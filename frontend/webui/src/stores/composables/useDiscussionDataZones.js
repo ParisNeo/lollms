@@ -77,7 +77,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
                             console.log("[HYDRATION][fetchDataZones] Hydrating rag_ids from full discussion fetch:", serverRagIds);
                             discussions.value[discussionId].rag_datastore_ids = serverRagIds;
                         }
-                        if (Array.isArray(meta?.active_tools)) {
+                        if (Array.isArray(meta?.active_tools) && meta.active_tools.length > 0) {
                             discussions.value[discussionId].active_tools = meta.active_tools;
                         }
                     }
@@ -120,8 +120,12 @@ export function useDiscussionDataZones(state, stores, getActions) {
             if (data.rag_datastore_ids == null && preservedRagIds !== undefined) {
                 discussions.value[discussionId].rag_datastore_ids = preservedRagIds;
             }
-            if (data.active_tools == null && preservedTools !== undefined) {
-                discussions.value[discussionId].active_tools = preservedTools;
+            if (preservedTools && Array.isArray(preservedTools) && preservedTools.length > 0) {
+                if (data.active_tools == null || (Array.isArray(data.active_tools) && data.active_tools.length === 0)) {
+                    discussions.value[discussionId].active_tools = preservedTools;
+                }
+            } else if (data.active_tools != null) {
+                discussions.value[discussionId].active_tools = data.active_tools;
             }
 
             if (!Array.isArray(discussions.value[discussionId].rag_datastore_ids)) {

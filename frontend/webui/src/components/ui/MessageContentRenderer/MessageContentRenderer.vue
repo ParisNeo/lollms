@@ -656,6 +656,9 @@ const parseSpecialBlock = (rawBlock, match = null) => {
 
     // 2. Direct match for raw <lollms_form> tags
     if (rawBlock.includes('<lollms_form')) {
+        if (!rawBlock.includes('</lollms_form>') && !rawBlock.includes('<field')) {
+            return { type: 'content', content: rawBlock };
+        }
         const formMatch = rawBlock.match(/<lollms_form\b([^>]*)>([\s\S]*?)(?:<\/lollms_form>|$)/i);
         const formAttrs = formMatch ? (formMatch[1] || '') : '';
         const formBody = formMatch ? (formMatch[2] || '') : '';
@@ -1231,7 +1234,7 @@ const messageParts = computed(() => {
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b[^>]*>[\s\S]*?(?:<\/processing>(?:\s*<!--\s*status:[a-zA-Z0-9_-]+\s*-->)?|(?=<round\b|<think>|<thought>|$)))/gi },
-                { type: 'tool', regex: /(<lollms_form\b([^>]*)>([\s\S]*?)(?:<\/lollms_form>|$))/gi },
+                { type: 'tool', regex: /(<lollms_form\b([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<tool_call[^>]*>([\s\S]*?)(?:<\/tool_call>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<mem_load\s+id=["']([^"']+)["']\s*\/?>)/gi },
@@ -1271,8 +1274,17 @@ const messageParts = computed(() => {
                 .filter(el => el.type === 'code')
                 .map(el => ({ start: el.start, end: el.end }));
 
+            // Protect inline code `...` so tags in single backticks are never parsed as tools
+
+            // Also protect inline code `...` so tags in single backticks are never parsed as tools
+            const inlineCodeRegex = /`[^`\n]+`/g;
+            let icMatch;
+            while ((icMatch = inlineCodeRegex.exec(segContent)) !== null) {
+                codeRanges.push({ start: icMatch.index, end: icMatch.index + icMatch[0].length });
+            }
+
             const isInsideCode = (start, end) => {
-                return codeRanges.some(r => start >= r.start && end <= r.end);
+                return codeRanges.some(r => (start >= r.start && start < r.end) || (start >= r.start && end <= r.end));
             };
 
             const activeElements = [];

@@ -932,7 +932,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "google_calendar_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "google_gmail_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "google_client_secret_json": "TEXT",
-            "scheduler_enabled": "BOOLEAN DEFAULT 0 NOT NULL"
+            "scheduler_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "mcp_access_info": "JSON"
         }
         
         added_cols = []

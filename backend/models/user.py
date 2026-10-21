@@ -3,6 +3,16 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from datetime import datetime, date
 
+class UserMCPAccessInfo(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    display_name: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    is_personal: bool
+
+
 class UserCreatePublic(BaseModel):
     username: str
     password: str

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-21 00:49]
+
+- Refine backend and frontend configurations:
+
 ## [2026-10-19 10:05]
 
 - Cleanup: remove dead code for AboutView, AccountSettings, AddFriend, AdminCreateUserModal,

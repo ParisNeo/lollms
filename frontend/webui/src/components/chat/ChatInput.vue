@@ -77,6 +77,10 @@ const skillsStore = useSkillsStore();
 const { on, off } = useEventBus();
 const router = useRouter();
 
+
+
+
+
 const dStoreRefs = storeToRefs(discussionsStore);
 const activeDiscussionArtefacts = computed(() => dStoreRefs.activeDiscussionArtefacts?.value || []);
 const loadedContextItems = computed(() => discussionsStore.loadedContextItems || []);
@@ -89,7 +93,7 @@ const dataZonesTokensFromContext = computed(() => dStoreRefs.dataZonesTokensFrom
 const currentModelVisionSupport = computed(() => dStoreRefs.currentModelVisionSupport?.value ?? true);
 const activeAiTasks = computed(() => dStoreRefs.activeAiTasks?.value || {});
 
-const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
+const { availableRagStores, userMcps, systemMcps } = storeToRefs(dataStore);
 const { lollmsPrompts, userPromptsByCategory, systemPromptsByZooCategory } = storeToRefs(promptsStore);
 const { notes } = storeToRefs(notesStore);
 const { skills } = storeToRefs(skillsStore);
@@ -179,17 +183,20 @@ function setReasoningEffort(effort) {
 // --- Reworked Workspace & Knowledge Hub Menu State ---
 const isWorkspaceMenuOpen = ref(false);
 const workspaceMenuRef = ref(null);
-const activeWorkspaceTab = ref('attach'); // 'attach', 'notes', 'skills', 'prompts', 'context'
+const activeWorkspaceTab = ref('attach'); // 'attach', 'notes', 'skills', 'prompts', 'context', 'mcps'
 const noteSearchTerm = ref('');
 const skillSearchTerm = ref('');
+const mcpSearchTerm = ref('');
 
 function openWorkspaceMenu(tab = 'attach') {
+    if (tab === 'tools') tab = 'mcps';
     activeWorkspaceTab.value = tab;
     isWorkspaceMenuOpen.value = true;
     isTuningOpen.value = false;
-    // Guaranteed fresh fetch of notes and skills whenever menu opens
+    // Guaranteed fresh fetch of notes, skills, and mcps
     notesStore.fetchNotes();
     skillsStore.fetchSkills();
+    dataStore.fetchMcps();
 }
 
 const filteredNotes = computed(() => {
@@ -205,6 +212,55 @@ const filteredSkills = computed(() => {
     const q = skillSearchTerm.value.toLowerCase().trim();
     return list.filter(s => (s.name || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q));
 });
+
+const allAvailableMcps = computed(() => {
+    return [...(userMcps.value || []), ...(systemMcps.value || [])];
+});
+
+const filteredPersonalMcps = computed(() => {
+    const list = userMcps.value || [];
+    if (!mcpSearchTerm.value.trim()) return list;
+    const q = mcpSearchTerm.value.toLowerCase().trim();
+    return list.filter(m => (m.name || '').toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q) || (m.url || '').toLowerCase().includes(q));
+});
+
+const filteredSystemMcps = computed(() => {
+    const list = systemMcps.value || [];
+    if (!mcpSearchTerm.value.trim()) return list;
+    const q = mcpSearchTerm.value.toLowerCase().trim();
+    return list.filter(m => (m.name || '').toLowerCase().includes(q) || (m.description || '').toLowerCase().includes(q) || (m.url || '').toLowerCase().includes(q));
+});
+
+const selectedMcps = computed({
+    get: () => {
+        return activeDiscussion.value?.active_tools || [];
+    },
+    set: (newSelection) => {
+        if (activeDiscussion.value) {
+            discussionsStore.updateDiscussionMcps({
+                discussionId: activeDiscussion.value.id,
+                mcp_tool_ids: newSelection
+            });
+        }
+    }
+});
+
+async function toggleMcpSelection(mcpName) {
+    if (!activeDiscussion.value) {
+        await discussionsStore.createNewDiscussion();
+    }
+    const current = new Set(selectedMcps.value || []);
+    if (current.has(mcpName)) {
+        current.delete(mcpName);
+    } else {
+        current.add(mcpName);
+    }
+    selectedMcps.value = Array.from(current);
+}
+
+function isMcpSelected(mcp) {
+    return (selectedMcps.value || []).includes(mcp.name) || (selectedMcps.value || []).includes(mcp.id);
+}
 
 function isNoteActiveInContext(note) {
     if (!note || !activeDiscussionArtefacts.value) return false;
@@ -379,17 +435,17 @@ const activeBuffs = computed(() => {
         });
     }
 
-    // 7. MCP Tools
-    if (mcpToolSelection.value && mcpToolSelection.value.length > 0) {
+    // 7. MCP Servers
+    if (selectedMcps.value && selectedMcps.value.length > 0) {
         buffs.push({
-            id: 'mcp',
-            icon: '🛠️',
-            name: `Swiss Army Arm (${mcpToolSelection.value.length} tools)`,
+            id: 'mcps',
+            icon: '🔌',
+            name: `MCPs (${selectedMcps.value.length} active)`,
             type: 'tools',
             badge: 'Cybernetic Tools',
-            description: 'Can trigger external function execution via Model Context Protocol.',
+            description: `Active MCP servers: ${selectedMcps.value.join(', ')}.`,
             actionText: 'Manage',
-            action: () => openWorkspaceMenu('context')
+            action: () => openWorkspaceMenu('mcps')
         });
     }
 
@@ -760,6 +816,10 @@ const mcpToolSelection = computed({
     set: (newIds) => { if (activeDiscussion.value) discussionsStore.updateDiscussionMcps({ discussionId: activeDiscussion.value.id, mcp_tool_ids: newIds }); }
 });
 
+// Static LLM capabilities live in user preference toggles now; kept (empty) only to
+// preserve the `selected_tools` payload contract in handleSendMessage.
+const selectedStaticToolsList = ref([]);
+
 const currentActiveTask = computed(() => {
     if (!activeDiscussion.value) return null;
     const tracked = activeAiTasks.value[activeDiscussion.value.id];
@@ -783,12 +843,7 @@ function toggleRagStore(storeId) {
     ragStoreSelection.value = Array.from(current);
 }
 
-function toggleMcpTool(toolId) {
-    const current = new Set(mcpToolSelection.value);
-    if (current.has(toolId)) current.delete(toolId);
-    else current.add(toolId);
-    mcpToolSelection.value = Array.from(current);
-}
+
 
 async function toggleWebSearch() {
     // Check against providers list (plural) as defined in model
@@ -850,6 +905,7 @@ const capabilityFlags = [
     { key: 'scheduler_enabled',          label: 'Task Scheduler',       emoji: '⏰', description: 'Schedule recurring prompts using cron syntax.' },
     { key: 'street_view_enabled',        label: 'Street View',          emoji: '🗺️', description: 'Fetch Google Street View images for a location.' },
     { key: 'herd_mode_enabled',          label: 'Herd Mode',            emoji: '🐺', description: 'Multiple AI agents debate & critique before answering (multi-agent).' },
+    { key: 'code_interpreter',           label: 'Code Interpreter',     emoji: '🧠', description: 'Allows the LLM to programmatically parse and execute code internally.' },
 ];
 
 function isCapabilityOn(cap) {
@@ -1505,7 +1561,9 @@ async function handleSendMessage() {
             temperature: isCustomTemp.value ? Number(customTemp.value) : null,
             max_nb_rounds: isCustomRounds.value ? parseInt(customRounds.value, 10) : null,
             reasoning_effort: isReasoningEffortActive.value ? (reasoningEffort.value || 'low') : 'none',
-            thinking: isReasoningEffortActive.value ? 'true' : 'false'
+            thinking: isReasoningEffortActive.value ? 'true' : 'false',
+            selected_tools: [...selectedMcps.value], // Inject active MCP server names into generation payload
+            rag_sources: [...ragStoreSelection.value] // Inject RAG selections to protect UI state
         }); 
     } catch(err) { 
         console.error("SendMessage failed:", err); 
@@ -1540,6 +1598,8 @@ const adjustTextareaHeight = () => {
 async function fetchInputTokenCount(text) { if (!text.trim()) { inputTokenCount.value = 0; return; } try { const response = await apiClient.post('/api/discussions/tokenize', { text }); inputTokenCount.value = response.data.tokens; } catch (error) {} }
 function handleStopGeneration() { discussionsStore.stopGeneration(); }
 
+
+
 watch(messageText, (newText) => { 
     clearTimeout(tokenizeInputDebounceTimer); 
     if (!newText.trim()) { 
@@ -1554,8 +1614,8 @@ onMounted(() => {
     promptsStore.fetchPrompts(); 
     notesStore.fetchNotes();
     skillsStore.fetchSkills();
+    dataStore.fetchMcps();
     if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores(); 
-    if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools(); 
     on('files-dropped-in-chat', handleFilesInput); 
     on('files-pasted-in-chat', handleFilesInput); 
     document.addEventListener('mousedown', closeMenusIfOutside);
@@ -1653,7 +1713,7 @@ onUnmounted(() => {
 
         <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
             <!-- Placeholder Detection Pill -->
-            <div v-if="detectedPlaceholders.length > 0" class="flex items-center justify-between px-3.5 py-2 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 rounded-xl text-xs text-amber-900 dark:text-amber-200 shadow-xs animate-in fade-in slide-in-from-bottom-1">
+            <div v-if="detectedPlaceholders.length > 0" class="flex items-center justify-between px-3.5 py-2 bg-amber-50/95 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 rounded-xl text-xs text-amber-900 dark:text-amber-200 shadow-xs animate-in fade-in slide-in-from-bottom-1">
                 <div class="flex items-center gap-2 min-w-0">
                     <IconSparkles class="w-4 h-4 text-amber-500 shrink-0 animate-pulse" />
                     <span class="font-bold truncate">
@@ -1818,7 +1878,7 @@ onUnmounted(() => {
                             title="Workspace Hub & Knowledge Injection"
                         >
                             <IconPlus class="w-4 h-4" />
-                            <span v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0 || loadedContextItems.length > 0" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2" style="border-color: var(--bg-card);"></span>
+                            <span v-if="ragStoreSelection.length > 0 || selectedMcps.length > 0 || loadedContextItems.length > 0" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2" style="border-color: var(--bg-card);"></span>
                         </button>
 
                         <!-- Tabbed Popover Menu -->
@@ -1832,7 +1892,7 @@ onUnmounted(() => {
                         >
                             <div 
                                 v-if="isWorkspaceMenuOpen" 
-                                class="absolute bottom-full left-0 mb-3 w-88 sm:w-[420px] rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[82vh] border"
+                                class="absolute bottom-full left-0 mb-3 w-88 sm:w-[420px] rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col min-h-[340px] max-h-[82vh] border"
                                 style="background-color: var(--brand-bg-elevated); border-color: var(--brand-border-main);"
                             >
                                 <!-- Tab Switcher Header -->
@@ -1879,6 +1939,26 @@ onUnmounted(() => {
                                         :class="activeWorkspaceTab === 'context' ? 'themed-tab-active text-green-600 shadow-xs' : 'themed-btn-surface'"
                                     >
                                         <span>⚙️ Context</span>
+                                    </button>
+                                    <button 
+                                        type="button" 
+                                        @click="openWorkspaceMenu('mcps')"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                        :class="activeWorkspaceTab === 'mcps' ? 'themed-tab-active text-purple-600 shadow-xs' : 'themed-btn-surface'"
+                                    >
+                                        <span class="text-base">🔌</span>
+                                        <span>MCPs</span>
+                                        <span class="text-[9px] px-1 py-0.2 rounded-full bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-mono">{{ selectedMcps.length }}</span>
+                                    </button>
+                                    <button 
+                                        type="button" 
+                                        @click="openWorkspaceMenu('tools')"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                        :class="activeWorkspaceTab === 'tools' ? 'themed-tab-active text-purple-600 shadow-xs' : 'themed-btn-surface'"
+                                    >
+                                        <IconMcp class="w-3.5 h-3.5" />
+                                        <span>Tools</span>
+                                        <span class="text-[9px] px-1 py-0.2 rounded-full bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-mono">{{ mcpToolSelection.length }}</span>
                                     </button>
                                 </div>
 
@@ -2027,15 +2107,111 @@ onUnmounted(() => {
                                             <IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 shrink-0" />
                                         </button>
                                     </div>
+                                </div>
 
-                                    <div class="text-[10px] font-black uppercase tracking-wider px-1 pt-2 border-t border-t-border-muted" style="color: var(--text-dim);">MCP Cybernetic Tools</div>
-                                    <div class="space-y-1">
-                                        <div v-for="group in availableMcpToolsForSelector" :key="group.label" class="space-y-1">
-                                            <span class="text-[9px] font-bold uppercase px-1" style="color: var(--text-dim);">{{ group.label }}</span>
-                                            <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="w-full text-left p-2 rounded-xl flex items-center justify-between text-xs border cursor-pointer" :class="mcpToolSelection.includes(tool.id) ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 font-bold text-purple-700' : 'border-border-muted themed-panel-hover'">
-                                                <span class="truncate pr-2">{{ tool.name }}</span>
-                                                <IconCheckCircle v-if="mcpToolSelection.includes(tool.id)" class="w-4 h-4 text-purple-500 shrink-0" />
-                                            </button>
+                                <!-- Tab MCP: MCP Servers -->
+                                <div v-else-if="activeWorkspaceTab === 'mcps'" class="p-3 space-y-3 flex flex-col grow min-h-0">
+                                    <div class="flex items-center justify-between gap-2 shrink-0">
+                                        <input 
+                                            v-model="mcpSearchTerm" 
+                                            type="text" 
+                                            placeholder="Filter MCPs..." 
+                                            class="input-field !py-1 text-xs grow"
+                                        />
+                                        <router-link to="/settings?section=mcps" @click="isWorkspaceMenuOpen = false" class="btn btn-secondary btn-xs shrink-0 flex items-center gap-1" title="Manage MCPs in Settings">
+                                            <IconCog class="w-3 h-3" />
+                                            <span>Settings</span>
+                                        </router-link>
+                                    </div>
+
+                                    <div class="overflow-y-auto custom-scrollbar space-y-3 grow max-h-72">
+                                        <div v-if="allAvailableMcps.length === 0" class="text-center py-8 px-4 rounded-xl border border-dashed border-border-muted space-y-2">
+                                            <IconMcp class="w-8 h-8 mx-auto text-purple-400 opacity-60" />
+                                            <p class="text-xs font-bold" style="color: var(--text-main);">No MCP Servers Available</p>
+                                            <p class="text-[10px]" style="color: var(--text-dim);">Register personal MCPs or enable system MCPs in Settings > MCPs.</p>
+                                            <router-link to="/settings?section=mcps" @click="isWorkspaceMenuOpen = false" class="btn btn-primary btn-xs inline-flex items-center gap-1 mt-1">
+                                                <span>Open MCP Settings</span>
+                                            </router-link>
+                                        </div>
+
+                                        <!-- Personal MCPs -->
+                                        <div v-if="filteredPersonalMcps.length > 0" class="space-y-1">
+                                            <div class="text-[10px] font-black uppercase tracking-wider px-1 text-purple-600 dark:text-purple-400 flex items-center justify-between">
+                                                <span>My Personal MCPs</span>
+                                                <span class="text-[9px] font-mono opacity-60">{{ filteredPersonalMcps.length }}</span>
+                                            </div>
+                                            <div 
+                                                v-for="mcp in filteredPersonalMcps" 
+                                                :key="mcp.id" 
+                                                @click="toggleMcpSelection(mcp.name)"
+                                                class="w-full text-left p-2.5 rounded-xl flex items-center justify-between text-xs border cursor-pointer transition-all group"
+                                                :class="isMcpSelected(mcp) ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-400 dark:border-purple-600 shadow-xs' : 'border-border-muted themed-panel-hover'"
+                                            >
+                                                <div class="flex items-center gap-2.5 min-w-0">
+                                                    <img 
+                                                        v-if="mcp.icon && (mcp.icon.startsWith('data:') || mcp.icon.startsWith('http') || mcp.icon.startsWith('/'))" 
+                                                        :src="mcp.icon" 
+                                                        class="w-6 h-6 rounded-md object-contain shrink-0 bg-white/20 p-0.5 border border-border-muted" 
+                                                    />
+                                                    <span v-else-if="mcp.icon && mcp.icon.length <= 4" class="text-base shrink-0">{{ mcp.icon }}</span>
+                                                    <div v-else class="w-6 h-6 rounded-md flex items-center justify-center bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 shrink-0">
+                                                        <IconMcp class="w-3.5 h-3.5" />
+                                                    </div>
+
+                                                    <div class="min-w-0">
+                                                        <div class="flex items-center gap-1.5">
+                                                            <span class="truncate font-bold text-gray-900 dark:text-gray-100">{{ mcp.name }}</span>
+                                                            <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="mcp.active ? 'bg-emerald-500 shadow-xs' : 'bg-gray-400'" :title="mcp.active ? 'Active' : 'Inactive'"></span>
+                                                        </div>
+                                                        <p class="text-[10px] truncate text-gray-500 dark:text-gray-400">{{ mcp.description || mcp.url }}</p>
+                                                    </div>
+                                                </div>
+                                                <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                                                    <span class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">Personal</span>
+                                                    <IconCheckCircle v-if="isMcpSelected(mcp)" class="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                                                    <IconCircle v-else class="w-4 h-4 opacity-30 shrink-0" />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- System MCPs -->
+                                        <div v-if="filteredSystemMcps.length > 0" class="space-y-1">
+                                            <div class="text-[10px] font-black uppercase tracking-wider px-1 text-purple-600 dark:text-purple-400 flex items-center justify-between">
+                                                <span>Available System MCPs</span>
+                                                <span class="text-[9px] font-mono opacity-60">{{ filteredSystemMcps.length }}</span>
+                                            </div>
+                                            <div 
+                                                v-for="mcp in filteredSystemMcps" 
+                                                :key="mcp.id" 
+                                                @click="toggleMcpSelection(mcp.name)"
+                                                class="w-full text-left p-2.5 rounded-xl flex items-center justify-between text-xs border cursor-pointer transition-all group"
+                                                :class="isMcpSelected(mcp) ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-400 dark:border-purple-600 shadow-xs' : 'border-border-muted themed-panel-hover'"
+                                            >
+                                                <div class="flex items-center gap-2.5 min-w-0">
+                                                    <img 
+                                                        v-if="mcp.icon && (mcp.icon.startsWith('data:') || mcp.icon.startsWith('http') || mcp.icon.startsWith('/'))" 
+                                                        :src="mcp.icon" 
+                                                        class="w-6 h-6 rounded-md object-contain shrink-0 bg-white/20 p-0.5 border border-border-muted" 
+                                                    />
+                                                    <span v-else-if="mcp.icon && mcp.icon.length <= 4" class="text-base shrink-0">{{ mcp.icon }}</span>
+                                                    <div v-else class="w-6 h-6 rounded-md flex items-center justify-center bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 shrink-0">
+                                                        <IconMcp class="w-3.5 h-3.5" />
+                                                    </div>
+
+                                                    <div class="min-w-0">
+                                                        <div class="flex items-center gap-1.5">
+                                                            <span class="truncate font-bold text-gray-900 dark:text-gray-100">{{ mcp.name }}</span>
+                                                            <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="mcp.active ? 'bg-emerald-500 shadow-xs' : 'bg-gray-400'" :title="mcp.active ? 'Active' : 'Inactive'"></span>
+                                                        </div>
+                                                        <p class="text-[10px] truncate text-gray-500 dark:text-gray-400">{{ mcp.description || mcp.url }}</p>
+                                                    </div>
+                                                </div>
+                                                <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                                                    <span class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">System</span>
+                                                    <IconCheckCircle v-if="isMcpSelected(mcp)" class="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                                                    <IconCircle v-else class="w-4 h-4 opacity-30 shrink-0" />
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -2268,7 +2444,7 @@ onUnmounted(() => {
                                                 </button>
                                             </div>
 
-                                            <!-- Internet Search gets a dedicated row linked to existing flow -->
+                                            <!-- Internet Search Capability Row -->
                                             <div
                                                 class="flex items-center justify-between gap-2 p-2 rounded-xl border transition-colors capability-row-blue"
                                                 :title="'Live web search via Google/DDG/Wiki. Configure API keys under Settings > User Context.'"
@@ -2303,9 +2479,6 @@ onUnmounted(() => {
                             </div>
                         </Transition>
                     </div>
-
-                    <input type="file" ref="fileInput" @change="handleFileUpload" multiple class="hidden">
-                    <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
                 </div>
 
                 <div class="grow min-w-0 relative flex items-center">
@@ -2342,6 +2515,10 @@ onUnmounted(() => {
                     </button>
                 </div>
             </div>
+
+            <!-- Hidden file inputs safely positioned outside template trees -->
+            <input type="file" ref="fileInput" @change="handleFileUpload" multiple class="hidden">
+            <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
             
             <div v-if="totalPercentage >= 100" class="flex flex-col items-center gap-1 animate-in fade-in slide-in-from-bottom-2 py-1">
                 <p class="text-[10px] text-center text-red-600 dark:text-red-400 font-black uppercase tracking-widest bg-red-500/20 px-6 py-1.5 rounded-full border border-red-500 shadow-lg shadow-red-500/20 animate-pulse">

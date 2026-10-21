@@ -123,6 +123,8 @@ def build_core_router(router: APIRouter):
         # for easier and more reliable frontend access, while keeping the
         # nested metadata object for other potential consumers.
         metadata = discussion_db.discussion_metadata or {}
+        if hasattr(discussion_obj, 'metadata') and isinstance(discussion_obj.metadata, dict):
+            metadata = {**metadata, **discussion_obj.metadata}
         rag_ids = metadata.get("rag_datastore_ids", [])
         tools = metadata.get("active_tools", [])
 
@@ -194,6 +196,27 @@ def build_core_router(router: APIRouter):
         discussion_obj.switch_to_branch(branch_id)
         discussion_obj.commit()
         return {"message": "Switched branch successfully"}
+
+    class DiscussionToolsUpdate(BaseModel):
+        tools: List[str]
+
+    @router.put("/{discussion_id}/tools")
+    async def update_discussion_tools(
+        discussion_id: str,
+        payload: DiscussionToolsUpdate,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        if discussion_obj is None:
+            raise HTTPException(status_code=404, detail="Discussion not found.")
+        discussion_obj.set_metadata_item('active_tools', payload.tools)
+        if hasattr(discussion_obj, 'discussion') and discussion_obj.discussion:
+            meta = dict(getattr(discussion_obj.discussion, 'discussion_metadata', {}) or {})
+            meta['active_tools'] = list(payload.tools)
+            discussion_obj.discussion.discussion_metadata = meta
+        discussion_obj.commit()
+        return {"message": "Discussion tools updated successfully", "active_tools": payload.tools}
 
     @router.delete("/{discussion_id}", status_code=200)
     async def delete_discussion_endpoint(

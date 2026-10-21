@@ -90,7 +90,11 @@ export function useDiscussionGeneration(state, stores, getActions) {
             sender_type: 'user', content: payload.prompt,
             localImageUrls: payload.localImageUrls || [],
             created_at: new Date().toISOString(),
-            parent_message_id: parentId
+            parent_message_id: parentId,
+            message_metadata: {
+                rag_sources: payload.rag_sources || [],
+                selected_tools: payload.selected_tools || []
+            }
         };
         const tempAiMessage = {
             id: `temp-ai-${Date.now()}`, sender: activePersonality.value?.name || 'assistant', sender_type: 'assistant',
@@ -134,6 +138,13 @@ export function useDiscussionGeneration(state, stores, getActions) {
         formData.append('image_server_paths_json', JSON.stringify(imagesToSend));
         if (payload.is_resend) formData.append('is_resend', 'true');
         formData.append('web_search_enabled', payload.webSearchEnabled ? 'true' : 'false');
+        
+        if (payload.rag_sources && payload.rag_sources.length > 0) {
+            formData.append('rag_sources_json', JSON.stringify(payload.rag_sources));
+        }
+        if (payload.selected_tools && payload.selected_tools.length > 0) {
+            formData.append('active_tools_json', JSON.stringify(payload.selected_tools));
+        }
         if (parentId) formData.append('parent_message_id', parentId);
         if (payload.temperature !== undefined && payload.temperature !== null) {
             formData.append('temperature', payload.temperature);
@@ -268,6 +279,11 @@ export function useDiscussionGeneration(state, stores, getActions) {
                             discussions.value[currentDiscussionId.value].title = data.new_title;
                         }
                     }
+                    if (data.discussion?.active_tools && Array.isArray(data.discussion.active_tools) && data.discussion.active_tools.length > 0) {
+                        if (discussions.value[currentDiscussionId.value]) {
+                            discussions.value[currentDiscussionId.value].active_tools = data.discussion.active_tools;
+                        }
+                    }
                     if (data.data && data.data.ai_message) {
                         const finalAi = data.data.ai_message;
                         messageToUpdate.id = finalAi.id;
@@ -364,13 +380,16 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 const discId = currentDiscussionId.value;
                 if (discId) {
                     const fullRes = await apiClient.get(`/api/discussions/${discId}`);
-                    const meta = fullRes.data?.discussion_metadata || fullRes.data;
-                    if (meta && discussions.value?.[discId]) {
-                        if (Array.isArray(meta.rag_datastore_ids)) {
-                            discussions.value[discId].rag_datastore_ids = meta.rag_datastore_ids;
+                    const fullData = fullRes.data || {};
+                    const meta = fullData.discussion_metadata || {};
+                    const ragIds = fullData.rag_datastore_ids ?? meta.rag_datastore_ids;
+                    const activeTools = fullData.active_tools ?? meta.active_tools;
+                    if (discussions.value?.[discId]) {
+                        if (Array.isArray(ragIds)) {
+                            discussions.value[discId].rag_datastore_ids = ragIds;
                         }
-                        if (Array.isArray(meta.active_tools)) {
-                            discussions.value[discId].active_tools = meta.active_tools;
+                        if (Array.isArray(activeTools) && activeTools.length > 0) {
+                            discussions.value[discId].active_tools = activeTools;
                         }
                     }
                 }

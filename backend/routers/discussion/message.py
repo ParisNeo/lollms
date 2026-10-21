@@ -477,6 +477,20 @@ def build_message_router(router: APIRouter):
                 parent_id=payload.parent_message_id,
                 sender_type=payload.sender_type
             )
+            
+            # Explicitly persist front-end injected metadata securely if passed in payload
+            payload_dict = payload.dict(exclude_unset=True)
+            target_metadata_keys = ['rag_sources', 'active_tools', 'selected_tools']
+            
+            if hasattr(new_message, 'metadata') and isinstance(new_message.metadata, dict):
+                updated = False
+                for k in target_metadata_keys:
+                    if k in payload_dict and payload_dict[k]:
+                        new_message.metadata[k] = payload_dict[k]
+                        updated = True
+                if updated:
+                    discussion_obj.db_manager.update_message(new_message) # Flush directly
+                    
             discussion_obj.commit()
         except Exception as e:
             trace_exception(e)

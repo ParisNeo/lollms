@@ -1,6 +1,6 @@
 # backend/routers/lollms_config.py
 import json
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -204,3 +204,47 @@ async def get_ttv_models(
         })
 
     return sorted(all_models, key=lambda x: x['name'])
+
+def _probe_mcp_tools_via_bindings(
+    client: Optional["LollmsClient"],
+    servers_infos: Dict[str, Dict[str, Any]],
+) -> Tuple[Dict[str, List[Dict[str, str]]], Dict[str, bool]]:
+    """
+    Canonical MCP probe: lists tools through each server binding's own list_tools()
+    contract. A server is flagged unavailable only on definitive evidence (its binding
+    reports is_active=False); probe failures never hide a configured server.
+    """
+    tools_by_server: Dict[str, List[Dict[str, str]]] = {}
+    availability: Dict[str, bool] = {}
+    if client is None:
+        return tools_by_server, availability
+
+    mcp_manager = getattr(client, "mcp", None)
+    get_binding = getattr(mcp_manager, "get_binding", None) if mcp_manager is not None else None
+    if not callable(get_binding):
+        return tools_by_server, availability
+
+    for name in servers_infos:
+        try:
+            binding = get_binding(name)
+        except Exception as e:
+            trace_exception(e)
+            binding = None
+
+        if binding is None:
+            availability[name] = True
+            continue
+
+        active_flag = getattr(binding, "is_active", True)
+        availability[name] = True if active_flag is None else bool(active_flag)
+
+        try:
+            raw = binding.list_tools()
+        except Exception as e:
+            trace_exception(e)
+            raw = []
+        raw_tools = raw if isinstance(raw, list) else []
+
+        tools_by_server[name] = _normalize_probed_tools(raw_tools, {name: servers_infos[name]}).get(name, [])
+
+    return tools_by_server, availability

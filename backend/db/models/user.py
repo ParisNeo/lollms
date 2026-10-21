@@ -122,6 +122,7 @@ class User(Base):
     google_drive_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     google_calendar_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     google_gmail_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    mcp_access_info = Column(JSON, nullable=True)
 
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     

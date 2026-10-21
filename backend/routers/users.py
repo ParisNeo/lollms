@@ -8,7 +8,9 @@ from backend.db.base import FriendshipStatus
 from backend.db.utils import get_friendship_record
 from backend.db.base import follows_table
 from backend.db.models.user import User as DBUser, Friendship as DBFriendship
+from backend.db.models.service import MCP as DBMCP
 from backend.models import UserAuthDetails, UserProfileResponse, UserPublic
+from backend.models.user import UserMCPAccessInfo
 from backend.models.admin import UserStats, UserActivityStat
 from backend.session import get_current_active_user
 from typing import List, Optional
@@ -16,6 +18,18 @@ import datetime
 from datetime import timezone, timedelta
 from collections import defaultdict
 from sqlalchemy import func, desc
+
+# Self-healing schema patch for users.mcp_access_info
+try:
+    with engine.connect() as _migration_conn:
+        _insp = inspect(_migration_conn)
+        if _insp.has_table('users'):
+            _cols = [c['name'] for c in _insp.get_columns('users')]
+            if 'mcp_access_info' not in _cols:
+                _migration_conn.execute(text("ALTER TABLE users ADD COLUMN mcp_access_info JSON"))
+                _migration_conn.commit()
+except Exception:
+    pass
 
 users_router = APIRouter(
     prefix="/api/users",
@@ -89,6 +103,60 @@ def search_for_mentions(
         DBUser.username.ilike(search_term)
     ).limit(5).all()
     return [_project_user_public(u) for u in users]
+
+
+@users_router.get("/me/accessible-mcps", response_model=List[UserMCPAccessInfo])
+def get_my_accessible_mcps(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Fetch all MCP servers that the current user can actively access (Personal or System).
+    """
+    # Personal MCPs are owned by the user
+    personal_mcps = db.query(DBMCP).filter(DBMCP.owner_user_id == current_user.id).all()
+    
+    # System MCPs explicitly granted to user via access info JSON (or all if system defaults to public)
+    # We read the mcp_access_info column if it exists, otherwise we fallback to querying non-personal ones marked active.
+    user_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
+    accessible_system_mcp_ids = set()
+    
+    if user_db and user_db.mcp_access_info and isinstance(user_db.mcp_access_info, list):
+        for m in user_db.mcp_access_info:
+            if isinstance(m, dict) and "id" in m:
+                accessible_system_mcp_ids.add(m["id"])
+
+    system_mcps = db.query(DBMCP).filter(
+        DBMCP.owner_user_id.is_(None),
+        DBMCP.active == True
+    ).all()
+
+    results = []
+    for mcp in personal_mcps:
+        results.append(UserMCPAccessInfo(
+            id=mcp.id,
+            name=mcp.name,
+            display_name=mcp.display_name,
+            description=mcp.description,
+            icon=mcp.icon,
+            is_personal=True
+        ))
+        
+    for mcp in system_mcps:
+        # If there's an explicit access whitelist configured, adhere to it
+        if accessible_system_mcp_ids and mcp.id not in accessible_system_mcp_ids:
+            continue
+            
+        results.append(UserMCPAccessInfo(
+            id=mcp.id,
+            name=mcp.name,
+            display_name=mcp.display_name,
+            description=mcp.description,
+            icon=mcp.icon,
+            is_personal=False
+        ))
+
+    return results
 
 
 @users_router.get("/me/stats", response_model=UserStats)

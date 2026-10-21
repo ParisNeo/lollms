@@ -213,7 +213,13 @@ def scheduled_email_proposal_job():
 
 startup_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="lollms_startup")
 
+_startup_tasks_completed = False
+
 def run_one_time_startup_tasks(lock: Lock):
+    global _startup_tasks_completed
+    if _startup_tasks_completed:
+        return
+
     acquired = lock.acquire(blocking=False)
     if not acquired:
         return
@@ -535,6 +541,7 @@ def run_one_time_startup_tasks(lock: Lock):
     except Exception as e:
         trace_exception(e)
 
+    _startup_tasks_completed = True
     lock.release()
 
 async def startup_event():

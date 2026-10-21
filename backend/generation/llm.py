@@ -75,7 +75,8 @@ from backend.session import (get_current_active_user,
                              build_lollms_client_from_params,
                              reset_client_state,
                              cancel_client_generation,
-                             evict_client_from_registry)
+                             evict_client_from_registry,
+                             load_mcps)
 from backend.task_manager import task_manager, Task
 from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
@@ -1250,6 +1251,7 @@ def build_llm_generation_router(router: APIRouter):
         max_nb_rounds: Optional[int] = Form(None),
         reasoning_effort: Optional[str] = Form(None),
         thinking: Optional[str] = Form(None),
+        active_tools_json: Optional[str] = Form(None),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> StreamingResponse:
@@ -1329,11 +1331,36 @@ def build_llm_generation_router(router: APIRouter):
             "think": is_think_on
         }
 
+        # Resolve active MCP tools for this discussion
+        active_tools_list = []
+        if active_tools_json:
+            try:
+                parsed_tools = json.loads(active_tools_json)
+                if isinstance(parsed_tools, list) and len(parsed_tools) > 0:
+                    active_tools_list = parsed_tools
+            except Exception:
+                pass
+        if not active_tools_list:
+            active_tools_list = (discussion_obj.metadata or {}).get('active_tools', [])
+
+        if active_tools_list:
+            discussion_obj.set_metadata_item('active_tools', active_tools_list)
+            if hasattr(discussion_obj, 'discussion') and discussion_obj.discussion:
+                meta = dict(getattr(discussion_obj.discussion, 'discussion_metadata', {}) or {})
+                meta['active_tools'] = list(active_tools_list)
+                discussion_obj.discussion.discussion_metadata = meta
+            discussion_obj.commit()
+            mcp_servers_infos = load_mcps(owner_username, active_mcp_names=active_tools_list)
+        else:
+            mcp_servers_infos = {}
+
         lc = get_user_lollms_client(
             username=owner_username,
             binding_alias_override=binding_alias,
             model_name_override=target_model,
-            llm_params=runtime_llm_params
+            llm_params=runtime_llm_params,
+            load_mcp=bool(mcp_servers_infos),
+            servers_infos=mcp_servers_infos
         )
         reset_client_state(lc)
         discussion_obj.lollms_client = lc
@@ -1969,10 +1996,114 @@ def build_llm_generation_router(router: APIRouter):
         discussion_obj.user_data_zone = user_data_zone
 
         # 6. Setup Personality, Tools & Multi-Source RAG Registration
-        combined_tools = list(set(((discussion_obj.metadata or {}).get('active_tools', [])) + (db_pers.tools if db_pers and db_pers.tools else [])))
+        combined_tools = list(set(active_tools_list + (db_pers.tools if db_pers and db_pers.tools else [])))
 
         # Static text fallback if personality has static data_source
         static_data_source = db_pers.data_source if (db_pers and db_pers.data_source_type == 'static_text') else None
+
+        # Discover and connect active MCP tools via MCPBinding + Direct JSON-RPC
+        if mcp_servers_infos:
+            for alias, s_info in mcp_servers_infos.items():
+                s_url = s_info.get("server_url") or s_info.get("url")
+                if not s_url:
+                    continue
+
+                auth_config = s_info.get("auth_config", {})
+                headers = {"Content-Type": "application/json"}
+                if auth_config.get("type") == "bearer" and auth_config.get("token"):
+                    headers["Authorization"] = f"Bearer {auth_config['token']}"
+                elif auth_config.get("type") == "api_key" and auth_config.get("key"):
+                    hdr_name = auth_config.get("header_name", "X-API-Key")
+                    headers[hdr_name] = auth_config["key"]
+
+                loaded_via_binding = False
+                try:
+                    from lollms_client.tools_bindings.mcp import MCPBinding
+                    single_server = [{
+                        "alias": alias,
+                        "type": "http",
+                        "url": s_url,
+                        "server_url": s_url,
+                        "auth_config": auth_config
+                    }]
+                    mcp_b = MCPBinding(servers=single_server, servers_infos={alias: s_info})
+                    raw = mcp_b.get_tools() if hasattr(mcp_b, "get_tools") else getattr(mcp_b, "tools", None)
+                    if raw and isinstance(raw, dict):
+                        for t_k, t_v in raw.items():
+                            agentic_tools[t_k] = t_v
+                        loaded_via_binding = True
+                        ASCIIColors.info(f"[MCP] Loaded {len(raw)} tools from '{alias}' via MCPBinding.")
+                except Exception:
+                    pass
+
+                # Direct JSON-RPC fallback to ensure tools are always retrieved
+                if not loaded_via_binding:
+                    try:
+                        import requests
+                        rpc_req = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+                        resp = requests.post(s_url, json=rpc_req, headers=headers, timeout=5)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            tools_list = data.get("result", {}).get("tools", [])
+                            for t in tools_list:
+                                tool_raw_name = t.get("name")
+                                if not tool_raw_name:
+                                    continue
+                                namespaced_name = f"{alias}__{tool_raw_name}" if not tool_raw_name.startswith(f"{alias}__") else tool_raw_name
+                                desc = t.get("description", f"Tool {tool_raw_name} from {alias}")
+                                input_schema = t.get("inputSchema", {})
+                                
+                                params_list = []
+                                properties = input_schema.get("properties", {})
+                                required_props = set(input_schema.get("required", []))
+                                for p_name, p_schema in properties.items():
+                                    params_list.append({
+                                        "name": p_name,
+                                        "type": p_schema.get("type", "string"),
+                                        "description": p_schema.get("description", ""),
+                                        "optional": p_name not in required_props
+                                    })
+
+                                def make_call_fn(target_url, tool_name_call, auth_headers):
+                                    def _mcp_callable(**kwargs):
+                                        call_payload = {
+                                            "jsonrpc": "2.0",
+                                            "id": 2,
+                                            "method": "tools/call",
+                                            "params": {
+                                                "name": tool_name_call,
+                                                "arguments": kwargs
+                                            }
+                                        }
+                                        try:
+                                            import requests
+                                            c_resp = requests.post(target_url, json=call_payload, headers=auth_headers, timeout=60)
+                                            if c_resp.status_code == 200:
+                                                res_data = c_resp.json()
+                                                if "error" in res_data:
+                                                    return {"success": False, "error": str(res_data["error"])}
+                                                res_content = res_data.get("result", {}).get("content", [])
+                                                output_texts = []
+                                                for item in res_content:
+                                                    if isinstance(item, dict) and item.get("type") == "text":
+                                                        output_texts.append(item.get("text", ""))
+                                                    elif isinstance(item, str):
+                                                        output_texts.append(item)
+                                                return {"success": True, "output": "\n".join(output_texts) if output_texts else str(res_data.get("result"))}
+                                            return {"success": False, "error": f"HTTP {c_resp.status_code}: {c_resp.text}"}
+                                        except Exception as c_err:
+                                            return {"success": False, "error": str(c_err)}
+                                    return _mcp_callable
+
+                                agentic_tools[namespaced_name] = {
+                                    "name": namespaced_name,
+                                    "description": f"[{alias}] {desc}",
+                                    "parameters": params_list if params_list else input_schema,
+                                    "callable": make_call_fn(s_url, tool_raw_name, headers)
+                                }
+                            ASCIIColors.info(f"[MCP] Direct JSON-RPC registered {len(tools_list)} tools from '{alias}' at {s_url}.")
+                    except Exception as rpc_err:
+                        ASCIIColors.warning(f"[MCP] Connection note for '{alias}' at {s_url}: {rpc_err}")
 
         if db_pers:
             active_personality = LollmsPersonality(
@@ -1981,7 +2112,7 @@ def build_llm_generation_router(router: APIRouter):
                 category=db_pers.category,
                 description=db_pers.description,
                 system_prompt=dynamic_preamble + db_pers.prompt_text,
-                tools=combined_tools,
+                tools=None,
                 data_source=static_data_source,
                 data_sources=multi_rag_data_sources if multi_rag_data_sources else None
             )
@@ -1992,7 +2123,7 @@ def build_llm_generation_router(router: APIRouter):
                 category="Generic",
                 description="",
                 system_prompt=dynamic_preamble + """You are Lollms—a multimodal AI agent built by ParisNeo, designed as the most capable large language and multimodal system for universal task execution. Your sole purpose: deliver accurate, creative, and ethically sound responses across text, images, code, and structured data, while adhering to safety, veracity, and user-centric principles. Your capabilities depend on the curent configuration of the system and the loaded bindings/modules.""",
-                tools=combined_tools,
+                tools=None,
                 data_source=static_data_source,
                 data_sources=multi_rag_data_sources if multi_rag_data_sources else None
             )
@@ -2138,7 +2269,8 @@ def build_llm_generation_router(router: APIRouter):
                                 if isinstance(parsed, dict):
                                     form_entry = parsed.get('form', parsed)
                             except Exception:
-                                if '<field' in target_data or '<lollms_form' in target_data:
+                                # Only parse if actual <field> elements are present to avoid triggering on prose mentions
+                                if '<field' in target_data:
                                     f_title_match = re.search(r'title=["\']([^"\']+)["\']', target_data)
                                     f_title = f_title_match.group(1) if f_title_match else "Interactive Form"
                                     f_id_match = re.search(r'id=["\']([^"\']+)["\']', target_data)
@@ -2163,9 +2295,10 @@ def build_llm_generation_router(router: APIRouter):
                                         form_entry = {"id": f_id, "title": f_title, "fields": parsed_fields}
 
                         if form_entry and isinstance(form_entry, dict):
-                            if 'fields' not in form_entry and 'form_fields' in form_entry:
-                                form_entry['fields'] = form_entry['form_fields']
-                            if form_entry.get('fields'):
+                            fields = form_entry.get('fields') or form_entry.get('form_fields')
+                            # Only register the form if it contains genuine, non-empty fields
+                            if fields and isinstance(fields, (list, dict)) and len(fields) > 0:
+                                form_entry['fields'] = fields
                                 collected_forms.append(form_entry)
 
                     tip = discussion_obj.get_message(discussion_obj.active_branch_id)
@@ -2628,7 +2761,8 @@ def build_llm_generation_router(router: APIRouter):
                         },
                         "discussion": {
                             "id": discussion_id,
-                            "artefacts": current_artefacts
+                            "artefacts": current_artefacts,
+                            "active_tools": active_tools_list
                         }
                     }
 

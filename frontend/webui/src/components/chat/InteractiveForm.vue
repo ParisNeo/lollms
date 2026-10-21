@@ -410,7 +410,7 @@ async function submitForm() {
 </script>
 
 <template>
-    <div class="my-4 border border-blue-200/80 dark:border-blue-900/60 rounded-2xl overflow-hidden shadow-lg transition-all max-w-xl mx-auto not-prose" style="background-color: var(--bg-card);">
+    <div v-if="resolvedFields.length > 0" class="my-4 border border-blue-200/80 dark:border-blue-900/60 rounded-2xl overflow-hidden shadow-lg transition-all max-w-xl mx-auto not-prose" style="background-color: var(--bg-card);">
         <!-- Form Header -->
         <div class="px-5 py-3.5 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 dark:from-blue-950/40 dark:to-gray-800/60 border-b border-blue-100 dark:border-gray-800 flex items-center justify-between">
             <div class="flex items-center gap-3 min-w-0">

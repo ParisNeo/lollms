@@ -56,7 +56,21 @@ export function useDiscussionMessages(state, stores, getActions) {
                 }
             }
 
-            messages.value = processMessages(response.data);
+            const localMap = new Map(messages.value.filter(m => m.message_metadata?.rag_sources).map(m => [m.id, m]));
+            
+            const hydratedData = response.data;
+            if (hydratedData && Array.isArray(hydratedData.messages)) {
+                hydratedData.messages = hydratedData.messages.map(dbMsg => {
+                    const localMsg = localMap.get(dbMsg.id);
+                    if (localMsg && (!dbMsg.message_metadata?.rag_sources || dbMsg.message_metadata.rag_sources.length === 0)) {
+                        dbMsg.message_metadata = dbMsg.message_metadata || {};
+                        dbMsg.message_metadata.rag_sources = localMsg.message_metadata.rag_sources;
+                    }
+                    return dbMsg;
+                });
+            }
+
+            messages.value = processMessages(hydratedData);
             state.emit('discussion:refreshed');
             await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch (error) {

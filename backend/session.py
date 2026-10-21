@@ -298,7 +298,13 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         if force_model_mode == "force_always" and forced_model:
             user_model_full = forced_model
 
-        session = user_sessions[username]
+        session = user_sessions.setdefault(username, {
+            "safe_store_instances": {}, "discussions": {},
+            "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
+            "lollms_model_name": db_user.lollms_model_name,
+            "llm_params": {},
+            "active_personality_id": db_user.active_personality_id,
+        })
         if session.get("lollms_model_name") != user_model_full:
             session["lollms_model_name"] = user_model_full
 
@@ -360,7 +366,14 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         effective_rag_rrf_k = db_user.rag_rrf_k or 60
         effective_default_rag_chunk_size = db_user.default_rag_chunk_size
         effective_default_rag_chunk_overlap = db_user.default_rag_chunk_overlap
-        effective_safe_store_vectorizer = user_sessions[username].get("active_vectorizer")
+        user_sess = user_sessions.setdefault(username, {
+            "safe_store_instances": {}, "discussions": {},
+            "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
+            "lollms_model_name": db_user.lollms_model_name,
+            "llm_params": {},
+            "active_personality_id": db_user.active_personality_id,
+        })
+        effective_safe_store_vectorizer = user_sess.get("active_vectorizer")
 
         if force_rag_mode == "force_always":
             rag_settings_forced = True
@@ -401,7 +414,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             stt_binding_model_name=db_user.stt_binding_model_name,
             stt_models_config=db_user.stt_models_config,
             safe_store_vectorizer=effective_safe_store_vectorizer,
-            active_personality_id=user_sessions[username].get("active_personality_id"),
+            active_personality_id=user_sessions.get(username, {}).get("active_personality_id"),
             active_voice_id=db_user.active_voice_id,
             last_discussion_id=db_user.last_discussion_id,
             lollms_client_ai_name=ai_name_for_user,
@@ -499,17 +512,28 @@ def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_a
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator privileges required.")
     return current_user
 
-def load_mcps(username):
+def load_mcps(username: str, active_mcp_names: Optional[list[str]] = None):
     session = user_sessions.get(username)
     is_temp_session = not session
     
     servers_infos = {}
     db_for_mcp = next(get_db())
     try:
-        app_mcps = db_for_mcp.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
-        system_mcps = db_for_mcp.query(DBMCP).filter(DBMCP.type == 'system', DBMCP.active == True).all()
-        user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
+        app_mcps = []
+        try:
+            all_apps = db_for_mcp.query(DBApp).all()
+            for app in all_apps:
+                if app.app_metadata and isinstance(app.app_metadata, dict) and app.app_metadata.get('item_type') == 'mcp':
+                    app_mcps.append(app)
+        except Exception:
+            pass
+
+        system_mcps = db_for_mcp.query(DBMCP).filter(
+            (DBMCP.type == 'system') | (DBMCP.owner_user_id.is_(None)),
+            DBMCP.active == True
+        ).all()
         
+        user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
         personal_mcps = []
         access_token = None
         
@@ -520,13 +544,25 @@ def load_mcps(username):
             else:
                 access_token = create_access_token(data={"sub": user_db.username})
             
-            personal_mcps = [mcp for mcp in user_db.personal_mcps if mcp.active]
+            personal_mcps = db_for_mcp.query(DBMCP).filter(
+                DBMCP.owner_user_id == user_db.id,
+                DBMCP.active == True
+            ).all()
 
         all_active_mcps = app_mcps + system_mcps + personal_mcps
 
         for mcp in all_active_mcps:
             try:
                 if not mcp.url: continue
+                if active_mcp_names is not None:
+                    mcp_name_clean = mcp.name.strip()
+                    mcp_id_clean = str(mcp.id).strip()
+                    matched = any(
+                        req_name.strip().lower() in [mcp_name_clean.lower(), mcp_id_clean.lower()]
+                        for req_name in active_mcp_names
+                    )
+                    if not matched:
+                        continue
                 
                 mcp_base_url = mcp.url.rstrip('/')
                 parsed = urlparse(mcp_base_url)
@@ -540,11 +576,12 @@ def load_mcps(username):
                 
                 server_info = {"server_url": mcp_full_url}
                 
-                if mcp.authentication_type == "lollms_chat_auth" and access_token:
+                auth_type = getattr(mcp, 'authentication_type', None)
+                if auth_type == "lollms_chat_auth" and access_token:
                     server_info["auth_config"] = { "type": "bearer", "token": access_token }
-                elif mcp.authentication_type == "bearer":
+                elif auth_type == "bearer" and mcp.authentication_key:
                     server_info["auth_config"] = { "type": "bearer", "token": mcp.authentication_key }
-                elif mcp.authentication_type == "api_key":
+                elif auth_type == "api_key" and mcp.authentication_key:
                     key = mcp.authentication_key
                     header = "X-API-Key"
                     
@@ -564,6 +601,7 @@ def load_mcps(username):
                     }
 
                 servers_infos[mcp.name] = server_info
+                ASCIIColors.info(f"[load_mcps] Active MCP Server connected: {mcp.name} -> {mcp_full_url}")
             except Exception as e:
                 trace_exception(e)
     finally:
@@ -588,6 +626,7 @@ def get_user_lollms_client(
     binding_alias_override: Optional[str] = None,
     model_name_override: Optional[str] = None,
     load_mcp: bool = True,
+    servers_infos: Optional[Dict[str, Any]] = None,
     llm_params: Optional[Dict[str, Any]] = None
 ) -> LollmsClient:
     client = build_lollms_client_from_params(
@@ -595,7 +634,8 @@ def get_user_lollms_client(
         binding_alias=binding_alias_override,
         model_name=model_name_override,
         llm_params=llm_params,
-        load_mcp=load_mcp
+        load_mcp=load_mcp,
+        servers_infos=servers_infos
     )
 
     if username in user_sessions:
@@ -604,6 +644,8 @@ def get_user_lollms_client(
         cache_key = f"{binding_alias_override or 'default'}_{model_name_override or 'default'}{params_suffix}"
         if not load_mcp:
             cache_key += "_no_mcp"
+        if servers_infos:
+            cache_key += f"_mcp_{hash(json.dumps(list(servers_infos.keys()), sort_keys=True))}"
         clients_cache[cache_key] = client
 
     return client
@@ -829,6 +871,7 @@ def build_lollms_client_from_params(
     load_ttv: bool = False,
     load_ttm: bool = False,
     load_mcp: bool = True,
+    servers_infos: Optional[Dict[str, Any]] = None,
     callback: Optional[Callable] = None
 ) -> LollmsClient:
     session = user_sessions.get(username)
@@ -1097,10 +1140,30 @@ def build_lollms_client_from_params(
         }
 
         if load_llm and load_mcp:
-            servers_infos = session.get('servers_infos')
-            if servers_infos is not None:
-                client_init_params["tools_binding_name"] = "remote_mcp"
-                client_init_params["tools_binding_config"] = {"servers_infos": servers_infos}
+            if servers_infos is None:
+                servers_infos = session.get('servers_infos')
+                if servers_infos is None:
+                    servers_infos = load_mcps(username)
+                    session['servers_infos'] = servers_infos
+            if servers_infos:
+                client_init_params["tools_binding_name"] = "mcp"
+                servers_list = []
+                for name, s_info in servers_infos.items():
+                    s_url = s_info.get("server_url") or s_info.get("url")
+                    s_entry = {
+                        "alias": name,
+                        "type": "http",
+                        "url": s_url,
+                        "server_url": s_url
+                    }
+                    if "auth_config" in s_info:
+                        s_entry["auth_config"] = s_info["auth_config"]
+                    servers_list.append(s_entry)
+
+                client_init_params["tools_binding_config"] = {
+                    "servers": servers_list,
+                    "servers_infos": servers_infos
+                }
 
         try:
             registry_payload = {k: v for k, v in client_init_params.items() if v is not None}
