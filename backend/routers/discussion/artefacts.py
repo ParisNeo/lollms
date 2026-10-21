@@ -14,6 +14,7 @@ import pipmaster as pm
 import shutil
 import tempfile
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Form, status, Body, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from ascii_colors import trace_exception
 
@@ -44,6 +45,22 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
 from pydantic import BaseModel
 
+OFFICE_EXTENSIONS = {".pptx", ".docx", ".xlsx", ".xls"}
+OFFICE_MIME_TYPES = {
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".webm", ".aac", ".opus"}
 AUDIO_MIME_TYPES = {
     ".mp3": "audio/mpeg", ".mpga": "audio/mpeg",
@@ -62,6 +79,18 @@ def _is_audio_filename(title: str) -> bool:
 
 def _audio_media_type(title: str) -> str:
     return AUDIO_MIME_TYPES.get(Path(title or "").suffix.lower(), "application/octet-stream")
+
+def _is_image_filename(title: str) -> bool:
+    return Path(title or "").suffix.lower() in IMAGE_EXTENSIONS
+
+def _image_media_type(title: str) -> str:
+    return IMAGE_MIME_TYPES.get(Path(title or "").suffix.lower(), "application/octet-stream")
+
+def _is_office_filename(title: str) -> bool:
+    return Path(title or "").suffix.lower() in OFFICE_EXTENSIONS
+
+def _office_media_type(title: str) -> str:
+    return OFFICE_MIME_TYPES.get(Path(title or "").suffix.lower(), "application/octet-stream")
 
 def _stream_audio_with_range(file_path: Path, request_range: Optional[str], filename: str, media_type: str):
     from fastapi import Request
@@ -1226,6 +1255,28 @@ def build_artefacts_router(router: APIRouter):
                 headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
             )
 
+        if _is_image_filename(decoded_title):
+            return JSONResponse(
+                content={
+                    **BINARY_ASSET_MARKER,
+                    "kind": "image",
+                    "mime": _image_media_type(decoded_title),
+                    "download_url": f"/api/discussions/{discussion_id}/artefacts/{encoded_title}/download",
+                },
+                headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
+            )
+
+        if _is_office_filename(decoded_title):
+            return JSONResponse(
+                content={
+                    **BINARY_ASSET_MARKER,
+                    "kind": "office",
+                    "mime": _office_media_type(decoded_title),
+                    "download_url": f"/api/discussions/{discussion_id}/artefacts/{encoded_title}/download",
+                },
+                headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
+            )
+
         content = artefact.get('content', '')
 
         return PlainTextResponse(
@@ -1255,17 +1306,24 @@ def build_artefacts_router(router: APIRouter):
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
-        # 1. Search for physical file on disk in workspace_data_path
+        # 1. Search for physical file on disk in workspace_data_path and the discussion root
         ws_data_dir = None
         if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path:
             ws_data_dir = Path(discussion.workspace_data_path).resolve()
 
+        ws_root_dir = None
+        if hasattr(discussion, "workspace_path") and discussion.workspace_path:
+            ws_root_dir = Path(discussion.workspace_path).resolve()
+            if ws_data_dir and ws_root_dir == ws_data_dir:
+                ws_root_dir = None
+
         candidate_paths = []
-        if ws_data_dir and ws_data_dir.exists():
-            candidate_paths.append((ws_data_dir / decoded_title).resolve())
-            for f in ws_data_dir.iterdir():
-                if f.is_file() and (f.name == decoded_title or f.stem == decoded_title or f.name.lower() == decoded_title.lower()):
-                    candidate_paths.append(f.resolve())
+        for search_dir in (ws_data_dir, ws_root_dir):
+            if search_dir and search_dir.exists():
+                candidate_paths.append((search_dir / decoded_title).resolve())
+                for f in search_dir.iterdir():
+                    if f.is_file() and (f.name == decoded_title or f.stem == decoded_title or f.name.lower() == decoded_title.lower()):
+                        candidate_paths.append(f.resolve())
 
         # Check versioned physical file in versions/
         if hasattr(discussion, "versions_path") and discussion.versions_path:
@@ -1276,9 +1334,10 @@ def build_artefacts_router(router: APIRouter):
                         candidate_paths.append(f.resolve())
 
         # Path traversal guard & serve physical file
+        allowed_roots = [d for d in (ws_data_dir, ws_root_dir) if d]
         for cand in candidate_paths:
             if cand.exists() and cand.is_file():
-                if ws_data_dir and cand.is_relative_to(ws_data_dir.parent):
+                if any(cand.is_relative_to(root) for root in allowed_roots):
                     if _is_audio_filename(cand.name):
                         range_header = None
                         try:
@@ -1289,10 +1348,39 @@ def build_artefacts_router(router: APIRouter):
                     return FileResponse(
                         str(cand),
                         filename=cand.name,
-                        media_type="application/octet-stream"
+                        media_type=_office_media_type(cand.name) if _is_office_filename(cand.name) else "application/octet-stream"
                     )
 
-        # 2. Fallback to database content if pure text/code artefact
+        # 2. Associated images stored in the LAM (base64) — generated images are
+        # stored as companion image data, not as physical files in workspace_data.
+        if _is_image_filename(decoded_title):
+            try:
+                associated_images = discussion.artefacts.get_associated_images(decoded_title)
+                if associated_images:
+                    sorted_images = sorted(associated_images, key=lambda x: x.get('index', 0))
+                    images = [img['data'] for img in sorted_images]
+                else:
+                    comp_art = discussion.get_artefact(title=f"{decoded_title}::images")
+                    images = comp_art['images'] if comp_art and 'images' in comp_art else []
+            except Exception:
+                images = []
+
+            image_data = next((img for img in images if img), None)
+            if image_data:
+                try:
+                    if "," in image_data:
+                        image_data = image_data.split(",", 1)[1]
+                    decoded_bytes = base64.b64decode(image_data)
+                    safe_filename = decoded_title if '.' in decoded_title else f"{decoded_title}.png"
+                    return Response(
+                        content=decoded_bytes,
+                        media_type=_image_media_type(decoded_title),
+                        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
+                    )
+                except Exception as e:
+                    trace_exception(e)
+
+        # 3. Fallback to database content if pure text/code artefact
         artefact = discussion.get_artefact(title=decoded_title, version=version)
         if not artefact:
             raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found.")

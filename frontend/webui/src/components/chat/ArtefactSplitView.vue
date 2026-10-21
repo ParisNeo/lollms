@@ -165,6 +165,8 @@ const isGeneratingAudio = ref(false);
 const loadError = ref(null);
 const isExecuting = ref(false);
 const audioBlobUrl = ref(null);
+const asIsBlobUrl = ref(null);
+const officeBlobUrl = ref(null);
 const pyodideStore = usePyodideStore();
 
 const isExecutable = computed(() => {
@@ -340,14 +342,39 @@ async function handleExecute() {
             URL.revokeObjectURL(audioBlobUrl.value);
             audioBlobUrl.value = null;
         }
+        if (officeBlobUrl.value) {
+            URL.revokeObjectURL(officeBlobUrl.value);
+            officeBlobUrl.value = null;
+        }
         try {
             if (isAudioArtefact.value) {
                 dbContent.value = '';
                 await fetchAudioBlobUrl(version);
-            } else if (!isAsIsFile.value) {
+            } else {
                 dbContent.value = '';
                 const { data } = await apiClient.get(`/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(title.value)}/content?version=${version}`);
-                dbContent.value = typeof data === 'string' ? data : (data?.content ?? '');
+                let payload = data;
+                if (typeof payload === 'string') {
+                    const trimmed = payload.trim();
+                    if (trimmed.startsWith('{')) {
+                        try { payload = JSON.parse(trimmed); } catch { /* keep as text */ }
+                    }
+                }
+                if (payload && typeof payload === 'object' && payload.__binary_asset__) {
+                    // Binary asset (image/office): render via blob, keep dbContent empty
+                    if (payload.kind === 'image' || isImageArtefact.value) {
+                        await fetchAsIsBlobUrl(version);
+                    } else if (payload.kind === 'office' || isOfficeArtefact.value) {
+                        await fetchOfficeBlobUrl(version);
+                    }
+                } else {
+                    dbContent.value = typeof payload === 'string' ? payload : (payload?.content ?? '');
+                    if (isImageArtefact.value && !asIsBlobUrl.value) {
+                        await fetchAsIsBlobUrl(version);
+                    } else if (isOfficeArtefact.value && !officeBlobUrl.value) {
+                        await fetchOfficeBlobUrl(version);
+                    }
+                }
             }
         } catch (error) {
             loadError.value = "Failed to load version. It might not exist or you may lack permission.";
@@ -590,6 +617,77 @@ const isAsIsFile = computed(() => {
     return c.startsWith('# As-Is File:') || c.includes('**Mode**: AS-IS') || artefactGroup.value?.versions[0]?.artefact_type === 'file';
 });
 
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+const isImageArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return IMAGE_EXTENSIONS.some(ext => t.endsWith('.' + ext));
+});
+const isAsIsImage = computed(() => isImageArtefact.value);
+
+const OFFICE_EXTENSIONS = ['pptx', 'docx', 'xlsx', 'xls'];
+const isOfficeArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return OFFICE_EXTENSIONS.some(ext => t.endsWith('.' + ext));
+});
+const isSpreadsheetArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return t.endsWith('.xlsx') || t.endsWith('.xls');
+});
+const officeBadgeClass = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    if (t.endsWith('.pptx')) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300';
+    if (t.endsWith('.docx')) return 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300';
+    return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300';
+});
+const officeIconClass = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    if (t.endsWith('.pptx')) return 'bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400';
+    if (t.endsWith('.docx')) return 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+    return 'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400';
+});
+const officeHint = computed(() => {
+    if (isSpreadsheetArtefact.value) return 'Download to open in Excel — inline preview is not supported for spreadsheets.';
+    if ((title.value || '').toLowerCase().endsWith('.pptx')) return 'Download to open in PowerPoint.';
+    return 'Download to open in Word.';
+});
+
+async function fetchAsIsBlobUrl(version) {
+    if (asIsBlobUrl.value) {
+        URL.revokeObjectURL(asIsBlobUrl.value);
+        asIsBlobUrl.value = null;
+    }
+    try {
+        const downloadUrl = `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${version ? `?version=${version}` : ''}`;
+        const response = await apiClient.get(downloadUrl, { responseType: 'blob' });
+        const mimeExt = (title.value || '').split('.').pop()?.toLowerCase();
+        const mimeMap = {
+            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+            gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp'
+        };
+        const blob = new Blob([response.data], { type: mimeMap[mimeExt] || 'image/png' });
+        asIsBlobUrl.value = URL.createObjectURL(blob);
+    } catch (e) {
+        console.error('Failed to load image artefact:', e);
+        loadError.value = 'Failed to load image.';
+    }
+}
+
+async function fetchOfficeBlobUrl(version) {
+    if (officeBlobUrl.value) {
+        URL.revokeObjectURL(officeBlobUrl.value);
+        officeBlobUrl.value = null;
+    }
+    try {
+        const downloadUrl = `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${version ? `?version=${version}` : ''}`;
+        const response = await apiClient.get(downloadUrl, { responseType: 'blob' });
+        const blob = new Blob([response.data], { type: 'application/octet-stream' });
+        officeBlobUrl.value = URL.createObjectURL(blob);
+    } catch (e) {
+        console.error('Failed to load office artefact:', e);
+        loadError.value = 'Failed to load document.';
+    }
+}
+
 const asIsMetadata = computed(() => {
     if (!isAsIsFile.value) return null;
     const c = dbContent.value || '';
@@ -609,21 +707,45 @@ onUnmounted(() => {
     if (audioBlobUrl.value) {
         URL.revokeObjectURL(audioBlobUrl.value);
     }
+    if (asIsBlobUrl.value) {
+        URL.revokeObjectURL(asIsBlobUrl.value);
+    }
+    if (officeBlobUrl.value) {
+        URL.revokeObjectURL(officeBlobUrl.value);
+    }
 });
 
 function download() {
     if (!title.value) return;
 
     // For AS-IS files or binary documents, download the raw physical binary bytes from the server!
-    if (isAsIsFile.value || artefactGroup.value?.versions[0]?.artefact_type === 'file') {
-        const downloadUrl = `/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(title.value)}/download`;
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = asIsMetadata.value?.filename || title.value;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        uiStore.addNotification(`Downloading native file: ${asIsMetadata.value?.filename || title.value}`, 'info');
+    if (isImageArtefact.value || isOfficeArtefact.value || isAsIsFile.value || artefactGroup.value?.versions[0]?.artefact_type === 'file') {
+        const downloadName = asIsMetadata.value?.filename || title.value;
+        if (isAsIsImage.value || isOfficeArtefact.value) {
+            // Blob-based download guarantees the actual binary is saved (auth-safe, no navigation)
+            const downloadUrl = `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${selectedVersion.value ? `?version=${selectedVersion.value}` : ''}`;
+            apiClient.get(downloadUrl, { responseType: 'blob' })
+                .then(response => {
+                    const url = URL.createObjectURL(response.data);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = downloadName;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                })
+                .catch(() => {
+                    uiStore.addNotification("Failed to download file.", "error");
+                });
+        } else {
+            const downloadUrl = `/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(title.value)}/download`;
+            const a = document.createElement('a');
+            a.href = downloadUrl;
+            a.download = downloadName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+        uiStore.addNotification(`Downloading native file: ${downloadName}`, 'info');
         return;
     }
 
@@ -882,6 +1004,70 @@ function download() {
                         >
                             <IconArrowDownTray class="w-4 h-4" />
                             <span>Download Original</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- AS-IS Image Viewer -->
+                <div v-else-if="isAsIsImage" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
+                    <div class="max-w-3xl w-full p-8 bg-white dark:bg-gray-850 rounded-3xl border border-gray-200/80 dark:border-gray-700 shadow-xl space-y-5 animate-in fade-in">
+                        <div class="space-y-1">
+                            <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-mono">
+                                {{ (title.split('.').pop() || 'IMAGE').toUpperCase() }} IMAGE
+                            </span>
+                            <h3 class="text-base font-black text-gray-900 dark:text-white break-all">
+                                {{ asIsMetadata?.filename || title }}
+                            </h3>
+                        </div>
+                        <div v-if="asIsBlobUrl" class="flex items-center justify-center">
+                            <img :src="asIsBlobUrl" :alt="title" class="max-w-full max-h-[60vh] rounded-xl shadow-md object-contain" />
+                        </div>
+                        <div v-else class="w-full flex items-center justify-center py-12">
+                            <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
+                        </div>
+                        <button
+                            type="button"
+                            @click="download"
+                            class="w-full btn btn-primary py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 text-xs font-bold uppercase tracking-wider cursor-pointer active:scale-98 transition-all"
+                        >
+                            <IconArrowDownTray class="w-4 h-4" />
+                            <span>Download Image</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- AS-IS Office Document Card (pptx / docx / xlsx / xls) -->
+                <div v-else-if="isOfficeArtefact" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
+                    <div class="max-w-md w-full p-8 bg-white dark:bg-gray-850 rounded-3xl border border-gray-200/80 dark:border-gray-700 shadow-xl space-y-5 animate-in fade-in">
+                        <div class="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto shadow-inner" :class="officeIconClass">
+                            <IconFileText class="w-10 h-10" />
+                        </div>
+
+                        <div class="space-y-1">
+                            <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider font-mono" :class="officeBadgeClass">
+                                {{ (title.split('.').pop() || 'FILE').toUpperCase() }} DOCUMENT
+                            </span>
+                            <h3 class="text-base font-black text-gray-900 dark:text-white break-all">
+                                {{ asIsMetadata?.filename || title }}
+                            </h3>
+                            <p v-if="asIsMetadata?.size" class="text-xs font-mono text-gray-500 dark:text-gray-400">
+                                {{ asIsMetadata.size }}
+                            </p>
+                        </div>
+
+                        <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl text-left text-[11px] text-gray-600 dark:text-gray-400 space-y-1 border dark:border-gray-800">
+                            <p class="font-semibold text-gray-800 dark:text-gray-200">Preserved in workspace:</p>
+                            <p class="font-mono text-[10px] text-gray-500 break-all">{{ asIsMetadata?.location || title }}</p>
+                            <p class="text-[10px] italic text-gray-400 pt-1">{{ officeHint }}</p>
+                        </div>
+
+                        <button
+                            type="button"
+                            @click="download"
+                            class="w-full btn btn-primary py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 text-xs font-bold uppercase tracking-wider cursor-pointer active:scale-98 transition-all"
+                        >
+                            <IconArrowDownTray class="w-4 h-4" />
+                            <span>Download {{ (title.split('.').pop() || 'FILE').toUpperCase() }} File</span>
                         </button>
                     </div>
                 </div>

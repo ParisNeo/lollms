@@ -76,11 +76,20 @@ async function fetchImage() {
 
   try {
     const response = await apiClient.get(props.src, { responseType: 'blob' });
+    const blobType = response.data?.type || '';
+    if (blobType && !blobType.startsWith('image/')) {
+      // SPA catch-all 404s return HTML — never bind a non-image payload
+      console.error("Authenticated image fetch returned non-image payload:", blobType, props.src);
+      error.value = true;
+      imageUrl.value = null;
+      return;
+    }
     objectUrl = URL.createObjectURL(response.data);
     imageUrl.value = objectUrl;
   } catch (e) {
     console.error("Failed to load authenticated image:", e);
     error.value = true;
+    imageUrl.value = null;
   } finally {
     isLoading.value = false;
   }

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-21 23:30]
+
+- feat(artefacts): add artefact context and image studio enhancements with updated frontend components
+
 ## [2026-10-21 00:49]
 
 - Refine backend and frontend configurations:

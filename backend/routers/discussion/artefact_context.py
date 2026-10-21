@@ -24,18 +24,60 @@ def estimate_text_tokens(text: Any) -> int:
     return max(1, len(text) // ESTIMATE_CHARS_PER_TOKEN)
 
 
+MANAGER_EXTRACTION_CANDIDATES = ("list_artefacts", "get_all_artefacts", "get_artefacts", "all")
+
+
+def _as_artefact_collection(value: Any) -> Optional[List[Any]]:
+    if not value:
+        return None
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    if isinstance(value, dict):
+        return list(value.values())
+    if hasattr(value, "__iter__") and not isinstance(value, (str, bytes)):
+        return list(value)
+    return None
+
+
+def _extract_from_manager(manager: Any) -> Optional[Tuple[List[Any], str]]:
+    for candidate_name in MANAGER_EXTRACTION_CANDIDATES:
+        candidate = getattr(manager, candidate_name, None)
+        if candidate is None:
+            continue
+        try:
+            result = candidate() if callable(candidate) else candidate
+        except Exception as e:
+            trace_exception(e)
+            continue
+        collected = _as_artefact_collection(result)
+        if collected:
+            return collected, f".{candidate_name}"
+    nested = getattr(manager, "artefacts", None)
+    if nested is not None and nested is not manager:
+        collected = _as_artefact_collection(nested)
+        if collected:
+            return collected, ".artefacts"
+    return None
+
+
 def collect_loaded_artefacts(discussion: Any) -> Tuple[List[Any], str]:
     for accessor_name in ARTEFACT_ACCESSORS:
         accessor = getattr(discussion, accessor_name, None)
         if accessor is None:
             continue
         try:
-            artefacts = accessor() if callable(accessor) else accessor
+            result = accessor() if callable(accessor) else accessor
         except Exception as e:
             trace_exception(e)
             continue
-        if artefacts:
-            return artefacts, f"discussion.{accessor_name}"
+        collected = _as_artefact_collection(result)
+        if collected:
+            return collected, f"discussion.{accessor_name}"
+        if result is not None and not callable(result):
+            extracted = _extract_from_manager(result)
+            if extracted:
+                artefacts, candidate_label = extracted
+                return artefacts, f"discussion.{accessor_name}{candidate_label}"
     zone = getattr(discussion, "data_zone", None)
     if isinstance(zone, str):
         try:
@@ -44,13 +86,13 @@ def collect_loaded_artefacts(discussion: Any) -> Tuple[List[Any], str]:
             trace_exception(e)
             zone = None
     if isinstance(zone, dict):
-        artefacts = zone.get("artefacts")
-        if artefacts:
-            return artefacts, "discussion.data_zone['artefacts']"
+        collected = _as_artefact_collection(zone.get("artefacts"))
+        if collected:
+            return collected, "discussion.data_zone['artefacts']"
     elif zone is not None and hasattr(zone, "artefacts"):
-        artefacts = getattr(zone, "artefacts")
-        if artefacts:
-            return artefacts, "discussion.data_zone.artefacts"
+        collected = _as_artefact_collection(getattr(zone, "artefacts"))
+        if collected:
+            return collected, "discussion.data_zone.artefacts"
     return [], "none"
 
 
@@ -75,6 +117,12 @@ AUDIO_LOADED_TOKEN_FOOTPRINT = 24
 
 def compute_artefact_zone(discussion: Any) -> Optional[Dict[str, Any]]:
     artefacts, source = collect_loaded_artefacts(discussion)
+    if not isinstance(artefacts, (list, tuple, set)):
+        if isinstance(artefacts, dict):
+            artefacts = list(artefacts.values())
+        else:
+            trace_exception(TypeError(f"Non-iterable artefact collection from {source}"))
+            return None
     breakdown: Dict[str, int] = {}
     for artefact in artefacts:
         title, is_loaded, content, declared = extract_artefact_fields(artefact)

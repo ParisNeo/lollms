@@ -13,9 +13,11 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
 from ascii_colors import trace_exception
-
+import datetime
 from backend.db import get_db
 from backend.db.models.image import UserImage, ImageAlbum
+from backend.db.models.config import TTIBinding as DBTTIBinding
+
 from backend.models import UserAuthDetails, TaskInfo
 from backend.models.image import (
     UserImagePublic, ImageGenerationRequest, MoveImageToDiscussionRequest, 
@@ -162,7 +164,7 @@ async def get_user_images(
         total_pages=total_pages
     )
 
-@image_studio_router.get("/{image_id}/thumbnail")
+@image_studio_router.get("/images/{image_id}/thumbnail")
 async def get_image_thumbnail(
     image_id: str,
     size: int = 384,
@@ -206,7 +208,7 @@ async def get_image_thumbnail(
         headers={"Cache-Control": "public, max-age=31536000, immutable"}
     )
 
-@image_studio_router.get("/{image_id}/file")
+@image_studio_router.get("/images/{image_id}/file")
 async def get_image_file(
     image_id: str,
     current_user: UserAuthDetails = Depends(get_current_active_user),
@@ -219,6 +221,23 @@ async def get_image_file(
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found on disk.")
     return FileResponse(str(file_path))
+
+@image_studio_router.get("/{image_id}/thumbnail")
+async def get_image_thumbnail_alias(
+    image_id: str,
+    size: int = 384,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    return await get_image_thumbnail(image_id, size, current_user, db)
+
+@image_studio_router.get("/{image_id}/file")
+async def get_image_file_alias(
+    image_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    return await get_image_file(image_id, current_user, db)
 
 @image_studio_router.post("/save-canvas", response_model=UserImagePublic)
 async def save_canvas_as_new_image(

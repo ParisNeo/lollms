@@ -442,7 +442,7 @@
                                             draggedStagedIndex === idx ? 'opacity-40' : ''
                                         ]"
                                     >
-                                         <AuthenticatedImage :src="`/api/image-studio/${img.id}/thumbnail?size=256`" class="w-full h-full object-cover pointer-events-none" />
+                                         <AuthenticatedImage :src="`/api/image-studio/images/${img.id}/thumbnail?size=256`" class="w-full h-full object-cover pointer-events-none" />
 
                                          <!-- Order Tag Badge -->
                                          <div class="absolute top-1.5 left-1.5 bg-blue-600 text-white font-mono text-[10px] font-black px-1.5 py-0.5 rounded-lg shadow-lg border border-white/20">
@@ -518,7 +518,7 @@
                             >
                                 <!-- Fast Thumbnail URL (fallback to full-res only if toggled) -->
                                 <AuthenticatedImage 
-                                    :src="useFullResThumbnails ? `/api/image-studio/${image.id}/file` : `/api/image-studio/${image.id}/thumbnail?size=384`" 
+                                    :src="useFullResThumbnails ? `/api/image-studio/images/${image.id}/file` : `/api/image-studio/images/${image.id}/thumbnail?size=384`" 
                                     class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
                                 />
 
@@ -1075,38 +1075,57 @@ function copyPrompt(text) {
     uiStore.copyToClipboard(text);
 }
 
-function downloadSingle(image) {
-    const link = document.createElement('a');
-    link.href = `/api/image-studio/${image.id}/file`;
-    link.download = `${image.prompt ? image.prompt.slice(0, 30) : 'creation'}_${image.id}.png`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    uiStore.addNotification('Image download started.', 'success', 2000);
+async function downloadSingle(image) {
+    try {
+        const response = await apiClient.get(`/api/image-studio/images/${image.id}/file`, { responseType: 'blob' });
+        const url = URL.createObjectURL(response.data);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${image.prompt ? image.prompt.slice(0, 30) : 'creation'}_${image.id}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        uiStore.addNotification('Image download started.', 'success', 2000);
+    } catch (e) {
+        console.error('Download failed:', e);
+        uiStore.addNotification('Failed to download image.', 'error');
+    }
 }
 
 function handleBatchZipDownload() {
     imageStore.downloadBatch(selectedImages.value);
 }
 
-function openCompareModal() {
+async function openCompareModal() {
     if (selectedImages.value.length !== 2) return;
     const [imgA, imgB] = selectedImageObjects.value;
-    uiStore.openModal('interactiveOutput', {
-        title: 'Side-by-Side Comparison',
-        htmlContent: `
-            <div style="display: flex; gap: 16px; justify-content: center; align-items: center; width: 100%; height: 100%; padding: 16px; box-sizing: border-box;">
-                <div style="flex: 1; text-align: center;">
-                    <img src="/api/image-studio/${imgA.id}/file" style="max-width: 100%; max-height: 75vh; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);" />
-                    <p style="margin-top: 8px; font-size: 11px; opacity: 0.7;">${imgA.prompt || 'Variant A'}</p>
+    try {
+        const [resA, resB] = await Promise.all([
+            apiClient.get(`/api/image-studio/images/${imgA.id}/file`, { responseType: 'blob' }),
+            apiClient.get(`/api/image-studio/images/${imgB.id}/file`, { responseType: 'blob' })
+        ]);
+        const urlA = URL.createObjectURL(resA.data);
+        const urlB = URL.createObjectURL(resB.data);
+        uiStore.openModal('interactiveOutput', {
+            title: 'Side-by-Side Comparison',
+            htmlContent: `
+                <div style="display: flex; gap: 16px; justify-content: center; align-items: center; width: 100%; height: 100%; padding: 16px; box-sizing: border-box;">
+                    <div style="flex: 1; text-align: center;">
+                        <img src="${urlA}" style="max-width: 100%; max-height: 75vh; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);" />
+                        <p style="margin-top: 8px; font-size: 11px; opacity: 0.7;">${imgA.prompt || 'Variant A'}</p>
+                    </div>
+                    <div style="flex: 1; text-align: center;">
+                        <img src="${urlB}" style="max-width: 100%; max-height: 75vh; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);" />
+                        <p style="margin-top: 8px; font-size: 11px; opacity: 0.7;">${imgB.prompt || 'Variant B'}</p>
+                    </div>
                 </div>
-                <div style="flex: 1; text-align: center;">
-                    <img src="/api/image-studio/${imgB.id}/file" style="max-width: 100%; max-height: 75vh; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);" />
-                    <p style="margin-top: 8px; font-size: 11px; opacity: 0.7;">${imgB.prompt || 'Variant B'}</p>
-                </div>
-            </div>
-        `
-    });
+            `
+        });
+    } catch (e) {
+        console.error('Compare modal failed:', e);
+        uiStore.addNotification('Failed to load images for comparison.', 'error');
+    }
 }
 
 function toggleSelection(id) { 
@@ -1207,8 +1226,8 @@ function openImageViewer(img, idx) {
     // Build full sequence for the lightbox viewer so user can navigate seamlessly across all images
     const sequence = filteredImages.value.map((i, ord) => ({
         id: i.id,
-        src: `/api/image-studio/${i.id}/file`,
-        thumbnail: `/api/image-studio/${i.id}/thumbnail?size=256`,
+        src: `/api/image-studio/images/${i.id}/file`,
+        thumbnail: `/api/image-studio/images/${i.id}/thumbnail?size=256`,
         prompt: i.prompt ? `#${(currentPage.value - 1) * pageSize.value + ord + 1}: ${i.prompt}` : `Image #${(currentPage.value - 1) * pageSize.value + ord + 1}`,
         model: i.model,
         width: i.width,

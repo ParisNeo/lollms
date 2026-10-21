@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue';
-import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../../services/markdownParser';
+import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection, isExternalSrc, TRANSPARENT_PIXEL } from '../../../services/markdownParser';
 import CodeBlock from './CodeBlock.vue';
 import ProcessingBlock from './ProcessingBlock.vue';
 import MermaidViewer from '../../modals/InteractiveMermaid.vue';
@@ -428,16 +428,20 @@ function renderMath() {
 watch(() => props.content, async () => {
   await nextTick();
   renderMath();
+  hydrateWorkspaceImages();
 }, { flush: 'post' });
 
 onMounted(async () => {
   window.addEventListener('message', handleWidgetMessage);
   await nextTick();
   renderMath();
+  hydrateWorkspaceImages();
 });
 
 onUnmounted(() => {
   window.removeEventListener('message', handleWidgetMessage);
+  hydratedObjectUrls.forEach(u => URL.revokeObjectURL(u));
+  hydratedObjectUrls.length = 0;
   Object.values(thinkingTimers.value).forEach(timer => {
       if (timer.intervalId) {
           clearInterval(timer.intervalId);
@@ -527,12 +531,54 @@ const parsedMarkdown = (content) => {
     }
   );
   const highlightedContent = highlightInlineXmlTags(sanitizedContent);
-  let html = rawParsedMarkdown(highlightedContent);
+  let html = rawParsedMarkdown(highlightedContent, { discussionId: effectiveDiscussionId.value });
   if (mathBlocks.length > 0) {
     html = html.replace(new RegExp(placeholder, 'g'), () => mathBlocks.shift());
   }
   return html;
 };
+
+const hydratedObjectUrls = [];
+
+async function hydrateWorkspaceImages() {
+  if (!messageContentRef.value) return;
+
+  // DOM-level rewrite pass (authoritative, bypass-proof): any <img> that reached
+  // the DOM with a workspace-relative src gets tagged for authenticated blob-fetch,
+  // regardless of which render path produced it (token passthrough, widget HTML,
+  // artefact content, streaming truncation, math-placeholder interleaving).
+  if (effectiveDiscussionId.value) {
+    const rawImgs = messageContentRef.value.querySelectorAll('img:not([data-asset-src]):not([data-hydrated])');
+    for (const img of rawImgs) {
+      const src = img.getAttribute('src');
+      if (!src || isExternalSrc(src)) continue;
+      const cleaned = src.replace(/^[.\/\\]+/, '').replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+      if (!cleaned || cleaned.split('/').includes('..')) continue;
+      img.setAttribute(
+        'data-asset-src',
+        `/api/discussions/${encodeURIComponent(effectiveDiscussionId.value)}/artefacts/${encodeURIComponent(cleaned)}/download`
+      );
+      img.classList.add('workspace-asset-img');
+      img.setAttribute('src', TRANSPARENT_PIXEL);
+    }
+  }
+
+  const imgs = messageContentRef.value.querySelectorAll('img.workspace-asset-img:not([data-hydrated])');
+  for (const img of imgs) {
+    const assetSrc = img.getAttribute('data-asset-src');
+    if (!assetSrc) continue;
+    img.setAttribute('data-hydrated', 'true');
+    try {
+      const res = await apiClient.get(assetSrc, { responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      hydratedObjectUrls.push(url);
+      img.src = url;
+    } catch (e) {
+      img.setAttribute('data-error', 'true');
+      console.warn('[MessageContentRenderer] workspace image hydrate failed:', assetSrc, e);
+    }
+  }
+}
 
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!rawBlock) return { type: 'content', content: '' };
@@ -1546,7 +1592,7 @@ const messageParts = computed(() => {
 });
 
 // Single watcher registered AFTER messageParts is initialized
-watch(() => messageParts.value, (newParts) => {
+watch(() => messageParts.value, async (newParts) => {
     if (!newParts || !Array.isArray(newParts)) return;
     newParts.forEach(part => {
         if (part.type === 'think') {
@@ -1581,6 +1627,8 @@ watch(() => messageParts.value, (newParts) => {
             }
         }
     });
+    await nextTick();
+    hydrateWorkspaceImages();
 }, { deep: true, immediate: true });
 
 const getTokens = (text) => {
@@ -1594,7 +1642,7 @@ const getTokens = (text) => {
     while ((match = combinedRegex.exec(text)) !== null) {
         if (match.index > lastIndex) {
             const markdownPart = text.substring(lastIndex, match.index);
-            const tokens = getContentTokensWithMathProtection(markdownPart);
+            const tokens = getContentTokensWithMathProtection(markdownPart, { discussionId: effectiveDiscussionId.value });
             if (Array.isArray(tokens)) {
                 allTokens.push(...tokens);
             }
@@ -1623,7 +1671,7 @@ const getTokens = (text) => {
 
     if (lastIndex < text.length) {
         const remaining = text.substring(lastIndex);
-        const tokens = getContentTokensWithMathProtection(remaining);
+        const tokens = getContentTokensWithMathProtection(remaining, { discussionId: effectiveDiscussionId.value });
         if (Array.isArray(tokens)) {
             allTokens.push(...tokens);
         }

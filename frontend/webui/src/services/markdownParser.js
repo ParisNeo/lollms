@@ -207,9 +207,52 @@ function sanitizeDangerousTags(html) {
     return clean;
 }
 
+const WORKSPACE_ASSET_CLASS = 'workspace-asset-img';
+export const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+export function isExternalSrc(src) {
+    return /^(https?:)?\/\//i.test(src) ||
+           /^(data|blob|mailto|tel):/i.test(src) ||
+           src.startsWith('/') ||
+           src.startsWith('api/') ||
+           src.startsWith('#');
+}
+
+export function rewriteWorkspaceImages(html, discussionId) {
+    if (!html || !discussionId) return html;
+    return html.replace(/<img\b[^>]*>/gi, (tag) => {
+        if (/\sdata-asset-src\s*=/i.test(tag)) return tag;
+        const srcMatch = tag.match(/\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i);
+        const src = srcMatch ? (srcMatch[1] ?? srcMatch[2]) : null;
+        if (!src || isExternalSrc(src)) return tag;
+
+        const cleaned = src.replace(/^[.\/\\]+/, '').replace(/\\/g, '/').replace(/\/{2,}/g, '/');
+        if (!cleaned || cleaned.split('/').includes('..')) return tag;
+
+        const assetUrl = `/api/discussions/${encodeURIComponent(discussionId)}/artefacts/${encodeURIComponent(cleaned)}/download`;
+        let rewritten = tag.replace(/\ssrc\s*=\s*(?:"[^"]*"|'[^']*')/i, ` src="${TRANSPARENT_PIXEL}"`);
+        rewritten = rewritten.replace(/\sdata-asset-src\s*=\s*(?:"[^"]*"|'[^']*')/i, ` data-asset-src="${assetUrl}"`);
+        if (/\sdata-asset-src\s*=/i.test(rewritten)) {
+            if (/\sclass\s*=\s*(?:"[^"]*"|'[^']*')/i.test(rewritten)) {
+                rewritten = rewritten.replace(/\sclass\s*=\s*(?:"([^"]*)"|'([^']*)')/i, (m, dq, sq) => {
+                    const existing = dq ?? sq;
+                    return existing.includes(WORKSPACE_ASSET_CLASS)
+                        ? m
+                        : ` class="${existing} ${WORKSPACE_ASSET_CLASS}"`;
+                });
+            } else {
+                rewritten = rewritten.replace(/<img\b/i, `<img class="${WORKSPACE_ASSET_CLASS}"`);
+            }
+            return rewritten;
+        }
+        return tag;
+    });
+}
+
 export function parsedMarkdown(content, options = {}) {
     if (!content) return '';
 
+    const discussionId = options.discussionId || null;
     let metadata = options.metadata || null;
     let protectedContent = protectFormsInCodeBlocks(content); // FIRST: Escape forms in code blocks
     const placeholders = new Map();
@@ -282,10 +325,10 @@ export function parsedMarkdown(content, options = {}) {
         finalHtml = finalHtml.replace(ph, `<div class="code-block-skeleton my-2 p-2 rounded bg-gray-100 dark:bg-gray-800 font-mono text-sm overflow-x-auto" data-lang="${lang}"><pre>${safeCode}</pre></div>`);
     }
     
-    return sanitizeDangerousTags(unprotectHtml(finalHtml));
+    return rewriteWorkspaceImages(sanitizeDangerousTags(unprotectHtml(finalHtml)), discussionId);
 }
 
-function tokenizeMarkdownPart(markdown) {
+function tokenizeMarkdownPart(markdown, discussionId = null) {
     if (!markdown.trim()) {
         return [{ type: 'space', raw: markdown }];
     }
@@ -304,7 +347,7 @@ function tokenizeMarkdownPart(markdown) {
     });
 }
 
-function customTokenizer(text) {
+function customTokenizer(text, discussionId = null) {
     if (!text) return [];
 
     const codeBlockRegex = /(^\s*```[\s\S]*?^\s*```\s*?$)/gm;
@@ -326,15 +369,15 @@ function customTokenizer(text) {
                     raw: part
                 });
             } else {
-                tokens.push(...tokenizeMarkdownPart(part));
+                tokens.push(...tokenizeMarkdownPart(part, discussionId));
             }
         } else {
-            tokens.push(...tokenizeMarkdownPart(part));
+            tokens.push(...tokenizeMarkdownPart(part, discussionId));
         }
     }
     return tokens;
 }
 
-export function getContentTokensWithMathProtection(text) {
-    return customTokenizer(text);
+export function getContentTokensWithMathProtection(text, options = {}) {
+    return customTokenizer(text, options.discussionId || null);
 }
