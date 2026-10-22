@@ -9,7 +9,6 @@ import sys
 import tempfile
 import threading
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
 from multiprocessing import set_start_method
 from pathlib import Path
@@ -39,7 +38,6 @@ from sqlalchemy.orm import Session
 
 from lollms_client import LollmsDataManager
 
-from backend.lollms_init_watcher import lollms_init_watcher
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
@@ -50,7 +48,6 @@ from backend.db import init_database, get_db, session as db_session_module
 from backend.db.base import Base, TaskStatus
 from backend.db.migration import run_schema_migrations_and_bootstrap, check_and_update_db_version
 from backend.db.models.user import User as DBUser
-from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import (
     AppZooRepository as DBAppZooRepository,
     MCPZooRepository as DBMCPZooRepository,
@@ -127,7 +124,6 @@ from backend.zoo_cache import load_cache
 # --------------------------------------------------------------------------- #
 broadcast_listener_task = None
 rss_scheduler: Optional[BackgroundScheduler] = None
-startup_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="lollms_startup")
 
 _startup_done = False
 _task_manager_ready = False
@@ -258,6 +254,22 @@ def _become_scheduler_leader() -> bool:
         return False
     _scheduler_lock = lock
     return True
+
+
+AGENT_USERNAME = "lollms"
+
+
+def _warm_agent_client():
+    """
+    Builds the moderation/organisation agent's client once, ~30s after startup, in the
+    scheduler-leader process only. Runs after the server accepts connections, so MCP servers
+    hosted by this app are reachable. A failure here never affects startup.
+    """
+    try:
+        build_lollms_client_from_params(AGENT_USERNAME, load_llm=True)
+        ASCIIColors.info(f"Agent client '{AGENT_USERNAME}' ready.")
+    except Exception as e:
+        ASCIIColors.warning(f"Agent client '{AGENT_USERNAME}' warmup failed: {e}")
 
 
 # --------------------------------------------------------------------------- #
@@ -494,9 +506,6 @@ async def startup_event():
 
     with db_scope() as db:
         settings.load_from_db(db)
-        binding_aliases = [
-            b.alias for b in db.query(DBLLMBinding).filter(DBLLMBinding.is_active.is_(True)).all()
-        ]
 
     manager.set_loop(asyncio.get_running_loop())
     _ensure_task_manager()
@@ -504,16 +513,7 @@ async def startup_event():
     if SERVER_CONFIG.get("workers", 1) > 1:
         broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
 
-    # Pre-warm once, here, per worker. With several workers each one loads its own copy.
-    if settings.get("prewarm_bindings", True):
-        for alias in binding_aliases:
-            startup_executor.submit(
-                build_lollms_client_from_params,
-                "lollms",
-                binding_alias=alias,
-                load_llm=True,
-                callback=lollms_init_watcher
-            )
+    # No client is built at startup. User clients are built lazily on first request.
 
     if _become_scheduler_leader():
         rss_scheduler = BackgroundScheduler(daemon=True)
@@ -537,6 +537,13 @@ async def startup_event():
                 next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=5), **job_opts
             )
 
+        if settings.get("prewarm_agent", True):
+            rss_scheduler.add_job(
+                _warm_agent_client, 'date',
+                run_date=datetime.datetime.now() + datetime.timedelta(seconds=30),
+                id="warm_agent_client"
+            )
+
         rss_scheduler.start()
         ASCIIColors.info(f"Scheduler started in process {os.getpid()}.")
 
@@ -555,7 +562,6 @@ async def shutdown_event():
     if _scheduler_lock is not None:
         _scheduler_lock.release()
         _scheduler_lock = None
-    startup_executor.shutdown(wait=False, cancel_futures=True)
 
 
 @asynccontextmanager
