@@ -43,6 +43,15 @@ try:                                                     # Linux defaults to 102
 except Exception:
     pass
 
+import faulthandler
+import signal
+try:
+    faulthandler.enable(file=sys.stderr, all_threads=True)
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, file=sys.stderr, all_threads=True)
+except Exception:
+    pass
+
 import pipmaster as pm
 pm.ensure_packages(["ascii_colors>=0.11.13", "lollms_client>=1.12.4", "filelock"])
 
@@ -564,10 +573,43 @@ def run_one_time_startup_tasks():
 
 
 # --------------------------------------------------------------------------- #
+# Stall diagnostics: if the event loop stops answering, the journal says exactly where
+# --------------------------------------------------------------------------- #
+_loop_heartbeat = {"t": None}
+_stall_thread_started = False
+
+
+async def _loop_heartbeat_task():
+    while True:
+        _loop_heartbeat["t"] = time.monotonic()
+        await asyncio.sleep(1)
+
+
+def _stall_watchdog_thread():
+    last_dump = 0.0
+    while True:
+        time.sleep(5)
+        t = _loop_heartbeat["t"]
+        if t is None:
+            continue
+        now = time.monotonic()
+        if now - t > 10 and now - last_dump > 60:
+            last_dump = now
+            ASCIIColors.error(
+                f"[watchdog pid {os.getpid()}] event loop blocked for {now - t:.0f}s. Thread dump follows:"
+            )
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+
+
+# --------------------------------------------------------------------------- #
 # Lifespan
 # --------------------------------------------------------------------------- #
 async def startup_event():
-    global broadcast_listener_task, rss_scheduler
+    global broadcast_listener_task, rss_scheduler, _stall_thread_started
+
+    ASCIIColors.info(f"[pid {os.getpid()}] worker starting...")
+    # If startup stalls, every thread's stack is printed every 60s until it finishes.
+    faulthandler.dump_traceback_later(60, repeat=True, file=sys.stderr)
 
     init_database(APP_DB_URL)
     await asyncio.to_thread(run_one_time_startup_tasks)
@@ -623,6 +665,13 @@ async def startup_event():
 
         rss_scheduler.start()
         ASCIIColors.info(f"Scheduler started in process {os.getpid()}.")
+
+    faulthandler.cancel_dump_traceback_later()
+    asyncio.create_task(_loop_heartbeat_task())
+    if not _stall_thread_started:
+        _stall_thread_started = True
+        threading.Thread(target=_stall_watchdog_thread, daemon=True, name="stall_watchdog").start()
+    ASCIIColors.info(f"[pid {os.getpid()}] worker ready, accepting requests.")
 
 
 async def shutdown_event():
@@ -912,6 +961,11 @@ if __name__ == "__main__":
     (data_dir / "apps").mkdir(parents=True, exist_ok=True)
 
     workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
+    if workers > 1:
+        ASCIIColors.warning(
+            f"{workers} workers: sessions, client registry, task manager and websockets are per-process state. "
+            "Use LOLLMS_WORKERS=1 unless you know you need more."
+        )
 
     ssl_params = {}
     if https_enabled:
