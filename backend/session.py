@@ -1,6 +1,8 @@
 # backend/session.py
 import os
 import json
+import time
+import hashlib
 import traceback
 import datetime
 import threading
@@ -55,9 +57,82 @@ _token_user_cache: Dict[str, tuple] = {}
 _token_cache_lock = threading.Lock()
 TOKEN_CACHE_TTL = 10 # seconds
 
-# Global Client Registry to prevent file descriptor exhaustion
+# --------------------------------------------------------------------------- #
+# Global Client Registry (prevents file descriptor exhaustion)
+#
+# Rules:
+#   * _registry_lock guards the dicts ONLY. It is never held while a client is built.
+#   * Slow construction is serialised per registry key by a dedicated build lock,
+#     with a timeout, so one slow model load can never freeze every request.
+#   * MCP bearer tokens are masked out of the key, otherwise every rebuild
+#     creates a new key and a new client.
+#   * Entries expire. Failed (degraded) clients expire quickly so a broken binding
+#     is retried after a cooldown rather than on every request.
+# --------------------------------------------------------------------------- #
+BUILD_WAIT_TIMEOUT = 120     # seconds a request waits for another thread's model load
+FAILURE_COOLDOWN = 60        # seconds a degraded client is reused before a retry
+REGISTRY_MAX_AGE = 1800      # seconds; keep below the MCP access token lifetime
+
 _global_client_registry: Dict[str, LollmsClient] = {}
-_registry_lock = threading.Lock()
+_registry_expiry: Dict[str, float] = {}
+_registry_build_locks: Dict[str, threading.Lock] = {}
+_registry_lock = threading.RLock()
+
+def _registry_key(payload: Dict[str, Any]) -> str:
+    def mask(o):
+        if isinstance(o, dict):
+            return {k: ("<t>" if k == "token" and isinstance(v, str) else mask(v)) for k, v in o.items()}
+        if isinstance(o, list):
+            return [mask(i) for i in o]
+        return o
+    return hashlib.sha1(json.dumps(mask(payload), sort_keys=True, default=str).encode()).hexdigest()
+
+def _registry_get(key: str) -> Optional[LollmsClient]:
+    with _registry_lock:
+        lc = _global_client_registry.get(key)
+        if lc is None:
+            return None
+        if time.monotonic() > _registry_expiry.get(key, float("inf")):
+            _global_client_registry.pop(key, None)
+            _registry_expiry.pop(key, None)
+            return None
+        return lc
+
+def _registry_put(key: str, lc: LollmsClient, ttl: float = REGISTRY_MAX_AGE) -> None:
+    with _registry_lock:
+        _global_client_registry[key] = lc
+        _registry_expiry[key] = time.monotonic() + ttl
+
+def _registry_build_lock(key: str) -> threading.Lock:
+    with _registry_lock:
+        return _registry_build_locks.setdefault(key, threading.Lock())
+
+def _registry_clear() -> None:
+    with _registry_lock:
+        _global_client_registry.clear()
+        _registry_expiry.clear()
+
+def _apply_runtime(lc: LollmsClient, runtime: Dict[str, Any]) -> None:
+    """Push per-request reasoning settings onto a (possibly cached) client and its binding."""
+    llm = getattr(lc, "llm", None)
+    for k, v in runtime.items():
+        setattr(lc, k, v)
+        if llm:
+            setattr(llm, k, v)
+
+def _configure_client(lc: LollmsClient, ctx: int, runtime: Dict[str, Any]) -> None:
+    llm = getattr(lc, "llm", None)
+    if llm:
+        setter = getattr(llm, "set_forced_ctx_size", None)
+        if callable(setter):
+            try:
+                setter(ctx)
+            except Exception:
+                pass
+        for attr in ("forced_context_size", "ctx_size"):
+            if hasattr(llm, attr):
+                setattr(llm, attr, ctx)
+    _apply_runtime(lc, runtime)
 
 def reset_client_state(lc: Optional[LollmsClient]) -> None:
     """
@@ -131,9 +206,10 @@ def evict_client_from_registry(client: Optional[LollmsClient] = None, username: 
         if client is not None:
             keys_to_remove = [k for k, v in _global_client_registry.items() if v is client]
             for k in keys_to_remove:
-                del _global_client_registry[k]
+                _global_client_registry.pop(k, None)
+                _registry_expiry.pop(k, None)
         else:
-            _global_client_registry.clear()
+            _registry_clear()
 
     if username and username in user_sessions:
         user_sessions[username].pop("lollms_clients_cache", None)
@@ -338,8 +414,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 if alias_key in prof_info and prof_info[alias_key] is not None:
                     effective_llm_params[user_key] = prof_info[alias_key]
 
-        lc = get_user_lollms_client(username)
-        ai_name_for_user = getattr(lc, "ai_name", "assistant")
+        # Never build or load a client on the authentication path: it is slow, takes locks,
+        # and runs on every request. The name is cached in the session when a client is built.
+        ai_name_for_user = user_sessions.get(username, {}).get("ai_name", "assistant")
         
         is_api_service_enabled = ensure_bool(settings.get("openai_api_service_enabled", False), False)
         is_api_require_key = ensure_bool(settings.get("openai_api_require_key", True), True)
@@ -639,7 +716,11 @@ def get_user_lollms_client(
     )
 
     if username in user_sessions:
-        clients_cache = user_sessions[username].setdefault("lollms_clients_cache", {})
+        sess = user_sessions[username]
+        # Cached here so the auth path never has to build a client just to read the AI name.
+        sess["ai_name"] = getattr(client, "ai_name", "assistant")
+
+        clients_cache = sess.setdefault("lollms_clients_cache", {})
         params_suffix = f"_{hash(json.dumps(llm_params, sort_keys=True, default=str))}" if llm_params else ""
         cache_key = f"{binding_alias_override or 'default'}_{model_name_override or 'default'}{params_suffix}"
         if not load_mcp:
@@ -1165,72 +1246,63 @@ def build_lollms_client_from_params(
                     "servers_infos": servers_infos
                 }
 
+        # Everything that needs the database is done. Release the connection NOW so a slow
+        # model load can't hold a pool slot (the outer finally closing again is harmless).
+        db.close()
+
         try:
             registry_payload = {k: v for k, v in client_init_params.items() if v is not None}
-            registry_key = str(hash(json.dumps(registry_payload, sort_keys=True, default=str)))
+            registry_key = _registry_key(registry_payload)
+            runtime = {
+                k: primary_config[k]
+                for k in ("reasoning_activation", "reasoning_effort")
+                if k in primary_config
+            }
 
-            with _registry_lock:
-                if registry_key in _global_client_registry:
-                    cached_lc = _global_client_registry[registry_key]
-                    if "reasoning_activation" in primary_config:
-                        setattr(cached_lc, 'reasoning_activation', primary_config["reasoning_activation"])
-                        if hasattr(cached_lc, 'llm') and cached_lc.llm:
-                            setattr(cached_lc.llm, 'reasoning_activation', primary_config["reasoning_activation"])
-                    if "reasoning_effort" in primary_config:
-                        setattr(cached_lc, 'reasoning_effort', primary_config["reasoning_effort"])
-                        if hasattr(cached_lc, 'llm') and cached_lc.llm:
-                            setattr(cached_lc.llm, 'reasoning_effort', primary_config["reasoning_effort"])
-                    if callback:
-                        callback("⚡ Universal Engine cached - Instant access enabled.", 28, {})
-                    return cached_lc
+            # Fast path: cached client, no build lock.
+            lc = _registry_get(registry_key)
+            if lc is not None:
+                _apply_runtime(lc, runtime)
+                if callback:
+                    callback("⚡ Universal Engine cached - Instant access enabled.", 28, {})
+                return lc
+
+            # Slow path: one builder per key; others wait with a timeout instead of freezing.
+            build_lock = _registry_build_lock(registry_key)
+            if not build_lock.acquire(timeout=BUILD_WAIT_TIMEOUT):
+                raise HTTPException(status_code=503, detail="Model engine is still loading. Retry shortly.")
+            try:
+                # Another thread may have finished the build while we waited.
+                lc = _registry_get(registry_key)
+                if lc is not None:
+                    _apply_runtime(lc, runtime)
+                    return lc
 
                 try:
                     lc = LollmsClient(**registry_payload, callback=callback)
-                    if hasattr(lc, 'llm') and lc.llm:
-                        if hasattr(lc.llm, 'set_forced_ctx_size') and callable(lc.llm.set_forced_ctx_size):
-                            try: lc.llm.set_forced_ctx_size(active_ctx)
-                            except Exception: pass
-                        if hasattr(lc.llm, 'forced_context_size'):
-                            lc.llm.forced_context_size = active_ctx
-                        if hasattr(lc.llm, 'ctx_size'):
-                            lc.llm.ctx_size = active_ctx
-                        if "reasoning_activation" in primary_config:
-                            setattr(lc.llm, 'reasoning_activation', primary_config["reasoning_activation"])
-                        if "reasoning_effort" in primary_config:
-                            setattr(lc.llm, 'reasoning_effort', primary_config["reasoning_effort"])
-
-                    if "reasoning_activation" in primary_config:
-                        setattr(lc, 'reasoning_activation', primary_config["reasoning_activation"])
-                    if "reasoning_effort" in primary_config:
-                        setattr(lc, 'reasoning_effort', primary_config["reasoning_effort"])
-
-                    _global_client_registry[registry_key] = lc
+                    _configure_client(lc, active_ctx, runtime)
+                    _registry_put(registry_key, lc)
                     return lc
                 except Exception as engine_err:
-                    error_msg = str(engine_err)
                     binding_alias_to_show = target_binding_alias or 'N/A'
-                    
-                    ASCIIColors.warning(f"Engine Load Failed >> Binding: {binding_alias_to_show} | Error: {error_msg}")
-                    
+                    ASCIIColors.warning(f"Engine Load Failed >> Binding: {binding_alias_to_show} | Error: {engine_err}")
                     if callback:
-                        callback(f"⚠️ Configuration Issue: {error_msg}", 24, {})
-                    
-                    degraded_payload = registry_payload.copy()
-                    degraded_payload["load_llm"] = False
-                    degraded_payload["load_tti"] = False
-                    degraded_payload["load_tts"] = False
-                    degraded_payload["load_stt"] = False
-                    degraded_payload.pop("llm_binding_name", None)
-                    degraded_payload.pop("llm_binding_config", None)
-                    degraded_payload.pop("llm_binding_profiles", None)
-                    degraded_payload.pop("llm_model_profiles", None)
-                    
-                    degraded_lc = LollmsClient(**degraded_payload)
-                    return degraded_lc
+                        callback(f"⚠️ Configuration Issue: {engine_err}", 24, {})
 
+                    degraded_payload = {k: v for k, v in registry_payload.items() if not k.startswith("llm_")}
+                    degraded_payload.update(load_llm=False, load_tti=False, load_tts=False, load_stt=False)
+                    degraded_lc = LollmsClient(**degraded_payload)
+                    # Short TTL: the broken binding is retried after a cooldown, not on every request.
+                    _registry_put(registry_key, degraded_lc, ttl=FAILURE_COOLDOWN)
+                    return degraded_lc
+            finally:
+                build_lock.release()
+
+        except HTTPException:
+            raise
         except Exception as e:
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"System error during engine registry: {str(e)}")
+            raise HTTPException(status_code=500, detail="System error during engine registry. See server logs.")
     finally:
         db.close()
 
@@ -1530,8 +1602,7 @@ def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], O
 def invalidate_model_cache(db: Session):
     db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").delete()
     db.commit()
-    with _registry_lock:
-        _global_client_registry.clear()
+    _registry_clear()
 
     from backend.ws_manager import manager
     manager.broadcast_internal_event_sync("global_model_cache_invalidate", {})
