@@ -7,7 +7,7 @@ fastapi==0.129.0
 uvicorn[standard]==0.37.0
 sse_starlette==3.0.2
 websockets==15.0.1
-werkzeug==3.1.6
+werkzeug==3.1.9
 python-multipart==0.0.31
 # --- Configuration & Utility ---
 toml==0.10.2
