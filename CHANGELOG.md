@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-22 07:40]
+
+- chore(frontend/webui): bump postcss-selector-parser from 6.0.10 to 7.1.7
+
 ## [2026-10-22 07:30]
 
 - bump werkzeug from 3.1.6 to 3.1.9

@@ -57,7 +57,7 @@ extract-msg==0.55.0
 
 # --- Document Publishing, Math & HTML/PDF Renderers ---
 markdown2==2.5.4
-markdown_pdf==1.10
+markdown_pdf==1.13.3
 latex2mathml==3.78.1
 weasyprint>=60.0
 xhtml2pdf>=0.2.15
