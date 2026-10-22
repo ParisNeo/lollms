@@ -72,7 +72,7 @@ class User(Base):
     image_annotation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     image_editing_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     inline_widgets_enabled = Column(Boolean, default=True, nullable=False, server_default='1')
-    slide_maker_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    office_tools_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     
     # Generation tools
     activate_generated_images = Column(Boolean, default=False, nullable=False, server_default='0')
@@ -88,9 +88,6 @@ class User(Base):
     reasoning_effort = Column(String, nullable=True)
     reasoning_summary = Column(Boolean, default=False, nullable=True, server_default='0')
     rlm_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
-
-    # Book Generation
-    book_generation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
 
     # Artefacts Generation
     artefacts_enabled = Column(Boolean, default=True, nullable=False, server_default='1')

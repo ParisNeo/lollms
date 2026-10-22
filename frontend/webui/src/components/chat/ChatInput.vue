@@ -898,8 +898,7 @@ const capabilityFlags = [
     { key: 'skills_library_enabled',     label: 'Skill Auto-Search',    emoji: '🔎', description: 'Inject the most relevant saved skill automatically per turn.' },
     { key: 'image_generation_enabled',   label: 'Image Generation',     emoji: '🎨', description: '<generate_image> tag renders via the active TTI binding.' },
     { key: 'image_editing_enabled',      label: 'Image Editing',        emoji: '🖌️', description: 'Modify previously generated images via <edit_image>.' },
-    { key: 'slide_maker_enabled',        label: 'Slide Maker',          emoji: '📊', description: 'Generate slide decks from a topic or per-slide prompts.' },
-    { key: 'book_generation_enabled',    label: 'Book Building',        emoji: '📚', description: 'Assemble long-form documents / PDF books.' },
+    { key: 'office_tools_enabled',       label: 'Office tools',         emoji: '📊', description: 'Enables interaction (Creation, Edition, scouting) if office files like pptx, xlsx, docx ...' },
     { key: 'memory_enabled',             label: 'Long-Term Memory',     emoji: '🐘', description: 'Deep recall and new memory recording on every turn.' },
     { key: 'auto_memory_enabled',        label: 'Auto-Dream Cycle',     emoji: '💤', description: 'Auto-consolidate, reinforce & decay memories in background.' },
     { key: 'scheduler_enabled',          label: 'Task Scheduler',       emoji: '⏰', description: 'Schedule recurring prompts using cron syntax.' },
@@ -1169,16 +1168,16 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Image Edit: Use <edit_image source_index="-1" strength="0.8">prompt</edit_image>.'
         });
     }
-    if (user.value?.slide_maker_enabled) {
+    if (user.value?.office_tools_enabled) {
         features.push({ 
-            id: 'slides', 
+            id: 'office_tools', 
             icon: IconPresentationChartBar, 
-            label: 'Slides', 
+            label: 'Office tools', 
             colorClass: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800', 
-            title: 'Slide Maker Enabled.',
-            modalTitle: 'Slide Maker',
-            modalDescription: 'Allows the AI to generate presentations (PPTX/PDF).',
-            systemPrompt: '## Slides: Use <generate_slides><Slide>desc</Slide></generate_slides>.'
+            title: 'Office tools Enabled.',
+            modalTitle: 'Office tools',
+            modalDescription: 'The AI generates PowerPoint slides and other office documents (pptx, xlsx, docx) automatically through the chat pipeline when needed.',
+            systemPrompt: '## Office Tools: PowerPoint slides, Excel sheets and Word documents are generated automatically when needed.' 
         });
     }
     if (user.value?.note_generation_enabled) {
@@ -1191,18 +1190,6 @@ const activeFeatures = computed(() => {
             modalTitle: 'Note Building',
             modalDescription: 'Allows the AI to create structured research notes saved directly to your library.',
             systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
-        });
-    }
-    if (user.value?.book_generation_enabled) {
-        features.push({ 
-            id: 'books', 
-            icon: IconBookOpen, 
-            label: 'Book Building', 
-            colorClass: 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800', 
-            title: 'Book Building Enabled.',
-            modalTitle: 'Digital Books',
-            modalDescription: 'Allows the AI to write and format complete digital books with automatic PDF conversion.',
-            systemPrompt: '## Books: Use <artifact type="book" title="Title">...</artifact> using semantic HTML5.'
         });
     }
     if (user.value?.artefacts_enabled) {
@@ -1456,10 +1443,16 @@ async function removeArtefact(file) {
 function removeStagedImage(index) { const removed = stagedImages.value.splice(index, 1)[0]; if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl); }
 function triggerFileUpload(mode = 'text_and_embedded_images') { currentUploadPdfMode.value = mode; fileInput.value?.click(); }
 function triggerImageUpload() { imageInput.value?.click(); }
-async function handleFilesInput(files) {
+async function handleFilesInput(files, { viaFileInput = false } = {}) {
     if (files.length === 0) return;
-    const images = files.filter(f => f.type.startsWith('image/'));
-    const others = files.filter(f => !f.type.startsWith('image/'));
+    // Entrypoint-aware routing: when the document file-input carries an explicit
+    // 'as_is' ingestion mode, ALL files (including images) must flow into the
+    // workspace artefact pipeline as byte-preserved, editable artefacts — not
+    // as vision attachments. Generic paths (Images tile, paste, drop, event bus)
+    // keep vision-staging as the default for image MIME types.
+    const asIsIngest = viaFileInput && currentUploadPdfMode.value === 'as_is';
+    const images = asIsIngest ? [] : files.filter(f => f.type.startsWith('image/'));
+    const others = asIsIngest ? files : files.filter(f => !f.type.startsWith('image/'));
     if (images.length > 0) images.forEach(file => { stagedImages.value.push({ file, previewUrl: URL.createObjectURL(file) }); });
     if (others.length > 0) {
         if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
@@ -1482,8 +1475,8 @@ async function handleFilesInput(files) {
         }
     }
 }
-async function handleFileUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files); event.target.value = ''; }
-async function handleImageUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files); event.target.value = ''; }
+async function handleFileUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files, { viaFileInput: true }); event.target.value = ''; }
+async function handleImageUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files, { viaFileInput: false }); event.target.value = ''; }
 async function handleDrop(event) { event.stopPropagation(); isDraggingOver.value = false; const files = Array.from(event.dataTransfer.files); if (files.length > 0) { await handleFilesInput(files); } }
 async function handlePaste(event) {
     event.stopPropagation();

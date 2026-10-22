@@ -60,7 +60,7 @@ class UserCreateAdmin(BaseModel):
     image_annotation_enabled: bool = False
     image_editing_enabled: bool = False
     inline_widgets_enabled: bool = True
-    slide_maker_enabled: bool = False
+    office_tools_enabled: bool = False
     activate_generated_images: bool = False
     max_image_width: Optional[int] = -1
     max_image_height: Optional[int] = -1
@@ -267,7 +267,7 @@ class UserAuthDetails(BaseModel):
     image_annotation_enabled: bool = False
     image_editing_enabled: bool = False
     inline_widgets_enabled: bool = True
-    slide_maker_enabled: bool = False
+    office_tools_enabled: bool = False
     note_generation_enabled: bool = False
     activate_generated_images: bool = False
     memory_enabled: bool = False
@@ -369,7 +369,7 @@ class UserUpdate(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: Optional[bool] = None
     image_editing_enabled: Optional[bool] = None
-    slide_maker_enabled: Optional[bool] = None
+    office_tools_enabled: Optional[bool] = None
     activate_generated_images: Optional[bool] = None
     note_generation_enabled: Optional[bool] = None
     memory_enabled: Optional[bool] = None

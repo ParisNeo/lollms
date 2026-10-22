@@ -298,7 +298,7 @@ def _bootstrap_lollms_user(connection):
                     memory_enabled, auto_memory_enabled,
                     default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status,
                     max_image_width, max_image_height,
-                    slide_maker_enabled, activate_generated_images, compress_images, image_compression_quality,
+                    office_tools_enabled, activate_generated_images, compress_images, image_compression_quality,
                     web_search_enabled, web_search_providers, web_search_deep_analysis, artefacts_enabled,
                     rlm_enabled, herd_mode_enabled
                 )
@@ -313,7 +313,7 @@ def _bootstrap_lollms_user(connection):
                     :memory_enabled, :auto_memory_enabled,
                     :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status,
                     -1, -1,
-                    :slide_maker_enabled, :activate_generated_images, :compress_images, :image_compression_quality,
+                    :office_tools_enabled, :activate_generated_images, :compress_images, :image_compression_quality,
                     :web_search_enabled, :web_search_providers, :web_search_deep_analysis, :artefacts_enabled,
                     :rlm_enabled, :herd_mode_enabled
                 )
@@ -349,7 +349,7 @@ def _bootstrap_lollms_user(connection):
                 "default_rag_chunk_overlap": 256,
                 "default_rag_metadata_mode": "none",
                 "status": "active",
-                "slide_maker_enabled": False,
+                "office_tools_enabled": False,
                 "activate_generated_images": False,
                 "compress_images": False,
                 "image_compression_quality": 85,
@@ -689,9 +689,9 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
         
-        if 'slide_maker_enabled' not in user_columns_db:
+        if 'office_tools_enabled' not in user_columns_db:
             try:
-                connection.execute(text("ALTER TABLE users ADD COLUMN slide_maker_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.execute(text("ALTER TABLE users ADD COLUMN office_tools_enabled BOOLEAN DEFAULT 0 NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
 
@@ -699,12 +699,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'note_generation_enabled' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN note_generation_enabled BOOLEAN DEFAULT 0 NOT NULL"))
-                connection.commit()
-            except Exception: connection.rollback()
-
-        if 'book_generation_enabled' not in user_columns_db:
-            try:
-                connection.execute(text("ALTER TABLE users ADD COLUMN book_generation_enabled BOOLEAN DEFAULT 0 NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
 

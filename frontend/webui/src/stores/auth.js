@@ -755,7 +755,7 @@ export const useAuthStore = defineStore('auth', () => {
         const map = {
             'image_generation': 'image_generation_enabled',
             'image_editing': 'image_editing_enabled',
-            'slide_maker': 'slide_maker_enabled',
+            'slide_maker': 'office_tools_enabled',
             'memory': 'memory_enabled',
             'note_generation': 'note_generation_enabled',
             'skills_building': 'skills_building_enabled',
@@ -763,7 +763,6 @@ export const useAuthStore = defineStore('auth', () => {
             'web_search': 'web_search_enabled',
             'inline_widgets': 'inline_widgets_enabled',
             'form_building': 'form_building_enabled',
-            'book_generation': 'book_generation_enabled',
             'artefacts': 'artefacts_enabled'
         };
         return map[opt];

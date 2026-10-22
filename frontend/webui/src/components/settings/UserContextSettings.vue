@@ -145,10 +145,9 @@ function populateForm() {
     imageAnnotationEnabled.value = !!user.value.image_annotation_enabled;
     imageEditingEnabled.value = !!(user.value.image_editing_enabled ?? false);
     inlineWidgetsEnabled.value = !!(user.value.inline_widgets_enabled ?? true);
-    slideMakerEnabled.value = !!(user.value.slide_maker_enabled ?? false);
+    slideMakerEnabled.value = !!(user.value.office_tools_enabled ?? false);
     activateGeneratedImages.value = !!(user.value.activate_generated_images ?? false);
     noteGenerationEnabled.value = !!(user.value.note_generation_enabled ?? false);
-    bookGenerationEnabled.value = !!(user.value.book_generation_enabled ?? false);
     artefactsEnabled.value = !!(user.value.artefacts_enabled ?? true);
     memoryEnabled.value = !!(user.value.memory_enabled ?? false);
     autoMemoryEnabled.value = !!(user.value.auto_memory_enabled ?? false);
@@ -261,10 +260,9 @@ async function handleSaveChanges() {
             image_annotation_enabled: imageAnnotationEnabled.value,
             image_editing_enabled: imageEditingEnabled.value,
             inline_widgets_enabled: inlineWidgetsEnabled.value,
-            slide_maker_enabled: slideMakerEnabled.value,
+            office_tools_enabled: slideMakerEnabled.value,
             activate_generated_images: activateGeneratedImages.value,
             note_generation_enabled: noteGenerationEnabled.value,
-            book_generation_enabled: bookGenerationEnabled.value,
             artefacts_enabled: artefactsEnabled.value,
             memory_enabled: memoryEnabled.value,
             auto_memory_enabled: autoMemoryEnabled.value,

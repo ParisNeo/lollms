@@ -509,7 +509,7 @@ const highlightInlineXmlTags = (text) => {
     const parts = text.split(/(`[^`\n]+`|```[\s\S]*?```)/g);
     return parts.map((part, index) => {
         if (index % 2 === 0) {
-            const xmlTagRegex = /<\/?(annotate|edit_image|generate_slides|street_view|schedule_task|lollms_widget|lollms_building|lollms_form_anchor|lollms_working|artefact_image|owl|round)\b[^>]*>/gi;
+            const xmlTagRegex = /<\/?(annotate|edit_image|street_view|schedule_task|lollms_widget|lollms_building|lollms_form_anchor|lollms_working|artefact_image|owl|round)\b[^>]*>/gi;
             return part.replace(xmlTagRegex, (match) => {
                 const escaped = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 return `<code class="inline-xml-tag px-1 py-0.5 rounded font-mono text-xs bg-blue-100/80 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40">${escaped}</code>`;

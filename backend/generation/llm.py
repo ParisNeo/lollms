@@ -1770,7 +1770,7 @@ def build_llm_generation_router(router: APIRouter):
                 "callable": tool_memory_search
             }
 
-        if owner_db_user.slide_maker_enabled:
+        if owner_db_user.office_tools_enabled:
             def tool_generate_slides(topic: str, width: int = 1024, height: int = 768):
                 try:
                     task_description = f"Creating slides for topic: {topic[:30]}..."
@@ -2531,9 +2531,9 @@ def build_llm_generation_router(router: APIRouter):
                             enable_notes=owner_db_user.note_generation_enabled,
                             enable_skills=owner_db_user.skills_building_enabled,
                             enable_forms=owner_db_user.form_building_enabled,
-                            enable_books=enable_books if enable_books is not None else owner_db_user.book_generation_enabled,
-                            enable_pptx_builder=owner_db_user.slide_maker_enabled,
-                            enable_office_files=True,
+                            
+                            enable_office_files=owner_db_user.office_tools_enabled,
+                            
                             enable_silent_artefact_explanation=True,
                             enable_artefacts=owner_db_user.artefacts_enabled,
                             memory_manager=mm_instance,

@@ -41,7 +41,7 @@ const activeIconTask = ref(null);
 const contextOptionChoices = [
     { id: 'image_generation', name: 'Image Generation' },
     { id: 'image_editing', name: 'Image Editing' },
-    { id: 'slide_maker', name: 'Slide Maker' },
+    { id: 'slide_maker', name: 'Office tools' },
     { id: 'note_generation', name: 'Note Generation' },
     { id: 'memory', name: 'Long-Term Memory' },
     { id: 'inline_widgets', name: 'Widget Building' }
