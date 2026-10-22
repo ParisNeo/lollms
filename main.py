@@ -1,56 +1,72 @@
-import shutil
+import asyncio
 import datetime
-from pathlib import Path
-from typing import Optional
+import hashlib
+import inspect
 import os
+import shutil
 import subprocess
 import sys
-from multiprocessing import cpu_count, Lock, set_start_method
-from urllib.parse import urlparse
-import pipmaster as pm
-pm.ensure_packages(["ascii_colors>=0.11.13", "lollms_client>=1.12.4"])
-
-from ascii_colors import ASCIIColors, trace_exception, Live, Panel, Console
-import asyncio
-import time
+import tempfile
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
+from contextlib import asynccontextmanager, contextmanager
+from multiprocessing import set_start_method
+from pathlib import Path
+from typing import Optional
 
-from multipart.multipart import FormParser
-FormParser.max_size = 50 * 1024 * 1024  # 50 MB
+# Windows cp1252 consoles crash on the Unicode used by ascii_colors. Fix before it is imported.
+if os.name == 'nt':
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    for _stream in (sys.stdout, sys.stderr):
+        if _stream and hasattr(_stream, 'reconfigure'):
+            _stream.reconfigure(encoding='utf-8')
 
-from fastapi import FastAPI, Depends, HTTPException, APIRouter
+import pipmaster as pm
+pm.ensure_packages(["ascii_colors>=0.11.13", "lollms_client>=1.12.4", "filelock"])
+
+from ascii_colors import ASCIIColors, trace_exception
+from filelock import FileLock, Timeout
+
+import uvicorn
+from apscheduler.schedulers.background import BackgroundScheduler
+from fastapi import FastAPI, Depends, HTTPException, APIRouter, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import or_, inspect as sa_inspect
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, inspect, desc
+
+from lollms_client import LollmsDataManager
 
 from backend.lollms_init_watcher import lollms_init_watcher
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
-    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH, SKILLS_ZOO_ROOT_PATH
+    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH,
+    PERSONALITIES_ZOO_ROOT_PATH, SKILLS_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.base import Base, TaskStatus
 from backend.db.migration import run_schema_migrations_and_bootstrap, check_and_update_db_version
 from backend.db.models.user import User as DBUser
-from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.config import LLMBinding as DBLLMBinding
-from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository, SkillZooRepository as DBSkillZooRepository
+from backend.db.models.service import (
+    AppZooRepository as DBAppZooRepository,
+    MCPZooRepository as DBMCPZooRepository,
+    PromptZooRepository as DBPromptZooRepository,
+    PersonalityZooRepository as DBPersonalityZooRepository,
+    SkillZooRepository as DBSkillZooRepository,
+)
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.db_task import DBTask
 from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (
     get_user_data_root, get_user_discussion_path, user_sessions,
-    build_lollms_client_from_params, get_user_lollms_client,
-    get_current_active_user
+    build_lollms_client_from_params, get_current_active_user
 )
 from backend.models.user import UserAuthDetails
-from pydantic import BaseModel, Field
-from lollms_client import LollmsDataManager
 from backend.settings import settings
 
 from backend.routers.auth import auth_router
@@ -84,53 +100,76 @@ from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
 from backend.routers.music_studio import music_studio_router
-from backend.routers.notes import notes_router 
+from backend.routers.notes import notes_router
 from backend.routers.notebooks import router as notebooks_router
 from backend.routers.public import public_router
 from backend.routers.flow_studio import router as flow_studio_router
 from backend.routers.services.lollms_v1 import lollms_v1_router
-from backend.tasks.email_tasks import _generate_email_proposal_task 
 from backend.routers.tasks import tasks_router
 from backend.routers.skills import skills_router
-from backend.task_manager import task_manager
-from backend.ws_manager import manager, listen_for_broadcasts
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
 from backend.routers.news import news_router
-from backend.zoo_cache import load_cache
 from backend.routers.discussion import build_discussions_router
 from backend.routers.discussion.core import build_core_router
-import uvicorn
-from apscheduler.schedulers.background import BackgroundScheduler
-import io
-
-# Fix Windows cp1252 console encoding crash with ascii_colors Unicode characters
-if os.name == 'nt':
-    os.environ['PYTHONIOENCODING'] = 'utf-8'
-    if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8')
-    if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
-        sys.stderr.reconfigure(encoding='utf-8')
+from backend.tasks.email_tasks import _generate_email_proposal_task
 from backend.tasks.news_tasks import _scrape_rss_feeds_task, _cleanup_old_news_articles_task
-from backend.tasks.social_tasks import _generate_feed_post_task 
+from backend.tasks.social_tasks import _generate_feed_post_task
 from backend.tasks.system_tasks import _prune_old_tasks_task
+from backend.task_manager import task_manager
+from backend.ws_manager import manager, listen_for_broadcasts
+from backend.zoo_cache import load_cache
 
+
+# --------------------------------------------------------------------------- #
+# Process-wide state
+# --------------------------------------------------------------------------- #
 broadcast_listener_task = None
-rss_scheduler = None
-startup_lock = Lock() 
+rss_scheduler: Optional[BackgroundScheduler] = None
+startup_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="lollms_startup")
 
+_startup_done = False
+_task_manager_ready = False
+_scheduler_lock: Optional[FileLock] = None
+
+# Cross-process coordination files, namespaced per database so instances don't collide.
+_INSTANCE_TAG = hashlib.sha1(str(APP_DB_URL).encode()).hexdigest()[:10]
+_LOCK_DIR = Path(tempfile.gettempdir())
+_STARTUP_LOCK_PATH = _LOCK_DIR / f"lollms_{_INSTANCE_TAG}_startup.lock"
+_STARTUP_MARKER_PATH = _LOCK_DIR / f"lollms_{_INSTANCE_TAG}_startup.done"
+_SCHEDULER_LOCK_PATH = _LOCK_DIR / f"lollms_{_INSTANCE_TAG}_scheduler.lock"
+
+
+@contextmanager
+def db_scope():
+    """Session that is always closed, and never unbound in a finally block."""
+    db = db_session_module.SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def _boot_id() -> str:
+    """Identifies one server launch. Set by __main__; falls back to the parent pid for `uvicorn main:app`."""
+    return os.getenv("LOLLMS_BOOT_ID") or f"ppid-{os.getppid()}"
+
+
+# --------------------------------------------------------------------------- #
+# Scheduled jobs
+# --------------------------------------------------------------------------- #
 def scheduled_rss_job():
-    active_tasks = task_manager.get_all_tasks()
-    if any(t.name == "Scheduled RSS Feed Scraping" and t.status in ['running', 'pending'] for t in active_tasks):
+    active = task_manager.get_all_tasks()
+    if any(t.name == "Scheduled RSS Feed Scraping" and t.status in ['running', 'pending'] for t in active):
         return
-        
     task_manager.submit_task(
         name="Scheduled RSS Feed Scraping",
         target=_scrape_rss_feeds_task,
         description="Periodically fetching and processing all active RSS feeds.",
         owner_username=None
     )
+
 
 def scheduled_news_cleanup_job():
     task_manager.submit_task(
@@ -140,68 +179,63 @@ def scheduled_news_cleanup_job():
         owner_username=None
     )
 
+
 def scheduled_task_pruning_job():
-    db = db_session_module.SessionLocal()
-    try:
+    with db_scope() as db:
         settings.load_from_db(db)
-        if not settings.get("tasks_auto_cleanup", True):
-            return
-            
-        task_manager.submit_task(
-            name="Scheduled Task Pruning",
-            target=_prune_old_tasks_task,
-            description="Automatic background cleanup of old finished tasks.",
-            owner_username=None
-        )
-    finally:
-        db.close()
+    if not settings.get("tasks_auto_cleanup", True):
+        return
+    task_manager.submit_task(
+        name="Scheduled Task Pruning",
+        target=_prune_old_tasks_task,
+        description="Automatic background cleanup of old finished tasks.",
+        owner_username=None
+    )
+
 
 def check_and_run_scheduled_posts():
-    db = db_session_module.SessionLocal()
     try:
-        settings.load_from_db(db)
-        
+        with db_scope() as db:
+            settings.load_from_db(db)
+
         if not settings.get("ai_bot_auto_post", False):
             return
-
         schedule = settings.get("ai_bot_post_schedule", [])
         if not schedule:
             return
 
-        last_posted_str = settings.get("ai_bot_last_posted_at")
         last_posted = None
+        last_posted_str = settings.get("ai_bot_last_posted_at")
         if last_posted_str:
             try:
                 last_posted = datetime.datetime.fromisoformat(last_posted_str)
-            except ValueError: pass
+            except ValueError:
+                pass
 
         now = datetime.datetime.now()
         current_time_str = now.strftime("%H:%M")
-        
+
         should_post = False
         for time_slot in schedule:
-            if current_time_str == time_slot:
-                if last_posted:
-                    time_diff = now - last_posted
-                    if time_diff.total_seconds() < 3540: 
-                        continue
-                
-                should_post = True
-                break
-        
+            if current_time_str != time_slot:
+                continue
+            if last_posted and (now - last_posted).total_seconds() < 3540:
+                continue
+            should_post = True
+            break
+
         if should_post:
             task_manager.submit_task(
                 name="AI Bot Scheduled Post",
                 target=_generate_feed_post_task,
-                args=(True,), 
+                args=(True,),
                 description=f"Scheduled post for {current_time_str}",
                 owner_username=None
             )
-
     except Exception as e:
-        print(f"Error in scheduler check: {e}")
-    finally:
-        db.close()
+        ASCIIColors.error(f"Error in scheduler check: {e}")
+        trace_exception(e)
+
 
 def scheduled_email_proposal_job():
     task_manager.submit_task(
@@ -211,395 +245,304 @@ def scheduled_email_proposal_job():
         owner_username=None
     )
 
-startup_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="lollms_startup")
 
-_startup_tasks_completed = False
+def _become_scheduler_leader() -> bool:
+    """Exactly one process across all workers gets the scheduler. The OS drops the lock if it dies."""
+    global _scheduler_lock
+    if _scheduler_lock is not None:
+        return True
+    lock = FileLock(str(_SCHEDULER_LOCK_PATH))
+    try:
+        lock.acquire(timeout=0)
+    except Timeout:
+        return False
+    _scheduler_lock = lock
+    return True
 
-def run_one_time_startup_tasks(lock: Lock):
-    global _startup_tasks_completed
-    if _startup_tasks_completed:
+
+# --------------------------------------------------------------------------- #
+# One-time startup (runs once per server launch, across all processes)
+# --------------------------------------------------------------------------- #
+def _migrate_legacy_discussions():
+    if not APP_SETTINGS.get("migrate"):
         return
-
-    acquired = lock.acquire(blocking=False)
-    if not acquired:
-        return
-
-    ASCIIColors.panel(f"ℹ️ Worker [bold]{os.getpid()}[/bold] acquired startup lock. Running one-time tasks... 🚀")
-
-    steps = [
-        ("Database tables check/creation", False),
-        ("Schema migration & bootstrap", False),
-        ("Legacy discussion migration", False),
-        ("Default admin & DB entries", False),
-        ("App Zoo repository setup", False),
-        ("MCP Zoo repository setup", False),
-        ("Prompt Zoo repository setup", False),
-        ("Personality Zoo repository setup", False),
-        ("Skill Zoo repository setup", False),
-        ("Filesystem‑DB synchronization", False),
-        ("Stale WebSocket & task cleanup", False),
-        ("Autostart & cleanup", False)
-    ]
-
-    def render_steps_panel():
-        lines = []
-        for description, done in steps:
-            checkbox = "[green]✔[/green]" if done else "[red]✘[/red]"
-            lines.append(f"{checkbox} {description}")
-        markdown = "\n".join(lines)
-        return ASCIIColors.panel(markdown, title="🛠️ Startup Progress", border_style="cyan")
-
-    try:
-        engine = db_session_module.engine
-        Base.metadata.create_all(bind=engine)
-        steps[0] = (steps[0][0], True)
-        render_steps_panel()
-    except Exception as e:
-        ASCIIColors.error(f"Database table creation failed: {e}")
-        trace_exception(e)
-        lock.release()
-        raise
-
-    try:
-        with engine.connect() as connection:
-            inspector = inspect(connection)
-            run_schema_migrations_and_bootstrap(connection, inspector)
-            ASCIIColors.green("INFO: Schema migration completed.")
-        check_and_update_db_version(db_session_module.SessionLocal)
-        steps[1] = (steps[1][0], True)
-        render_steps_panel()
-    except Exception as e:
-        ASCIIColors.error(f"Schema migration failed: {e}")
-        trace_exception(e)
-        lock.release()
-        raise
-
-    try:
-        if APP_SETTINGS.get("migrate"):
-            db_session = None
-            try:
-                db_session = next(get_db())
-                all_users = db_session.query(DBUser).all()
-                for user in all_users:
-                    username = user.username
-                    old_discussion_path = get_user_discussion_path(username)
-                    if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
+    with db_scope() as db:
+        for user in db.query(DBUser).all():
+            username = user.username
+            old_path = get_user_discussion_path(username)
+            if not (old_path.exists() and old_path.is_dir()):
+                continue
+            if username not in user_sessions:
+                user_sessions[username] = {
+                    "lollms_model_name": user.lollms_model_name,
+                    "llm_params": {}
+                }
+            db_path = get_user_data_root(username) / "discussions.db"
+            dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
+            migrated = 0
+            failed = 0
+            for file_path in old_path.glob("*.yaml"):
+                ddb = None
+                try:
+                    old_disc = LegacyDiscussion.load_from_yaml(file_path)
+                    if not old_disc:
                         continue
-                    if username not in user_sessions:
-                        user_sessions[username] = {
-                            "lollms_model_name": user.lollms_model_name,
-                            "llm_params": {}
-                        }
-                    db_path = get_user_data_root(username) / "discussions.db"
-                    dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
-                    migrated_count = 0
-                    for file_path in old_discussion_path.glob("*.yaml"):
-                        discussion_db_session = None
-                        try:
-                            old_disc = LegacyDiscussion.load_from_yaml(file_path)
-                            if not old_disc:
-                                continue
-                            discussion_db_session = dm.get_session()
-                            if discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
-                                discussion_db_session.close()
-                                continue
-                            new_db_disc_orm = dm.DiscussionModel(
-                                id=old_disc.discussion_id,
-                                discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids},
-                                active_branch_id=old_disc.active_branch_id
-                            )
-                            discussion_db_session.add(new_db_disc_orm)
-                            for msg in old_disc.messages:
-                                msg_orm = dm.MessageModel(
-                                    id=msg.id,
-                                    discussion_id=new_db_disc_orm.id,
-                                    parent_id=msg.parent_id,
-                                    sender=msg.sender,
-                                    sender_type=msg.sender_type,
-                                    content=msg.content,
-                                    created_at=msg.created_at,
-                                    binding_name=msg.binding_name,
-                                    model_name=msg.model_name,
-                                    tokens=msg.token_count,
-                                    message_metadata={"sources": msg.sources, "steps": msg.steps}
-                                )
-                                discussion_db_session.add(msg_orm)
-                            discussion_db_session.commit()
-                            migrated_count += 1
-                        except Exception as e:
-                            if discussion_db_session:
-                                discussion_db_session.rollback()
-                        finally:
-                            if discussion_db_session:
-                                discussion_db_session.close()
-                    if migrated_count > 0:
-                        backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-                        shutil.move(str(old_discussion_path), str(backup_path))
-            finally:
-                if db_session:
-                    db_session.close()
-        steps[2] = (steps[2][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
+                    ddb = dm.get_session()
+                    if ddb.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
+                        continue
+                    new_disc = dm.DiscussionModel(
+                        id=old_disc.discussion_id,
+                        discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids},
+                        active_branch_id=old_disc.active_branch_id
+                    )
+                    ddb.add(new_disc)
+                    for msg in old_disc.messages:
+                        ddb.add(dm.MessageModel(
+                            id=msg.id,
+                            discussion_id=new_disc.id,
+                            parent_id=msg.parent_id,
+                            sender=msg.sender,
+                            sender_type=msg.sender_type,
+                            content=msg.content,
+                            created_at=msg.created_at,
+                            binding_name=msg.binding_name,
+                            model_name=msg.model_name,
+                            tokens=msg.token_count,
+                            message_metadata={"sources": msg.sources, "steps": msg.steps}
+                        ))
+                    ddb.commit()
+                    migrated += 1
+                except Exception as e:
+                    failed += 1
+                    if ddb:
+                        ddb.rollback()
+                    ASCIIColors.warning(f"Legacy discussion migration failed for {file_path.name} ({username}): {e}")
+                finally:
+                    if ddb:
+                        ddb.close()
+            # Only archive the old folder if nothing failed, otherwise data would be hidden from a retry.
+            if migrated > 0 and failed == 0:
+                stamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                backup = old_path.parent / f"{old_path.name}_migrated_{stamp}"
+                shutil.move(str(old_path), str(backup))
 
-    try:
-        db_for_defaults = next(get_db())
-        admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
-        admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
-        admin_exists = db_for_defaults.query(DBUser).filter(DBUser.is_admin == True).first() is not None
-        if not admin_exists:
-            existing_user = db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first()
-            if existing_user:
-                existing_user.is_admin = True
-                existing_user.is_active = True
-                existing_user.status = "active"
-                db_for_defaults.commit()
-            else:
-                new_admin = DBUser(
-                    username=admin_username, 
-                    hashed_password=hash_password(admin_password), 
-                    is_admin=True,
-                    is_active=True,
-                    status="active"
-                )
-                db_for_defaults.add(new_admin)
-                db_for_defaults.commit()
-        steps[3] = (steps[3][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_defaults:
-            db_for_defaults.close()
 
-    try:
-        db_for_repos = next(get_db())
-        app_zoo_name = "Official LoLLMs Apps Zoo"
-        app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
-        app_zoo_repo_path = APPS_ZOO_ROOT_PATH / app_zoo_name
+def _ensure_default_admin():
+    admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
+    admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
+    with db_scope() as db:
+        if db.query(DBUser).filter(DBUser.is_admin.is_(True)).first():
+            return
+        existing = db.query(DBUser).filter(DBUser.username == admin_username).first()
+        if existing:
+            existing.is_admin = True
+            existing.is_active = True
+            existing.status = "active"
+        else:
+            db.add(DBUser(
+                username=admin_username,
+                hashed_password=hash_password(admin_password),
+                is_admin=True,
+                is_active=True,
+                status="active"
+            ))
+        db.commit()
 
-        if not db_for_repos.query(DBAppZooRepository).filter(
-            or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)
-        ).first():
-            default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
-            db_for_repos.add(default_repo)
-            db_for_repos.commit()
-        if not app_zoo_repo_path.exists():
-            subprocess.run(["git", "clone", app_zoo_url, str(app_zoo_repo_path)], check=True)
-        steps[4] = (steps[4][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_repos:
-            db_for_repos.close()
 
-    try:
-        db_for_mcps = next(get_db())
-        mcp_zoo_name = "lollms_mcps_zoo"
-        mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
-        mcp_zoo_repo_path = MCPS_ZOO_ROOT_PATH / mcp_zoo_name
+def _ensure_zoo(repo_model, name: str, url: str, root_path: Path):
+    """Register a zoo repository in the DB and clone it if missing."""
+    with db_scope() as db:
+        exists = db.query(repo_model).filter(
+            or_(repo_model.name == name, repo_model.url == url)
+        ).first()
+        if not exists:
+            db.add(repo_model(name=name, url=url, is_deletable=False))
+            db.commit()
+    repo_path = Path(root_path) / name
+    if not repo_path.exists():
+        try:
+            subprocess.run(["git", "clone", url, str(repo_path)], check=True, timeout=600)
+        except Exception:
+            # Don't leave a half-cloned directory that would pass the exists() check next time.
+            shutil.rmtree(repo_path, ignore_errors=True)
+            raise
 
-        if not db_for_mcps.query(DBMCPZooRepository).filter(
-            or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)
-        ).first():
-            default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
-            db_for_mcps.add(default_mcp_repo)
-            db_for_mcps.commit()
-        if not mcp_zoo_repo_path.exists():
-            subprocess.run(["git", "clone", mcp_zoo_url, str(mcp_zoo_repo_path)], check=True)
-        steps[5] = (steps[5][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_mcps:
-            db_for_mcps.close()
 
-    try:
-        db_for_prompts = next(get_db())
-        prompt_zoo_name = "lollms_prompts_zoo"
-        prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
-        prompt_zoo_repo_path = PROMPTS_ZOO_ROOT_PATH / prompt_zoo_name
-
-        if not db_for_prompts.query(DBPromptZooRepository).filter(
-            or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)
-        ).first():
-            default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
-            db_for_prompts.add(default_prompt_repo)
-            db_for_prompts.commit()
-        if not prompt_zoo_repo_path.exists():
-            subprocess.run(["git", "clone", prompt_zoo_url, str(prompt_zoo_repo_path)], check=True)
-        steps[6] = (steps[6][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_prompts:
-            db_for_prompts.close()
-
-    try:
-        db_for_personalities = next(get_db())
-        personality_zoo_name = "lollms_personalities_zoo"
-        personality_zoo_url = "https://github.com/ParisNeo/lollms_personalities_zoo.git"
-        personality_zoo_repo_path = PERSONALITIES_ZOO_ROOT_PATH / personality_zoo_name
-
-        if not db_for_personalities.query(DBPersonalityZooRepository).filter(
-            or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)
-        ).first():
-            default_personality_repo = DBPersonalityZooRepository(name=personality_zoo_name, url=personality_zoo_url, is_deletable=False)
-            db_for_personalities.add(default_personality_repo)
-            db_for_personalities.commit()
-        if not personality_zoo_repo_path.exists():
-            subprocess.run(["git", "clone", personality_zoo_url, str(personality_zoo_repo_path)], check=True)
-        steps[7] = (steps[7][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_personalities:
-            db_for_personalities.close()
-
-    try:
-        db_for_skills = next(get_db())
-        skill_zoo_name = "lollms_skills_zoo"
-        skill_zoo_url = "https://github.com/ParisNeo/lollms_skills_zoo.git"
-        skill_zoo_repo_path = SKILLS_ZOO_ROOT_PATH / skill_zoo_name
-
-        if not db_for_skills.query(DBSkillZooRepository).filter(
-            or_(DBSkillZooRepository.name == skill_zoo_name, DBSkillZooRepository.url == skill_zoo_url)
-        ).first():
-            default_skill_repo = DBSkillZooRepository(name=skill_zoo_name, url=skill_zoo_url, is_deletable=False)
-            db_for_skills.add(default_skill_repo)
-            db_for_skills.commit()
-        if not skill_zoo_repo_path.exists():
-            subprocess.run(["git", "clone", skill_zoo_url, str(skill_zoo_repo_path)], check=True)
-        steps[8] = (steps[8][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_skills:
-            db_for_skills.close()
-
-    try:
-        db_for_sync = next(get_db())
-        synchronize_filesystem_and_db(db_for_sync)
-        steps[8] = (steps[8][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_sync:
-            db_for_sync.close()
-
-    try:
-        db_for_cleanup = next(get_db())
-        db_for_cleanup.query(WebSocketConnection).delete()
-        interrupted_tasks = db_for_cleanup.query(DBTask).filter(
+def _cleanup_stale_state():
+    with db_scope() as db:
+        db.query(WebSocketConnection).delete()
+        interrupted = db.query(DBTask).filter(
             DBTask.status.in_([TaskStatus.RUNNING, TaskStatus.PENDING])
         ).all()
-        if interrupted_tasks:
-            for task in interrupted_tasks:
-                task.status = TaskStatus.FAILED
-                task.error = "Task interrupted by server restart."
-                task.completed_at = datetime.datetime.now(datetime.timezone.utc)
-                task.logs = [{"timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(), "message": "System Restart Recovery", "level": "ERROR"}]
-            db_for_cleanup.commit()
-        steps[9] = (steps[9][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
-    finally:
-        if db_for_cleanup:
-            db_for_cleanup.close()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for task in interrupted:
+            task.status = TaskStatus.FAILED
+            task.error = "Task interrupted by server restart."
+            task.completed_at = now
+            task.logs = list(task.logs or []) + [{
+                "timestamp": now.isoformat(),
+                "message": "System Restart Recovery",
+                "level": "ERROR"
+            }]
+        db.commit()
 
-    try:
-        load_cache()
+
+def _schema_migration():
+    engine = db_session_module.engine
+    with engine.connect() as connection:
+        inspector = sa_inspect(connection)
+        run_schema_migrations_and_bootstrap(connection, inspector)
+    ASCIIColors.green("INFO: Schema migration completed.")
+    check_and_update_db_version(db_session_module.SessionLocal)
+
+
+def _ensure_task_manager():
+    """task_manager lives in process memory, so init it once per process."""
+    global _task_manager_ready
+    if not _task_manager_ready:
         task_manager.init_app(db_session_module.SessionLocal)
-        cleanup_and_autostart_apps()
-        steps[10] = (steps[10][0], True)
-        render_steps_panel()
-    except Exception as e:
-        trace_exception(e)
+        _task_manager_ready = True
 
-    try:
-        db_warmup = next(get_db())
-        active_llm_bindings = db_warmup.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-        if active_llm_bindings:
-            for binding in active_llm_bindings:
-                startup_executor.submit(
-                    build_lollms_client_from_params,
-                    "lollms",
-                    binding_alias=binding.alias,
-                    load_llm=True,
-                    callback=lollms_init_watcher
-                )
-        db_warmup.close()
-        steps.append(("Pre-warm Active Bindings", True))
-    except Exception as e:
-        trace_exception(e)
 
-    _startup_tasks_completed = True
-    lock.release()
+def _autostart():
+    _ensure_task_manager()
+    cleanup_and_autostart_apps()
 
+
+def _do_startup_tasks():
+    ASCIIColors.panel(f"ℹ️ Process [bold]{os.getpid()}[/bold] running one-time startup tasks... 🚀")
+
+    # (label, function, fatal)
+    plan = [
+        ("Database tables check/creation", lambda: Base.metadata.create_all(bind=db_session_module.engine), True),
+        ("Schema migration & bootstrap", _schema_migration, True),
+        ("Legacy discussion migration", _migrate_legacy_discussions, False),
+        ("Default admin & DB entries", _ensure_default_admin, False),
+        ("App Zoo repository setup",
+         lambda: _ensure_zoo(DBAppZooRepository, "Official LoLLMs Apps Zoo",
+                             "https://github.com/ParisNeo/lollms_apps_zoo.git", APPS_ZOO_ROOT_PATH), False),
+        ("MCP Zoo repository setup",
+         lambda: _ensure_zoo(DBMCPZooRepository, "lollms_mcps_zoo",
+                             "https://github.com/ParisNeo/lollms_mcps_zoo.git", MCPS_ZOO_ROOT_PATH), False),
+        ("Prompt Zoo repository setup",
+         lambda: _ensure_zoo(DBPromptZooRepository, "lollms_prompts_zoo",
+                             "https://github.com/ParisNeo/lollms_prompts_zoo.git", PROMPTS_ZOO_ROOT_PATH), False),
+        ("Personality Zoo repository setup",
+         lambda: _ensure_zoo(DBPersonalityZooRepository, "lollms_personalities_zoo",
+                             "https://github.com/ParisNeo/lollms_personalities_zoo.git", PERSONALITIES_ZOO_ROOT_PATH), False),
+        ("Skill Zoo repository setup",
+         lambda: _ensure_zoo(DBSkillZooRepository, "lollms_skills_zoo",
+                             "https://github.com/ParisNeo/lollms_skills_zoo.git", SKILLS_ZOO_ROOT_PATH), False),
+        ("Filesystem-DB synchronization", lambda: _sync_fs_db(), False),
+        ("Stale WebSocket & task cleanup", _cleanup_stale_state, False),
+        ("Autostart & cleanup", _autostart, False),
+    ]
+
+    results = []
+    for label, fn, fatal in plan:
+        try:
+            fn()
+            results.append((label, True))
+        except Exception as e:
+            ASCIIColors.error(f"Startup step failed: {label}: {e}")
+            trace_exception(e)
+            results.append((label, False))
+            if fatal:
+                raise
+
+    lines = [f"{'[green]✔[/green]' if ok else '[red]✘[/red]'} {label}" for label, ok in results]
+    ASCIIColors.panel("\n".join(lines), title="🛠️ Startup Progress", border_style="cyan")
+
+
+def _sync_fs_db():
+    with db_scope() as db:
+        synchronize_filesystem_and_db(db)
+
+
+def run_one_time_startup_tasks():
+    """
+    Runs the heavy startup exactly once per server launch, no matter how many processes
+    import this module. A file lock serialises processes; a marker keyed on the launch id
+    tells latecomers it is already done.
+    """
+    global _startup_done
+    if _startup_done:
+        return
+    boot_id = _boot_id()
+    with FileLock(str(_STARTUP_LOCK_PATH), timeout=900):
+        try:
+            already = _STARTUP_MARKER_PATH.read_text().strip() == boot_id
+        except OSError:
+            already = False
+        if not already:
+            _do_startup_tasks()
+            _STARTUP_MARKER_PATH.write_text(boot_id)
+    _startup_done = True
+
+
+# --------------------------------------------------------------------------- #
+# Lifespan
+# --------------------------------------------------------------------------- #
 async def startup_event():
-    global broadcast_listener_task, rss_scheduler, startup_lock
+    global broadcast_listener_task, rss_scheduler
 
     init_database(APP_DB_URL)
-    run_one_time_startup_tasks(startup_lock)
+    await asyncio.to_thread(run_one_time_startup_tasks)
 
-    db = db_session_module.SessionLocal()
-    try:
+    # Per-process state: these live in each worker's memory.
+    await asyncio.to_thread(load_cache)
+
+    with db_scope() as db:
         settings.load_from_db(db)
-
-        active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-        if active_bindings:
-            loop = asyncio.get_running_loop()
-            for b in active_bindings:
-                loop.run_in_executor(
-                    startup_executor,
-                    get_user_lollms_client,
-                    "lollms",
-                    b.alias
-                )
-    finally:
-        db.close()
+        binding_aliases = [
+            b.alias for b in db.query(DBLLMBinding).filter(DBLLMBinding.is_active.is_(True)).all()
+        ]
 
     manager.set_loop(asyncio.get_running_loop())
-    task_manager.init_app(db_session_module.SessionLocal)
+    _ensure_task_manager()
 
     if SERVER_CONFIG.get("workers", 1) > 1:
         broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
 
-    if os.getpid() == os.getppid() or os.getenv("WORKER_ID") == "1":
+    # Pre-warm once, here, per worker. With several workers each one loads its own copy.
+    if settings.get("prewarm_bindings", True):
+        for alias in binding_aliases:
+            startup_executor.submit(
+                build_lollms_client_from_params,
+                "lollms",
+                binding_alias=alias,
+                load_llm=True,
+                callback=lollms_init_watcher
+            )
+
+    if _become_scheduler_leader():
         rss_scheduler = BackgroundScheduler(daemon=True)
+        job_opts = {"max_instances": 1, "coalesce": True}
 
         if settings.get("rss_feed_enabled"):
             interval = settings.get("rss_feed_check_interval_minutes", 60)
-            next_run = datetime.datetime.now() + datetime.timedelta(seconds=20)
-            rss_scheduler.add_job(scheduled_rss_job, 'interval', minutes=interval, next_run_time=next_run)
+            rss_scheduler.add_job(
+                scheduled_rss_job, 'interval', minutes=interval,
+                next_run_time=datetime.datetime.now() + datetime.timedelta(seconds=20), **job_opts
+            )
+            if settings.get("rss_news_retention_days", 1) > 0:
+                rss_scheduler.add_job(scheduled_news_cleanup_job, 'cron', hour=3, minute=0, **job_opts)
 
-            retention_days = settings.get("rss_news_retention_days", 1)
-            if retention_days > 0:
-                rss_scheduler.add_job(scheduled_news_cleanup_job, 'cron', hour=3, minute=0)
-
-        rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1)
-        rss_scheduler.add_job(scheduled_task_pruning_job, 'cron', hour=4, minute=0)
+        rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1, **job_opts)
+        rss_scheduler.add_job(scheduled_task_pruning_job, 'cron', hour=4, minute=0, **job_opts)
 
         if settings.get("email_marketing_enabled", False):
             rss_scheduler.add_job(
-                scheduled_email_proposal_job, 
-                'interval', 
-                hours=24, 
-                next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=5)
+                scheduled_email_proposal_job, 'interval', hours=24,
+                next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=5), **job_opts
             )
 
-        if not rss_scheduler.running:
-            rss_scheduler.start()
+        rss_scheduler.start()
+        ASCIIColors.info(f"Scheduler started in process {os.getpid()}.")
+
 
 async def shutdown_event():
+    global _scheduler_lock
     ASCIIColors.info(f"--- Worker process (PID: {os.getpid()}) shutting down. ---")
     if broadcast_listener_task:
         broadcast_listener_task.cancel()
@@ -608,107 +551,135 @@ async def shutdown_event():
         except asyncio.CancelledError:
             pass
     if rss_scheduler and rss_scheduler.running:
-        rss_scheduler.shutdown()
+        rss_scheduler.shutdown(wait=False)
+    if _scheduler_lock is not None:
+        _scheduler_lock.release()
+        _scheduler_lock = None
+    startup_executor.shutdown(wait=False, cancel_futures=True)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_event()
+
 
 app = FastAPI(
-    title="LoLLMs Platform", 
-    description="API for a multi-user LoLLMs and SafeStore chat application.", 
+    title="LoLLMs Platform",
+    description="API for a multi-user LoLLMs and SafeStore chat application.",
     version=APP_VERSION,
-    on_startup=[startup_event],
-    on_shutdown=[shutdown_event]
+    lifespan=lifespan
 )
 
-from fastapi.responses import JSONResponse
-from fastapi import Request
 
-# Robust, Top-Level CORS Middleware Setup (Universal for all workers and preflight OPTIONS requests)
+# --------------------------------------------------------------------------- #
+# CORS
+# --------------------------------------------------------------------------- #
+_DEFAULT_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:9642",
+    "http://127.0.0.1:9642",
+]
+
+
+def _allowed_origins() -> list:
+    """Explicit allow-list. Extend via SERVER_CONFIG['allowed_origins'] or LOLLMS_CORS_ORIGINS (comma-separated)."""
+    origins = list(_DEFAULT_ORIGINS)
+    origins += list(SERVER_CONFIG.get("allowed_origins", []) or [])
+    env = os.getenv("LOLLMS_CORS_ORIGINS", "")
+    origins += [o.strip() for o in env.split(",") if o.strip()]
+    return list(dict.fromkeys(origins))
+
+
+ALLOWED_ORIGINS = _allowed_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:9642",
-        "http://127.0.0.1:9642"
-    ],
-    allow_origin_regex=r"^https?://.*",
+    allow_origins=ALLOWED_ORIGINS,
+    # Any port on loopback only. Never `.*` together with credentials.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"]
 )
 
+
 @app.exception_handler(Exception)
 async def global_unhandled_exception_handler(request: Request, exc: Exception):
-    """
-    Guarantees that unhandled 500 exceptions are returned with proper CORS headers,
-    preventing the browser from blocking error details under CORS policy.
-    """
+    """Unhandled 500s still carry CORS headers (for allowed origins only) so the browser shows the real status."""
+    error_id = uuid.uuid4().hex[:12]
+    ASCIIColors.error(f"Unhandled exception [{error_id}] on {request.method} {request.url.path}")
     trace_exception(exc)
-    origin = request.headers.get("origin") or "http://localhost:5173"
+
+    headers = {}
+    origin = request.headers.get("origin")
+    if origin and origin in ALLOWED_ORIGINS:
+        headers = {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Vary": "Origin",
+        }
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal Server Error: {str(exc)}"},
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true"
-        }
+        content={"detail": "Internal Server Error", "error_id": error_id},
+        headers=headers
     )
 
-app.include_router(auth_router)
-app.include_router(admin_router)
-app.include_router(languages_router)
-app.include_router(personalities_router)
-app.include_router(friends_router)
-app.include_router(groups_router)
-app.include_router(dm_router)
-app.include_router(store_files_router)
-app.include_router(datastore_router)
-app.include_router(apps_router)
-app.include_router(mcp_router)
-app.include_router(discussion_tools_router)
-app.include_router(social_router)
-app.include_router(users_router)
-app.include_router(dm_ws_router)
-app.include_router(api_keys_router)
-app.include_router(openai_v1_router)
-app.include_router(ollama_v1_router)
-app.include_router(lollms_config_router)
-app.include_router(files_router)
-app.include_router(ui_router)
-app.include_router(sso_router)
-app.include_router(sso_client_router)
-app.include_router(scim_router)
-app.include_router(apps_zoo_router)
-app.include_router(mcps_zoo_router)
-app.include_router(prompts_zoo_router)
-app.include_router(personalities_zoo_router)
-app.include_router(skills_zoo_router)
-app.include_router(tasks_router)
-app.include_router(help_router)
-app.include_router(prompts_router)
-app.include_router(memories_router)
-app.include_router(news_router)
-app.include_router(upload_router)
-app.include_router(assets_router)
-app.include_router(build_discussions_router())
+
+# --------------------------------------------------------------------------- #
+# Routers
+# --------------------------------------------------------------------------- #
+for _router in (
+    auth_router, admin_router, languages_router, personalities_router, friends_router,
+    groups_router, dm_router, store_files_router, datastore_router, apps_router, mcp_router,
+    discussion_tools_router, social_router, users_router, dm_ws_router, api_keys_router,
+    openai_v1_router, ollama_v1_router, lollms_config_router, files_router, ui_router,
+    sso_router, sso_client_router, scim_router, apps_zoo_router, mcps_zoo_router,
+    prompts_zoo_router, personalities_zoo_router, skills_zoo_router, tasks_router,
+    help_router, prompts_router, memories_router, news_router, upload_router, assets_router,
+    build_discussions_router(),
+):
+    app.include_router(_router)
+
 core_router = APIRouter()
 build_core_router(core_router)
 app.include_router(core_router, prefix="/api/discussions", tags=["Discussions"])
-app.include_router(discussion_groups_router)
-app.include_router(voices_studio_router)
-app.include_router(image_studio_router)
-app.include_router(music_studio_router)
-app.include_router(notes_router)
-app.include_router(notebooks_router) 
-app.include_router(public_router)
-app.include_router(lollms_v1_router) 
-app.include_router(flow_studio_router)
-app.include_router(skills_router)
 
+for _router in (
+    discussion_groups_router, voices_studio_router, image_studio_router, music_studio_router,
+    notes_router, notebooks_router, public_router, lollms_v1_router, flow_studio_router,
+    skills_router,
+):
+    app.include_router(_router)
+
+
+# --------------------------------------------------------------------------- #
+# Direct generation endpoint
+# --------------------------------------------------------------------------- #
 class GenerateTextRequest(BaseModel):
     prompt: str
-    max_new_tokens: Optional[int] = Field(default=1024, alias="max_new_tokens")
+    max_new_tokens: Optional[int] = Field(default=1024, ge=1)
     temperature: Optional[float] = 0.2
+
+
+def _token_limit_kwarg(fn) -> str:
+    """Pick the parameter name the installed lollms_client uses, by inspection instead of try/except TypeError
+    (which could re-run a full generation after a TypeError raised inside the model)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return "max_new_tokens"
+    if "max_new_tokens" in params:
+        return "max_new_tokens"
+    if "n_predict" in params:
+        return "n_predict"
+    return "max_new_tokens"
+
 
 @app.post("/api/lollms/generate")
 async def lollms_generate(
@@ -717,9 +688,9 @@ async def lollms_generate(
     db: Session = Depends(get_db)
 ):
     try:
-        user_model_full = current_user.lollms_model_name
         binding_alias = None
         model_name = None
+        user_model_full = current_user.lollms_model_name
         if user_model_full and '/' in user_model_full:
             binding_alias, model_name = user_model_full.split('/', 1)
 
@@ -730,59 +701,83 @@ async def lollms_generate(
             load_llm=True
         )
 
+        limit_kwarg = _token_limit_kwarg(lc.generate_text)
+
         def _run_gen():
-            try:
-                return lc.generate_text(
-                    prompt=request.prompt,
-                    max_new_tokens=request.max_new_tokens,
-                    temperature=request.temperature
-                )
-            except TypeError:
-                return lc.generate_text(
-                    prompt=request.prompt,
-                    n_predict=request.max_new_tokens,
-                    temperature=request.temperature
-                )
+            return lc.generate_text(
+                prompt=request.prompt,
+                temperature=request.temperature,
+                **{limit_kwarg: request.max_new_tokens}
+            )
 
         generated_text = await asyncio.to_thread(_run_gen)
 
         from backend.db.models.generation_metric import record_generation_metric
-        est_prompt_tokens = len(request.prompt) // 4
-        est_completion_tokens = len(generated_text) // 4
         record_generation_metric(
             db=db,
             user_id=current_user.id,
             username=current_user.username,
             model_name=model_name or "unknown",
             binding_name=binding_alias,
-            prompt_tokens=est_prompt_tokens,
-            completion_tokens=est_completion_tokens,
+            prompt_tokens=len(request.prompt) // 4,
+            completion_tokens=len(generated_text) // 4,
             source="api"
         )
         return {"generated_text": generated_text}
+    except HTTPException:
+        raise
     except Exception as e:
         trace_exception(e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Generation failed. See server logs.")
+
 
 add_ui_routes(app)
 
-# Silence benign WinError 10054 connection reset tracebacks from Windows Proactor EventLoop
+
+# --------------------------------------------------------------------------- #
+# Windows: silence benign WinError 10054 tracebacks from the Proactor event loop
+# --------------------------------------------------------------------------- #
 if os.name == 'nt':
-    from asyncio.proactor_events import _ProactorBasePipeTransport
-    _orig_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        _orig_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
 
-    def _silenced_call_connection_lost(self, exc):
-        try:
-            _orig_call_connection_lost(self, exc)
-        except ConnectionResetError:
-            pass
-        except OSError as e:
-            if getattr(e, 'winerror', None) == 10054:
+        def _silenced_call_connection_lost(self, exc):
+            try:
+                _orig_call_connection_lost(self, exc)
+            except ConnectionResetError:
                 pass
-            else:
-                raise
+            except OSError as e:
+                if getattr(e, 'winerror', None) != 10054:
+                    raise
 
-    _ProactorBasePipeTransport._call_connection_lost = _silenced_call_connection_lost
+        _ProactorBasePipeTransport._call_connection_lost = _silenced_call_connection_lost
+    except ImportError:
+        pass
+
+
+# --------------------------------------------------------------------------- #
+# Entry point
+# --------------------------------------------------------------------------- #
+def _detect_first_run() -> bool:
+    """Must run BEFORE init_database(), which may create the SQLite file."""
+    url = str(APP_DB_URL)
+    if not url.startswith("sqlite:///"):
+        return False
+    return not Path(url.replace("sqlite:///", "", 1)).exists()
+
+
+def _run_setup_wizard():
+    wizard_script = Path(__file__).resolve().parent / "scripts" / "setup_wizard.py"
+    if not wizard_script.exists():
+        return
+    env = os.environ.copy()
+    project_root = str(Path(__file__).resolve().parent)
+    env["PYTHONPATH"] = f"{project_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    result = subprocess.run([sys.executable, str(wizard_script)], env=env)
+    if result.returncode != 0:
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     if os.name == 'nt':
@@ -791,59 +786,41 @@ if __name__ == "__main__":
         except RuntimeError as e:
             if "context has already been set" not in str(e):
                 raise
-            else:
-                pass
+
+    # One id per launch, inherited by uvicorn workers. Lets them skip work done here.
+    os.environ["LOLLMS_BOOT_ID"] = uuid.uuid4().hex
+
+    is_first_run = _detect_first_run()
+    if is_first_run:
+        _run_setup_wizard()
 
     init_database(APP_DB_URL)
+    run_one_time_startup_tasks()
 
-    db_path_str = APP_DB_URL.replace("sqlite:///", "")
-    db_path = Path(db_path_str)
-    is_first_run = not db_path.exists()
-    
-    if is_first_run:
-        wizard_script = Path(__file__).resolve().parent / "scripts" / "setup_wizard.py"
-        if wizard_script.exists():
-            python_executable = sys.executable
-            env = os.environ.copy()
-            project_root_path = str(Path(__file__).resolve().parent)
-            current_python_path = env.get("PYTHONPATH", "")
-            new_python_path = f"{project_root_path}{os.pathsep}{current_python_path}"
-            env["PYTHONPATH"] = new_python_path
-            
-            result = subprocess.run([python_executable, str(wizard_script)], env=env)
-            if result.returncode != 0:
-                sys.exit(1)
-
-    run_one_time_startup_tasks(startup_lock)
-    
-    db = db_session_module.SessionLocal()
-    try:
+    with db_scope() as db:
         settings.load_from_db(db)
-
-        from backend.com_hub import start_hub_server
-        hub_port_val = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
-        threading.Thread(
-            target=start_hub_server, 
-            kwargs={"host": "127.0.0.1", "port": int(hub_port_val)}, 
-            daemon=True
-        ).start()
-
         host_setting = settings.get("host", SERVER_CONFIG.get("host", "0.0.0.0"))
-        port_setting = settings.get("port", SERVER_CONFIG.get("port", 9642))
+        port_setting = int(settings.get("port", SERVER_CONFIG.get("port", 9642)))
+        hub_port = int(settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042)))
         https_enabled = settings.get("https_enabled", False)
-    finally:
-        db.close()
-   
-    data_dir = Path(settings.get("data_dir", "data"))
-    (data_dir / "mcps").mkdir(parents=True, exist_ok=True)
-    (data_dir / "apps").mkdir(parents=True, exist_ok=True)
-    
-    workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
-    
-    ssl_params = {}
-    if settings.get("https_enabled"):
         certfile = settings.get("ssl_certfile")
         keyfile = settings.get("ssl_keyfile")
+        data_dir = Path(settings.get("data_dir", "data"))
+
+    from backend.com_hub import start_hub_server
+    threading.Thread(
+        target=start_hub_server,
+        kwargs={"host": "127.0.0.1", "port": hub_port},
+        daemon=True
+    ).start()
+
+    (data_dir / "mcps").mkdir(parents=True, exist_ok=True)
+    (data_dir / "apps").mkdir(parents=True, exist_ok=True)
+
+    workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
+
+    ssl_params = {}
+    if https_enabled:
         try:
             if certfile and keyfile and Path(certfile).is_file() and Path(keyfile).is_file():
                 ssl_params["ssl_certfile"] = certfile
@@ -851,11 +828,10 @@ if __name__ == "__main__":
             else:
                 raise FileNotFoundError("Certificate or key file is missing.")
         except Exception as e:
-            print(f"WARNING: HTTPS config error: {e}. Server will start without HTTPS.")
+            ASCIIColors.warning(f"HTTPS config error: {e}. Server will start without HTTPS.")
 
-    content = ""
     protocol = "https" if ssl_params else "http"
-
+    content = ""
     if host_setting == "0.0.0.0":
         from backend.utils import get_accessible_host
         accessible_host = get_accessible_host()
@@ -864,8 +840,15 @@ if __name__ == "__main__":
         content += f"[magenta]Or access locally at:[/magenta] {protocol}://localhost:{port_setting}/\n"
     else:
         content += f"[magenta]Access UI at:[/magenta] {protocol}://{host_setting}:{port_setting}/\n"
-    
     content += f"[green]Using {workers} Workers[/green]"
     ASCIIColors.panel(content, f"LoLLMs Platform (v{APP_VERSION})")
 
-    uvicorn.run("main:app", host=host_setting, port=int(port_setting), reload=False, workers=workers, timeout_keep_alive=600, **ssl_params)
+    uvicorn.run(
+        f"{Path(__file__).stem}:app",
+        host=host_setting,
+        port=port_setting,
+        reload=False,
+        workers=workers,
+        timeout_keep_alive=600,
+        **ssl_params
+    )
