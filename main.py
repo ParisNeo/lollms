@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 from multiprocessing import set_start_method
@@ -20,6 +21,27 @@ if os.name == 'nt':
     for _stream in (sys.stdout, sys.stderr):
         if _stream and hasattr(_stream, 'reconfigure'):
             _stream.reconfigure(encoding='utf-8')
+
+# --- Headless (systemd) hardening: must run before anything else is imported ---
+os.environ.setdefault("PYTHONUNBUFFERED", "1")          # journal shows logs live, not in bursts
+os.environ.setdefault("GIT_TERMINAL_PROMPT", "0")       # git never waits for a password nobody can type
+for _k in ("NO_PROXY", "no_proxy"):                     # loopback traffic must never go through a proxy
+    _cur = os.environ.get(_k, "")
+    if "127.0.0.1" not in _cur:
+        os.environ[_k] = f"{_cur},localhost,127.0.0.1,::1".strip(",")
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+try:                                                     # Linux defaults to 1024 open files
+    import resource
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    _want = 65535 if _hard == resource.RLIM_INFINITY else min(_hard, 65535)
+    if _soft < _want:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (_want, _hard))
+except Exception:
+    pass
 
 import pipmaster as pm
 pm.ensure_packages(["ascii_colors>=0.11.13", "lollms_client>=1.12.4", "filelock"])
@@ -131,7 +153,12 @@ _scheduler_lock: Optional[FileLock] = None
 
 # Cross-process coordination files, namespaced per database so instances don't collide.
 _INSTANCE_TAG = hashlib.sha1(str(APP_DB_URL).encode()).hexdigest()[:10]
-_LOCK_DIR = Path(tempfile.gettempdir())
+_UID = os.getuid() if hasattr(os, "getuid") else 0
+_LOCK_DIR = Path(tempfile.gettempdir()) / f"lollms-{_UID}"
+try:
+    _LOCK_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    _LOCK_DIR = Path(tempfile.gettempdir())
 _STARTUP_LOCK_PATH = _LOCK_DIR / f"lollms_{_INSTANCE_TAG}_startup.lock"
 _STARTUP_MARKER_PATH = _LOCK_DIR / f"lollms_{_INSTANCE_TAG}_startup.done"
 _SCHEDULER_LOCK_PATH = _LOCK_DIR / f"lollms_{_INSTANCE_TAG}_scheduler.lock"
@@ -373,7 +400,11 @@ def _ensure_zoo(repo_model, name: str, url: str, root_path: Path):
     repo_path = Path(root_path) / name
     if not repo_path.exists():
         try:
-            subprocess.run(["git", "clone", url, str(repo_path)], check=True, timeout=600)
+            subprocess.run(
+                ["git", "clone", url, str(repo_path)],
+                check=True, timeout=300, stdin=subprocess.DEVNULL,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+            )
         except Exception:
             # Don't leave a half-cloned directory that would pass the exists() check next time.
             shutil.rmtree(repo_path, ignore_errors=True)
@@ -421,6 +452,28 @@ def _autostart():
     cleanup_and_autostart_apps()
 
 
+def _run_with_timeout(fn, timeout, label):
+    """Run a non-critical step in a daemon thread. If it stalls, stop waiting so the server still comes up."""
+    if not timeout:
+        return fn()
+    box = {}
+
+    def target():
+        try:
+            box["r"] = fn()
+        except BaseException as e:
+            box["e"] = e
+
+    t = threading.Thread(target=target, daemon=True, name=f"startup-{label}")
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        raise TimeoutError(f"'{label}' still running after {timeout}s; continuing without waiting for it")
+    if "e" in box:
+        raise box["e"]
+    return box.get("r")
+
+
 def _do_startup_tasks():
     ASCIIColors.panel(f"ℹ️ Process [bold]{os.getpid()}[/bold] running one-time startup tasks... 🚀")
 
@@ -450,10 +503,16 @@ def _do_startup_tasks():
         ("Autostart & cleanup", _autostart, False),
     ]
 
+    # Steps that call into other code and could stall get a deadline; the server must still come up.
+    step_timeouts = {"Filesystem-DB synchronization": 120, "Autostart & cleanup": 120}
+
     results = []
     for label, fn, fatal in plan:
+        t0 = time.monotonic()
+        ASCIIColors.info(f"[startup] {label}...")
         try:
-            fn()
+            _run_with_timeout(fn, step_timeouts.get(label), label)
+            ASCIIColors.info(f"[startup] {label} done in {time.monotonic() - t0:.1f}s")
             results.append((label, True))
         except Exception as e:
             ASCIIColors.error(f"Startup step failed: {label}: {e}")
@@ -481,7 +540,17 @@ def run_one_time_startup_tasks():
     if _startup_done:
         return
     boot_id = _boot_id()
-    with FileLock(str(_STARTUP_LOCK_PATH), timeout=900):
+    ASCIIColors.info(f"[{os.getpid()}] waiting for startup lock ({_STARTUP_LOCK_PATH})...")
+    lock = FileLock(str(_STARTUP_LOCK_PATH))
+    try:
+        lock.acquire(timeout=300)
+    except Timeout:
+        raise RuntimeError(
+            f"Startup lock {_STARTUP_LOCK_PATH} is held by another process. "
+            "Stop stale instances (systemctl stop lollms; pgrep -af main.py) and retry."
+        )
+    try:
+        ASCIIColors.info(f"[{os.getpid()}] startup lock acquired.")
         try:
             already = _STARTUP_MARKER_PATH.read_text().strip() == boot_id
         except OSError:
@@ -489,6 +558,8 @@ def run_one_time_startup_tasks():
         if not already:
             _do_startup_tasks()
             _STARTUP_MARKER_PATH.write_text(boot_id)
+    finally:
+        lock.release()
     _startup_done = True
 
 
@@ -502,7 +573,13 @@ async def startup_event():
     await asyncio.to_thread(run_one_time_startup_tasks)
 
     # Per-process state: these live in each worker's memory.
-    await asyncio.to_thread(load_cache)
+    try:
+        await asyncio.wait_for(asyncio.to_thread(load_cache), timeout=120)
+    except asyncio.TimeoutError:
+        ASCIIColors.warning("load_cache() still running after 120s; continuing without waiting for it.")
+    except Exception as e:
+        ASCIIColors.error(f"load_cache() failed: {e}")
+        trace_exception(e)
 
     with db_scope() as db:
         settings.load_from_db(db)
@@ -777,6 +854,12 @@ def _run_setup_wizard():
     wizard_script = Path(__file__).resolve().parent / "scripts" / "setup_wizard.py"
     if not wizard_script.exists():
         return
+    if not sys.stdin or not sys.stdin.isatty():
+        ASCIIColors.warning(
+            "First run detected but no terminal is attached (service mode): skipping the setup wizard. "
+            "Run `python scripts/setup_wizard.py` once by hand, or rely on INITIAL_ADMIN_USER_CONFIG."
+        )
+        return
     env = os.environ.copy()
     project_root = str(Path(__file__).resolve().parent)
     env["PYTHONPATH"] = f"{project_root}{os.pathsep}{env.get('PYTHONPATH', '')}"
@@ -795,6 +878,7 @@ if __name__ == "__main__":
 
     # One id per launch, inherited by uvicorn workers. Lets them skip work done here.
     os.environ["LOLLMS_BOOT_ID"] = uuid.uuid4().hex
+    ASCIIColors.info(f"Working dir: {os.getcwd()} | DB: {APP_DB_URL} | pid {os.getpid()}")
 
     is_first_run = _detect_first_run()
     if is_first_run:
@@ -814,11 +898,15 @@ if __name__ == "__main__":
         data_dir = Path(settings.get("data_dir", "data"))
 
     from backend.com_hub import start_hub_server
-    threading.Thread(
-        target=start_hub_server,
-        kwargs={"host": "127.0.0.1", "port": hub_port},
-        daemon=True
-    ).start()
+
+    def _run_hub():
+        try:
+            start_hub_server(host="127.0.0.1", port=hub_port)
+        except Exception as e:
+            ASCIIColors.error(f"Communication hub failed on port {hub_port}: {e}")
+            trace_exception(e)
+
+    threading.Thread(target=_run_hub, daemon=True, name="com_hub").start()
 
     (data_dir / "mcps").mkdir(parents=True, exist_ok=True)
     (data_dir / "apps").mkdir(parents=True, exist_ok=True)
@@ -849,6 +937,7 @@ if __name__ == "__main__":
     content += f"[green]Using {workers} Workers[/green]"
     ASCIIColors.panel(content, f"LoLLMs Platform (v{APP_VERSION})")
 
+    ASCIIColors.info("Startup complete. Starting HTTP server...")
     uvicorn.run(
         f"{Path(__file__).stem}:app",
         host=host_setting,
