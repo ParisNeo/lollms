@@ -29,7 +29,7 @@ python-dotenv==1.2.4
 
 # --- LoLLMs Ecosystem & Client Library ---
 lollms-client==1.20.23
-ascii_colors==0.12.3
+ascii_colors==0.13.0
 pipmaster==1.1.13
 openai==2.1.0
 tiktoken==0.11.0
@@ -41,7 +41,7 @@ numpy==2.2.6
 Pillow==13.0.0
 
 # --- SafeStore & Vector / Graph Engine ---
-safe_store==3.7.3
+safe_store==3.8.0
 wcwidth==0.2.14
 
 # --- Document Parsing, Ingestion & Office Formats ---
@@ -73,7 +73,7 @@ feedparser==6.0.10
 aioredis==2.0.1
 
 # --- Web Intelligence, Scraping & Knowledge Tools ---
-ScrapeMaster==0.8.6
+ScrapeMaster==0.9.0
 duckduckgo-search==8.1.1
 arxiv==2.3.1
 google-api-python-client==2.184.0

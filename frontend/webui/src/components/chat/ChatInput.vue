@@ -898,13 +898,14 @@ const capabilityFlags = [
     { key: 'skills_library_enabled',     label: 'Skill Auto-Search',    emoji: '🔎', description: 'Inject the most relevant saved skill automatically per turn.' },
     { key: 'image_generation_enabled',   label: 'Image Generation',     emoji: '🎨', description: '<generate_image> tag renders via the active TTI binding.' },
     { key: 'image_editing_enabled',      label: 'Image Editing',        emoji: '🖌️', description: 'Modify previously generated images via <edit_image>.' },
-    { key: 'office_tools_enabled',       label: 'Office tools',         emoji: '📊', description: 'Enables interaction (Creation, Edition, scouting) if office files like pptx, xlsx, docx ...' },
+    { key: 'powerpoint_enabled',         label: 'PowerPoint',           emoji: '📊', description: 'Generate .pptx presentation slides when needed.' },
+    { key: 'word_enabled',               label: 'Word',                 emoji: '📄', description: 'Generate .docx Word documents when needed.' },
+    { key: 'excel_enabled',              label: 'Excel',                emoji: '📈', description: 'Generate .xlsx Excel spreadsheets when needed.' },
     { key: 'memory_enabled',             label: 'Long-Term Memory',     emoji: '🐘', description: 'Deep recall and new memory recording on every turn.' },
     { key: 'auto_memory_enabled',        label: 'Auto-Dream Cycle',     emoji: '💤', description: 'Auto-consolidate, reinforce & decay memories in background.' },
     { key: 'scheduler_enabled',          label: 'Task Scheduler',       emoji: '⏰', description: 'Schedule recurring prompts using cron syntax.' },
     { key: 'street_view_enabled',        label: 'Street View',          emoji: '🗺️', description: 'Fetch Google Street View images for a location.' },
     { key: 'herd_mode_enabled',          label: 'Herd Mode',            emoji: '🐺', description: 'Multiple AI agents debate & critique before answering (multi-agent).' },
-    { key: 'code_interpreter',           label: 'Code Interpreter',     emoji: '🧠', description: 'Allows the LLM to programmatically parse and execute code internally.' },
 ];
 
 function isCapabilityOn(cap) {
@@ -1168,16 +1169,40 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Image Edit: Use <edit_image source_index="-1" strength="0.8">prompt</edit_image>.'
         });
     }
-    if (user.value?.office_tools_enabled) {
+    if (user.value?.powerpoint_enabled) {
         features.push({ 
-            id: 'office_tools', 
+            id: 'powerpoint', 
             icon: IconPresentationChartBar, 
-            label: 'Office tools', 
+            label: 'PowerPoint', 
             colorClass: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800', 
-            title: 'Office tools Enabled.',
-            modalTitle: 'Office tools',
-            modalDescription: 'The AI generates PowerPoint slides and other office documents (pptx, xlsx, docx) automatically through the chat pipeline when needed.',
-            systemPrompt: '## Office Tools: PowerPoint slides, Excel sheets and Word documents are generated automatically when needed.' 
+            title: 'PowerPoint Enabled.',
+            modalTitle: 'PowerPoint',
+            modalDescription: 'The AI generates .pptx presentation slides automatically through the chat pipeline when needed.',
+            systemPrompt: '## PowerPoint: Presentation slides (.pptx) are generated automatically when needed.'
+        });
+    }
+    if (user.value?.word_enabled) {
+        features.push({ 
+            id: 'word', 
+            icon: IconFileText, 
+            label: 'Word', 
+            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800', 
+            title: 'Word Enabled.',
+            modalTitle: 'Word',
+            modalDescription: 'The AI generates .docx Word documents automatically through the chat pipeline when needed.',
+            systemPrompt: '## Word: Word documents (.docx) are generated automatically when needed.'
+        });
+    }
+    if (user.value?.excel_enabled) {
+        features.push({ 
+            id: 'excel', 
+            icon: IconDatabase, 
+            label: 'Excel', 
+            colorClass: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800', 
+            title: 'Excel Enabled.',
+            modalTitle: 'Excel',
+            modalDescription: 'The AI generates .xlsx Excel spreadsheets automatically through the chat pipeline when needed.',
+            systemPrompt: '## Excel: Excel spreadsheets (.xlsx) are generated automatically when needed.'
         });
     }
     if (user.value?.note_generation_enabled) {

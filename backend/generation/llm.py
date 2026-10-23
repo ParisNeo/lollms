@@ -1770,7 +1770,7 @@ def build_llm_generation_router(router: APIRouter):
                 "callable": tool_memory_search
             }
 
-        if owner_db_user.office_tools_enabled:
+        if owner_db_user.powerpoint_enabled:
             def tool_generate_slides(topic: str, width: int = 1024, height: int = 768):
                 try:
                     task_description = f"Creating slides for topic: {topic[:30]}..."
@@ -1796,6 +1796,60 @@ def build_llm_generation_router(router: APIRouter):
                 ],
                 "output":[{"name": "success", "type": "bool"}, {"name": "task_id", "type": "str"}],
                 "callable": tool_generate_slides
+            }
+
+        if owner_db_user.word_enabled:
+            def tool_generate_word_document(title: str, content: str):
+                try:
+                    art_title = title if title.endswith('.docx') else f"{title}.docx"
+                    discussion_obj.add_artefact(
+                        title=art_title,
+                        content=content,
+                        author="LoLLMs Office Agent",
+                        active=True,
+                        artefact_type="document"
+                    )
+                    discussion_obj.commit()
+                    return {"success": True, "title": art_title, "message": f"Word document '{art_title}' created in workspace."}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            agentic_tools["generate_word_document"] = {
+                "name": "generate_word_document",
+                "description": "Create a Word (.docx) document in the discussion workspace from provided markdown content.",
+                "parameters": [
+                    {"name": "title", "type": "str", "optional": False, "description": "Document title (used as artefact filename)."},
+                    {"name": "content", "type": "str", "optional": False, "description": "Markdown content of the document."}
+                ],
+                "output": [{"name": "success", "type": "bool"}, {"name": "title", "type": "str"}],
+                "callable": tool_generate_word_document
+            }
+
+        if owner_db_user.excel_enabled:
+            def tool_generate_excel_sheet(title: str, content: str):
+                try:
+                    art_title = title if title.endswith('.xlsx') else f"{title}.xlsx"
+                    discussion_obj.add_artefact(
+                        title=art_title,
+                        content=content,
+                        author="LoLLMs Office Agent",
+                        active=True,
+                        artefact_type="data"
+                    )
+                    discussion_obj.commit()
+                    return {"success": True, "title": art_title, "message": f"Excel sheet '{art_title}' created in workspace."}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            agentic_tools["generate_excel_sheet"] = {
+                "name": "generate_excel_sheet",
+                "description": "Create an Excel (.xlsx) spreadsheet in the discussion workspace from provided markdown table content.",
+                "parameters": [
+                    {"name": "title", "type": "str", "optional": False, "description": "Spreadsheet title (used as artefact filename)."},
+                    {"name": "content", "type": "str", "optional": False, "description": "Markdown table content of the sheet."}
+                ],
+                "output": [{"name": "success", "type": "bool"}, {"name": "title", "type": "str"}],
+                "callable": tool_generate_excel_sheet
             }
 
         if owner_db_user.street_view_enabled and owner_db_user.google_api_key:
@@ -2532,7 +2586,9 @@ def build_llm_generation_router(router: APIRouter):
                             enable_skills=owner_db_user.skills_building_enabled,
                             enable_forms=owner_db_user.form_building_enabled,
                             
-                            enable_office_files=owner_db_user.office_tools_enabled,
+                            enable_powerpoint=owner_db_user.powerpoint_enabled,
+                            enable_word=owner_db_user.word_enabled,
+                            enable_excel=owner_db_user.excel_enabled,
                             
                             enable_silent_artefact_explanation=True,
                             enable_artefacts=owner_db_user.artefacts_enabled,

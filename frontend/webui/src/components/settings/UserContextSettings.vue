@@ -51,7 +51,9 @@ const imageGenerationSystemPrompt = ref('');
 const imageAnnotationEnabled = ref(false);
 const imageEditingEnabled = ref(false);
 const inlineWidgetsEnabled = ref(true);
-const slideMakerEnabled = ref(false);
+const powerpointEnabled = ref(false);
+const wordEnabled = ref(false);
+const excelEnabled = ref(false);
 const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
 const bookGenerationEnabled = ref(false);
@@ -145,7 +147,9 @@ function populateForm() {
     imageAnnotationEnabled.value = !!user.value.image_annotation_enabled;
     imageEditingEnabled.value = !!(user.value.image_editing_enabled ?? false);
     inlineWidgetsEnabled.value = !!(user.value.inline_widgets_enabled ?? true);
-    slideMakerEnabled.value = !!(user.value.office_tools_enabled ?? false);
+    powerpointEnabled.value = !!(user.value.powerpoint_enabled ?? false);
+    wordEnabled.value = !!(user.value.word_enabled ?? false);
+    excelEnabled.value = !!(user.value.excel_enabled ?? false);
     activateGeneratedImages.value = !!(user.value.activate_generated_images ?? false);
     noteGenerationEnabled.value = !!(user.value.note_generation_enabled ?? false);
     artefactsEnabled.value = !!(user.value.artefacts_enabled ?? true);
@@ -207,7 +211,7 @@ watch(user, populateForm, { immediate: true, deep: true });
 watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
-    imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
+    imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, powerpointEnabled, wordEnabled, excelEnabled, activateGeneratedImages, noteGenerationEnabled,
     bookGenerationEnabled,
     artefactsEnabled,
     memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, formBuildingEnabled, 
@@ -260,7 +264,9 @@ async function handleSaveChanges() {
             image_annotation_enabled: imageAnnotationEnabled.value,
             image_editing_enabled: imageEditingEnabled.value,
             inline_widgets_enabled: inlineWidgetsEnabled.value,
-            office_tools_enabled: slideMakerEnabled.value,
+            powerpoint_enabled: powerpointEnabled.value,
+            word_enabled: wordEnabled.value,
+            excel_enabled: excelEnabled.value,
             activate_generated_images: activateGeneratedImages.value,
             note_generation_enabled: noteGenerationEnabled.value,
             artefacts_enabled: artefactsEnabled.value,
@@ -584,7 +590,9 @@ async function handleSaveChanges() {
                 <div class="flex flex-wrap gap-2 justify-end">
                     <label class="feature-tag" :class="{'active': imageGenerationEnabled}" title="Generate images from text"><input type="checkbox" v-model="imageGenerationEnabled"><span>ImgGen</span></label>
                     <label class="feature-tag" :class="{'active': imageEditingEnabled}" title="Modify existing images"><input type="checkbox" v-model="imageEditingEnabled"><span>ImgEdit</span></label>
-                    <label class="feature-tag" :class="{'active': slideMakerEnabled}" title="Generate presentations"><input type="checkbox" v-model="slideMakerEnabled"><span>Slides</span></label>
+                    <label class="feature-tag" :class="{'active': powerpointEnabled}" title="Generate .pptx presentations"><input type="checkbox" v-model="powerpointEnabled"><span>PPT</span></label>
+                    <label class="feature-tag" :class="{'active': wordEnabled}" title="Generate .docx documents"><input type="checkbox" v-model="wordEnabled"><span>Word</span></label>
+                    <label class="feature-tag" :class="{'active': excelEnabled}" title="Generate .xlsx spreadsheets"><input type="checkbox" v-model="excelEnabled"><span>Excel</span></label>
                     <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
                     <label class="feature-tag" :class="{'active': inlineWidgetsEnabled}" title="Build interactive widgets"><input type="checkbox" v-model="inlineWidgetsEnabled"><span>Widgets</span></label>
                     <label class="feature-tag" :class="{'active': noteGenerationEnabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>

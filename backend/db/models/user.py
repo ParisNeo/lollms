@@ -73,6 +73,9 @@ class User(Base):
     image_editing_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     inline_widgets_enabled = Column(Boolean, default=True, nullable=False, server_default='1')
     office_tools_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    powerpoint_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    word_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    excel_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     
     # Generation tools
     activate_generated_images = Column(Boolean, default=False, nullable=False, server_default='0')

@@ -695,6 +695,40 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
 
+        # --- Office tools split: enable_powerpoint / enable_word / enable_excel ---
+        # The DBUser model declares three granular office flags, but create_all never
+        # ALTERs existing tables. Add the columns when missing and backfill them from
+        # the legacy master flag so prior behavior (office_tools_enabled=True -> all
+        # three tools enabled) is preserved.
+        office_split_cols = {
+            "powerpoint_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "word_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "excel_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+        }
+        added_office_split_cols = []
+        for col_name, col_sql_def in office_split_cols.items():
+            if col_name not in user_columns_db:
+                try:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
+                    added_office_split_cols.append(col_name)
+                    connection.commit()
+                    print(f"INFO: Added '{col_name}' column to 'users' table.")
+                except Exception as e:
+                    print(f"WARNING: Failed to add column {col_name} to users table: {e}")
+                    connection.rollback()
+
+        if added_office_split_cols:
+            try:
+                connection.execute(text(
+                    "UPDATE users SET powerpoint_enabled = office_tools_enabled, "
+                    "word_enabled = office_tools_enabled, excel_enabled = office_tools_enabled"
+                ))
+                connection.commit()
+                print("INFO: Backfilled office tool split flags from legacy 'office_tools_enabled'.")
+            except Exception as e:
+                print(f"WARNING: Failed to backfill office tool split flags: {e}")
+                connection.rollback()
+
         # --- Migration for new fields ---
         if 'note_generation_enabled' not in user_columns_db:
             try:
