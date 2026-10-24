@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-24 17:03]
+
+- chore(deps): bump pipmaster from 1.1.13 to 1.2.0
+
 ## [2026-10-22 13:00]
 
 - feat(user): add personality and user context settings for individual users
