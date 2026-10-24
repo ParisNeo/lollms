@@ -69,7 +69,7 @@ nvidia-ml-py==13.590.48
 
 # --- Task Scheduling & Networking ---
 apscheduler==3.11.1
-feedparser==6.0.10
+feedparser==6.0.14
 aioredis==2.0.1
 
 # --- Web Intelligence, Scraping & Knowledge Tools ---
