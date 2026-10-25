@@ -18,6 +18,7 @@ import platform
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor
+import safe_store
 from safe_store import SafeStore
 # Third-Party Imports
 import fitz  # PyMuPDF
