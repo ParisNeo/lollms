@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-25 16:21]
+
+- feat(artefacts): add "as_is" import mode for artefact handling
+
 ## [2026-10-24 00:26]
 
 - refactor: Cleanup and optimize frontend assets and build pipeline

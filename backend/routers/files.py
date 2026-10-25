@@ -1078,6 +1078,7 @@ async def extract_and_embed_files(
     all_extracted_text = ""
 
     mode_map = {
+        "as_is": "as_is",
         "text_images": "text_images",
         "text_embedded_images": "text_embedded_images",
         "text": "text",
@@ -1099,7 +1100,8 @@ async def extract_and_embed_files(
                 path=tmp_path,
                 mode=import_mode,
                 title=file.filename,
-                activate=True
+                activate=True,
+                on_conflict="suffix"
             )
 
             text_art = result.get("text_artefact")
