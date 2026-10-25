@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onUnmounted } from 'vue';
 import { useDiscussionsStore } from '../../../stores/discussions';
 import { useUiStore } from '../../../stores/ui';
 import { usePyodideStore } from '../../../stores/pyodide';
@@ -25,11 +25,16 @@ import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconLock from '../../../assets/icons/IconLock.vue';
 import IconCog from '../../../assets/icons/IconCog.vue';
 import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
+import IconTable from '../../../assets/icons/IconTable.vue';
+import IconPresentationChartBar from '../../../assets/icons/IconPresentationChartBar.vue';
+import IconSpeakerWave from '../../../assets/icons/IconSpeakerWave.vue';
+import IconCode from '../../../assets/icons/IconCode.vue';
 import DropdownMenu from '../DropdownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../DropdownMenu/DropdownSubmenu.vue';
 
 import { useDataStore } from '../../../stores/data';
 import IconDatabase from '../../../assets/icons/IconDatabase.vue';
+import apiClient from '../../../services/api';
 
 const props = defineProps({
     artefactGroup: { type: Object, required: true },
@@ -145,6 +150,41 @@ const fileExtensionLower = computed(() => {
     return parts.length > 1 ? parts.pop().toLowerCase() : '';
 });
 
+// ── Image thumbnails + filetype icons ──
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
+const MIME_MAP = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml'
+};
+
+const isImageArtefact = computed(() => IMAGE_EXTENSIONS.includes(fileExtensionLower.value));
+
+const FILE_TYPE_ICONS = {
+    xlsx: IconTable, xlsm: IconTable, xls: IconTable, csv: IconTable,
+    pdf: IconFileText, docx: IconFileText, doc: IconFileText, rtf: IconFileText, odt: IconFileText,
+    pptx: IconPresentationChartBar, ppt: IconPresentationChartBar,
+    mp3: IconSpeakerWave, wav: IconSpeakerWave, m4a: IconSpeakerWave, ogg: IconSpeakerWave, flac: IconSpeakerWave,
+    py: IconCode, js: IconCode, ts: IconCode, html: IconCode, css: IconCode, json: IconCode,
+    sql: IconCode, sh: IconCode, xml: IconCode, yaml: IconCode, yml: IconCode,
+    md: IconFileText, txt: IconFileText,
+};
+const FILE_TYPE_COLORS = {
+    xlsx: 'text-emerald-500', xlsm: 'text-emerald-500', xls: 'text-emerald-500', csv: 'text-emerald-500',
+    pdf: 'text-red-500', docx: 'text-blue-500', doc: 'text-blue-500', rtf: 'text-blue-500', odt: 'text-blue-500',
+    pptx: 'text-orange-500', ppt: 'text-orange-500',
+    mp3: 'text-purple-500', wav: 'text-purple-500', m4a: 'text-purple-500', ogg: 'text-purple-500', flac: 'text-purple-500',
+};
+
+function getFileTypeIcon(name) {
+    const ext = String(name || '').toLowerCase().split('.').pop();
+    return FILE_TYPE_ICONS[ext] || null;
+}
+
+function getFileTypeIconColor(name) {
+    const ext = String(name || '').toLowerCase().split('.').pop();
+    return FILE_TYPE_COLORS[ext] || '';
+}
+
 const isExecutable = computed(() => {
     const ext = fileExtensionLower.value;
     return ['html', 'mermaid', 'svg', 'py', 'js', 'json', 'python', 'javascript'].includes(ext);
@@ -249,6 +289,42 @@ async function handleExecute() {
 
 const currentType = computed(() => {
     return props.artefactGroup.versions[0]?.artefact_type || 'file';
+});
+
+// ── Thumbnail loading (blob via authenticated /download route) ──
+const thumbnailUrl = ref('');
+const thumbnailCache = new Map(); // cacheKey -> object URL
+const thumbFetches = new Map();   // in-flight dedup
+
+async function loadThumbnail() {
+    if (!isImageArtefact.value) { thumbnailUrl.value = ''; return; }
+    const discId = cardDiscussionId.value;
+    const title = props.artefactGroup.title;
+    const version = selectedVersion.value;
+    const cacheKey = `${title}::v${version}`;
+    if (thumbFetches.has(cacheKey)) return;
+    if (thumbnailCache.has(cacheKey)) { thumbnailUrl.value = thumbnailCache.get(cacheKey); return; }
+
+    const fetchPromise = apiClient.get(
+        `/api/discussions/${encodeURIComponent(discId)}/artefacts/${encodeURIComponent(title)}/download${version ? `?version=${version}` : ''}`,
+        { responseType: 'blob' }
+    )
+        .then((response) => {
+            const blob = new Blob([response.data], { type: MIME_MAP[fileExtensionLower.value] || 'image/png' });
+            const url = URL.createObjectURL(blob);
+            thumbnailCache.set(cacheKey, url);
+            thumbnailUrl.value = url;
+        })
+        .catch(() => { /* silent — badge fallback */ })
+        .finally(() => thumbFetches.delete(cacheKey));
+    thumbFetches.set(cacheKey, fetchPromise);
+}
+
+watch([isImageArtefact, selectedVersion, cardDiscussionId], () => { loadThumbnail(); }, { immediate: true });
+
+onUnmounted(() => {
+    thumbnailCache.forEach((url) => URL.revokeObjectURL(url));
+    thumbnailCache.clear();
 });
 
 async function handleView() {
@@ -418,7 +494,18 @@ async function handleExportArchive() {
         'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/30': currentType === 'note',
         'bg-green-50 text-green-600 border-green-100 dark:bg-green-950/40 dark:text-green-400 dark:border-green-900/30': currentType === 'skill'
     }">
-        <IconFileText v-if="currentType === 'file' || currentType === 'document' || currentType === 'code'" class="w-4 h-4" />
+        <img v-if="isImageArtefact && thumbnailUrl"
+             :src="thumbnailUrl" :alt="artefactGroup.title"
+             class="w-6 h-6 rounded object-cover border border-gray-200 dark:border-gray-600" />
+        <span v-else-if="isImageArtefact"
+              class="text-[8px] font-black uppercase tracking-widest text-gray-400 select-none">
+            {{ fileExtensionLower }}
+        </span>
+        <component v-else-if="getFileTypeIcon(artefactGroup.title)"
+                   :is="getFileTypeIcon(artefactGroup.title)"
+                   class="w-4 h-4"
+                   :class="getFileTypeIconColor(artefactGroup.title)" />
+        <IconFileText v-else-if="currentType === 'file' || currentType === 'document' || currentType === 'code'" class="w-4 h-4" />
         <IconPencil v-else-if="currentType === 'note'" class="w-4.5 h-4.5" />
         <IconSparkles v-else-if="currentType === 'skill'" class="w-4 h-4" />
     </div>

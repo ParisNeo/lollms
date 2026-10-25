@@ -47,6 +47,9 @@ import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
+import IconTable from '../../assets/icons/IconTable.vue';
+import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
+import IconCode from '../../assets/icons/IconCode.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
@@ -1332,6 +1335,105 @@ function getGroupExtension(group) {
     return parts.length > 1 ? parts.pop().toLowerCase() : '';
 }
 
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
+const MIME_MAP = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml'
+};
+const isImageArtefact = (name) => {
+    if (!name) return false;
+    const ext = String(name).toLowerCase().split('.').pop();
+    return IMAGE_EXTENSIONS.includes(ext);
+};
+const getExtLabel = (name) => {
+    const ext = String(name || '').toLowerCase().split('.').pop();
+    return ext ? ext.toUpperCase().slice(0, 4) : '';
+};
+
+// ── Filetype icons for known extensions (xlsx, pdf, docx, pptx, audio, code) ──
+const FILE_TYPE_ICONS = {
+    xlsx: IconTable, xlsm: IconTable, xls: IconTable, csv: IconTable,
+    pdf: IconFileText, docx: IconFileText, doc: IconFileText, rtf: IconFileText, odt: IconFileText,
+    pptx: IconPresentationChartBar, ppt: IconPresentationChartBar,
+    mp3: IconSpeakerWave, wav: IconSpeakerWave, m4a: IconSpeakerWave, ogg: IconSpeakerWave, flac: IconSpeakerWave,
+    py: IconCode, js: IconCode, ts: IconCode, html: IconCode, css: IconCode, json: IconCode,
+    sql: IconCode, sh: IconCode, xml: IconCode, yaml: IconCode, yml: IconCode,
+    md: IconFileText, txt: IconFileText,
+};
+const FILE_TYPE_COLORS = {
+    xlsx: 'text-emerald-500', xlsm: 'text-emerald-500', xls: 'text-emerald-500', csv: 'text-emerald-500',
+    pdf: 'text-red-500', docx: 'text-blue-500', doc: 'text-blue-500', rtf: 'text-blue-500', odt: 'text-blue-500',
+    pptx: 'text-orange-500', ppt: 'text-orange-500',
+    mp3: 'text-purple-500', wav: 'text-purple-500', m4a: 'text-purple-500', ogg: 'text-purple-500', flac: 'text-purple-500',
+};
+function getFileTypeIcon(name) {
+    const ext = String(name || '').toLowerCase().split('.').pop();
+    return FILE_TYPE_ICONS[ext] || null;
+}
+function getFileTypeIconColor(name) {
+    const ext = String(name || '').toLowerCase().split('.').pop();
+    return FILE_TYPE_COLORS[ext] || '';
+}
+const isGroupImage = (group) => {
+    if (!group) return false;
+    if (group.artefact_type === 'image') return true;
+    return isImageArtefact(group.title);
+};
+
+// ── Image thumbnails for artefact chips ──
+// Bytes live server-side in workspace_data/<title>; we resolve them through the
+// authenticated fetchArtefactContent action (strategy 'raw') and cache one blob
+// object URL per artefact title+version. All URLs are revoked on unmount.
+const artefactThumbnails = ref({});
+const thumbnailFetches = new Map();
+
+function getThumbnailCacheKey(group) {
+    const file = group.selectedFile || group.latest;
+    return `${group.title}::v${file?.version ?? 'latest'}`;
+}
+
+function getArtefactThumbnail(group) {
+    const cacheKey = getThumbnailCacheKey(group);
+    if (artefactThumbnails.value[cacheKey]) return artefactThumbnails.value[cacheKey];
+    if (thumbnailFetches.has(cacheKey)) return '';
+
+    const file = group.selectedFile || group.latest;
+    if (!file || !discussionsStore.currentDiscussionId) return '';
+
+    // Use the proven authenticated /download blob route (same as ArtefactSplitView
+    // and ArtefactCard) — returns raw file bytes, no JSON/base64 ambiguity.
+    const fetchPromise = apiClient.get(
+        `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(group.title)}/download${file.version ? `?version=${file.version}` : ''}`,
+        { responseType: 'blob' }
+    )
+        .then((response) => {
+            const ext = getGroupExtension(group);
+            const mime = MIME_MAP[ext] || 'image/png';
+            const blob = new Blob([response.data], { type: mime });
+            const url = URL.createObjectURL(blob);
+            artefactThumbnails.value[cacheKey] = url;
+            return url;
+        })
+        .catch(() => '')
+        .finally(() => thumbnailFetches.delete(cacheKey));
+
+    thumbnailFetches.set(cacheKey, fetchPromise);
+    return '';
+}
+
+watch(groupedAttachedFiles, (groups) => {
+    (groups || []).forEach((group) => {
+        if (isGroupImage(group)) getArtefactThumbnail(group);
+    });
+}, { immediate: true, deep: false });
+
+function releaseArtefactThumbnails() {
+    Object.values(artefactThumbnails.value).forEach((url) => {
+        if (url) URL.revokeObjectURL(url);
+    });
+    artefactThumbnails.value = {};
+}
+
 function isGroupExecutable(group) {
     const ext = getGroupExtension(group);
     return ['html', 'mermaid', 'svg', 'py', 'js', 'json', 'python', 'javascript'].includes(ext);
@@ -1642,6 +1744,7 @@ onUnmounted(() => {
     off('files-dropped-in-chat', handleFilesInput); 
     off('files-pasted-in-chat', handleFilesInput); 
     stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl)); 
+    releaseArtefactThumbnails();
     document.removeEventListener('mousedown', closeMenusIfOutside);
 });
 </script>
@@ -1800,8 +1903,18 @@ onUnmounted(() => {
                      ]"
                      :title="`Drag to green RAG database chip to vectorize, or click title to open workspace`">
                     
-                    <!-- Icon based on registered custom types -->
-                    <IconPencil v-if="group.artefact_type === 'note'" class="w-4 h-4 text-amber-600" />
+                    <!-- Thumbnail for image artefacts, generic icon otherwise -->
+                    <img v-if="isGroupImage(group) && artefactThumbnails[getThumbnailCacheKey(group)]"
+                         :src="artefactThumbnails[getThumbnailCacheKey(group)]"
+                         :alt="group.title"
+                         class="w-5 h-5 rounded object-cover shrink-0 border border-border-muted" />
+                    <span v-else-if="isGroupImage(group)"
+                          class="text-[8px] font-black uppercase tracking-widest text-gray-400 select-none shrink-0">
+                        {{ getExtLabel(group.title) }}
+                    </span>
+                    <component v-else-if="getFileTypeIcon(group.title)" :is="getFileTypeIcon(group.title)"
+                               class="w-4 h-4 shrink-0" :class="getFileTypeIconColor(group.title)" />
+                    <IconPencil v-else-if="group.artefact_type === 'note'" class="w-4 h-4 text-amber-600" />
                     <IconSparkles v-else-if="group.artefact_type === 'skill'" class="w-4 h-4 text-emerald-600" />
                     <IconFileText v-else class="w-4 h-4 text-blue-600" />
 

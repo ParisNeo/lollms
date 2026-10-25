@@ -83,7 +83,15 @@ def _import_artefact_task(
             'data_bundle': 'data_bundle',
             'audio_stt': 'audio_stt'
         }
-        import_mode = mode_mapping.get(pdf_mode, 'as_is' if file_path.suffix.lower() in ['.docx', '.pdf', '.xlsx', '.pptx'] and pdf_mode == 'as_is' else 'text_images')
+        # Deterministic fallback: unmapped UI modes resolve to native 'as_is' for
+        # binary/image types (byte preservation), 'text_images' for documents.
+        if pdf_mode in mode_mapping:
+            import_mode = mode_mapping[pdf_mode]
+        elif file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tif', '.tiff',
+                                          '.docx', '.pdf', '.xlsx', '.pptx', '.zip', '.mp3', '.wav', '.m4a']:
+            import_mode = 'as_is'
+        else:
+            import_mode = 'text_images'
         
         task.set_progress(30)
         task.log(f"Processing '{filename}' using mode '{import_mode}'...")
@@ -93,6 +101,7 @@ def _import_artefact_task(
             path=str(file_path.resolve()),
             mode=import_mode,
             title=filename,
+            activate=auto_load,
             on_conflict=on_conflict
         )
         

@@ -617,11 +617,62 @@ const isAsIsFile = computed(() => {
     return c.startsWith('# As-Is File:') || c.includes('**Mode**: AS-IS') || artefactGroup.value?.versions[0]?.artefact_type === 'file';
 });
 
-const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
+const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
 const isImageArtefact = computed(() => {
     const t = (title.value || '').toLowerCase();
     return IMAGE_EXTENSIONS.some(ext => t.endsWith('.' + ext));
 });
+
+// ── Image thumbnail for the split-view header (list-row equivalent) ──
+// Reuses the authenticated /download blob route (same as fetchAsIsBlobUrl).
+// One object URL cached per title+version; all revoked on unmount.
+const splitThumbnails = ref({});
+const splitThumbFetches = new Map();
+
+function getSplitThumbKey() {
+    return `${title.value}::v${selectedVersion.value ?? 'latest'}`;
+}
+
+function getSplitThumbnail() {
+    if (!isImageArtefact.value || !title.value || !discussionsStore.currentDiscussionId) return '';
+    const cacheKey = getSplitThumbKey();
+    if (splitThumbnails.value[cacheKey]) return splitThumbnails.value[cacheKey];
+    if (splitThumbFetches.has(cacheKey)) return '';
+
+    const version = selectedVersion.value || artefactGroup.value?.versions[0]?.version;
+    const fetchPromise = apiClient
+        .get(
+            `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${version ? `?version=${version}` : ''}`,
+            { responseType: 'blob' }
+        )
+        .then((response) => {
+            const mimeExt = (title.value || '').split('.').pop()?.toLowerCase();
+            const mimeMap = {
+                png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml'
+            };
+            const blob = new Blob([response.data], { type: mimeMap[mimeExt] || 'image/png' });
+            const url = URL.createObjectURL(blob);
+            splitThumbnails.value[cacheKey] = url;
+            return url;
+        })
+        .catch(() => '')
+        .finally(() => splitThumbFetches.delete(cacheKey));
+
+    splitThumbFetches.set(cacheKey, fetchPromise);
+    return '';
+}
+
+watch([title, selectedVersion], () => {
+    getSplitThumbnail();
+}, { immediate: true });
+
+function releaseSplitThumbnails() {
+    Object.values(splitThumbnails.value).forEach((url) => {
+        if (url) URL.revokeObjectURL(url);
+    });
+    splitThumbnails.value = {};
+}
 const isAsIsImage = computed(() => isImageArtefact.value);
 
 const OFFICE_EXTENSIONS = ['pptx', 'docx', 'xlsx', 'xls'];
@@ -704,6 +755,7 @@ const asIsMetadata = computed(() => {
 });
 
 onUnmounted(() => {
+    releaseSplitThumbnails();
     if (audioBlobUrl.value) {
         URL.revokeObjectURL(audioBlobUrl.value);
     }
@@ -786,7 +838,11 @@ function download() {
                             'bg-purple-100 text-purple-600': ['code', 'audio'].includes(artefactGroup?.versions[0]?.artefact_type)
                         }
                     ]">
-                        <IconPencil v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
+                        <img v-if="isImageArtefact && splitThumbnails[getSplitThumbKey()]"
+                             :src="splitThumbnails[getSplitThumbKey()]"
+                             :alt="title"
+                             class="w-6 h-6 rounded object-cover border border-gray-200 dark:border-gray-600" />
+                        <IconPencil v-else-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
                         <IconSparkles v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" class="w-4 h-4" />
                         <IconCode v-else-if="artefactGroup?.versions[0]?.artefact_type === 'code'" class="w-4 h-4" />
                         <IconSpeakerWave v-else-if="artefactGroup?.versions[0]?.artefact_type === 'audio'" class="w-4 h-4" />
