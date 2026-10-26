@@ -50,6 +50,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(artefacts): add "as_is" import mode for artefact handling
 
+## [2026-10-25 16:24]
+
+- # Fix LoLLMs project dependencies for Paris deployment environment
+
 ## [2026-10-24 00:26]
 
 - refactor: Cleanup and optimize frontend assets and build pipeline

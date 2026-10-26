@@ -52,9 +52,6 @@ try:
 except Exception:
     pass
 
-import pipmaster as pm
-pm.ensure_packages(["ascii_colors>=0.11.13", "lollms_client>=1.12.4", "filelock"])
-
 from ascii_colors import ASCIIColors, trace_exception
 from filelock import FileLock, Timeout
 
