@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-26 01:33]
+
+- `fix: update pipmaster version to 1.2.2 for the requirements.txt file`
+
 ## [2026-10-25 16:21]
 
 - feat(artefacts): add "as_is" import mode for artefact handling
