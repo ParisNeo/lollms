@@ -10,6 +10,18 @@ const __dirname = path.dirname(__filename);
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
+  // Pre-bundle dynamically imported preview libraries at dev-server start.
+  // They are only referenced via runtime import() in ArtefactSplitView.vue,
+  // so without this Vite discovers them mid-session, mints a new dep hash,
+  // and already-loaded pages 504 on the stale hashed URL.
+  optimizeDeps: {
+    include: [
+      '@silurus/ooxml/xlsx',
+      'exceljs',
+      'mammoth',
+      'pptx-preview',
+    ],
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

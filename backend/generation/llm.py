@@ -80,7 +80,6 @@ from backend.session import (get_current_active_user,
 from backend.task_manager import task_manager, Task
 from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
-from backend.tasks.image_generation_tasks import _generate_slides_task
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from lollms_client.lollms_types import MSG_TYPE, EventMode
 # Google Search Tools
@@ -578,64 +577,6 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
     # Important: Return original text to preserve tags in chat history
     return text, images_b64, generation_infos, generated_groups
 
-def process_slide_generation_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, message_id: str, main_loop=None, stream_queue=None) -> Tuple[str, Optional[str]]:
-    """
-    Parses <generate_slides> tags, extracting inner <Slide> contents or raw prompt, and triggers the slide generation task.
-    Returns: (cleaned_text, task_id) where task_id is the ID of the background task if one was triggered, else None.
-    """
-    # Regex to capture the whole block including attributes
-    # Pattern: <generate_slides attr="val"> ... <Slide>desc</Slide> ... </generate_slides>
-    block_pattern = re.compile(r'<generate_slides\b([^>]*)>(.*?)</generate_slides>', re.DOTALL | re.IGNORECASE)
-    slide_pattern = re.compile(r'<Slide>(.*?)</Slide>', re.DOTALL | re.IGNORECASE)
-    
-    matches = list(block_pattern.finditer(text))
-    if not matches:
-        return text, None
-
-    triggered_task_id = None
-
-    for match in matches:
-        attr_str = match.group(1)
-        content_str = match.group(2)
-        
-        width = 1024
-        height = 768
-        
-        # Parse attributes from the parent tag
-        width_match = re.search(r'width="(\d+)"', attr_str)
-        if width_match: width = int(width_match.group(1))
-        
-        height_match = re.search(r'height="(\d+)"', attr_str)
-        if height_match: height = int(height_match.group(1))
-        
-        # Extract individual slide prompts if present
-        slides = [m.group(1).strip() for m in slide_pattern.finditer(content_str) if m.group(1).strip()]
-        
-        # If no explicit slides found, use the inner text as the "topic" prompt
-        final_slides_arg = slides if slides else content_str.strip()
-        
-        if final_slides_arg:
-            try:
-                task_description = f"Creating {len(slides)} slides..." if slides else f"Planning slides for topic: {final_slides_arg[:30]}..."
-                
-                new_task = task_manager.submit_task(
-                    name=f"Generating Slides",
-                    target=_generate_slides_task,
-                    args=(user.username, discussion_obj.id, message_id, final_slides_arg, width, height),
-                    description=task_description,
-                    owner_username=user.username
-                )
-                triggered_task_id = new_task.id
-                
-                if main_loop and stream_queue:
-                    payload = {"type": "info", "content": "Started slide generation task."}
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
-                    
-            except Exception as e:
-                 print(f"Failed to start slide generation task: {e}")
-
-    # Return original text to preserve tags
-    return text, triggered_task_id
 
 def process_street_view_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
     """
@@ -1768,88 +1709,6 @@ def build_llm_generation_router(router: APIRouter):
                 "parameters": [{"name": "query", "type": "str", "optional": False, "description": "The search query or keywords to find in deep memory."}],
                 "output": [{"name": "success", "type": "bool"}, {"name": "results", "type": "list"}, {"name": "count", "type": "int"}],
                 "callable": tool_memory_search
-            }
-
-        if owner_db_user.powerpoint_enabled:
-            def tool_generate_slides(topic: str, width: int = 1024, height: int = 768):
-                try:
-                    task_description = f"Creating slides for topic: {topic[:30]}..."
-                    new_task = task_manager.submit_task(
-                        name=f"Generating Slides",
-                        target=_generate_slides_task,
-                        args=(owner_username, discussion_obj.id, None, topic, width, height),
-                        description=task_description,
-                        owner_username=owner_username
-                    )
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Started slide generation task."})) + "\n")
-                    return {"success": True, "task_id": new_task.id}
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-
-            agentic_tools["generate_slides"] = {
-                "name": "generate_slides",
-                "description": "Generate a presentation slide deck based on a topic.",
-                "parameters":[
-                    {"name": "topic", "type": "str", "optional": False},
-                    {"name": "width", "type": "int", "optional": True, "default": 1024},
-                    {"name": "height", "type": "int", "optional": True, "default": 768}
-                ],
-                "output":[{"name": "success", "type": "bool"}, {"name": "task_id", "type": "str"}],
-                "callable": tool_generate_slides
-            }
-
-        if owner_db_user.word_enabled:
-            def tool_generate_word_document(title: str, content: str):
-                try:
-                    art_title = title if title.endswith('.docx') else f"{title}.docx"
-                    discussion_obj.add_artefact(
-                        title=art_title,
-                        content=content,
-                        author="LoLLMs Office Agent",
-                        active=True,
-                        artefact_type="document"
-                    )
-                    discussion_obj.commit()
-                    return {"success": True, "title": art_title, "message": f"Word document '{art_title}' created in workspace."}
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-
-            agentic_tools["generate_word_document"] = {
-                "name": "generate_word_document",
-                "description": "Create a Word (.docx) document in the discussion workspace from provided markdown content.",
-                "parameters": [
-                    {"name": "title", "type": "str", "optional": False, "description": "Document title (used as artefact filename)."},
-                    {"name": "content", "type": "str", "optional": False, "description": "Markdown content of the document."}
-                ],
-                "output": [{"name": "success", "type": "bool"}, {"name": "title", "type": "str"}],
-                "callable": tool_generate_word_document
-            }
-
-        if owner_db_user.excel_enabled:
-            def tool_generate_excel_sheet(title: str, content: str):
-                try:
-                    art_title = title if title.endswith('.xlsx') else f"{title}.xlsx"
-                    discussion_obj.add_artefact(
-                        title=art_title,
-                        content=content,
-                        author="LoLLMs Office Agent",
-                        active=True,
-                        artefact_type="data"
-                    )
-                    discussion_obj.commit()
-                    return {"success": True, "title": art_title, "message": f"Excel sheet '{art_title}' created in workspace."}
-                except Exception as e:
-                    return {"success": False, "error": str(e)}
-
-            agentic_tools["generate_excel_sheet"] = {
-                "name": "generate_excel_sheet",
-                "description": "Create an Excel (.xlsx) spreadsheet in the discussion workspace from provided markdown table content.",
-                "parameters": [
-                    {"name": "title", "type": "str", "optional": False, "description": "Spreadsheet title (used as artefact filename)."},
-                    {"name": "content", "type": "str", "optional": False, "description": "Markdown table content of the sheet."}
-                ],
-                "output": [{"name": "success", "type": "bool"}, {"name": "title", "type": "str"}],
-                "callable": tool_generate_excel_sheet
             }
 
         if owner_db_user.street_view_enabled and owner_db_user.google_api_key:

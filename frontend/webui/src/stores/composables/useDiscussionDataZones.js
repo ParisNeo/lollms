@@ -2,9 +2,20 @@
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 
+// Wraps an eventBus emit so a dead/disconnected port in one observer
+// never throws out of the dispatch loop nor poisons other observers.
+function safeEmit(emit, eventName, payload) {
+    try {
+        emit(eventName, payload);
+    } catch (error) {
+        console.warn(`[useDiscussionDataZones] Suppressed emit failure for "${eventName}":`, error);
+    }
+}
+
 export function useDiscussionDataZones(state, stores, getActions) {
     const { discussions, currentDiscussionId, activeDiscussionContextStatus, liveDataZoneTokens, activeAiTasks, _clearActiveAiTask, sharedWithMe } = state;
     const { emit } = useEventBus();
+    const emitZoneProcessed = (payload) => safeEmit(emit, 'discussion_zone:processed', payload);
 
     const uiStore = {
         addNotification(...args) { return stores.uiStore.addNotification(...args); },
@@ -282,7 +293,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
                 uiStore.addNotification('Data zone has been updated by AI.', 'success');
 
                 if (discussion_id === currentDiscussionId.value) {
-                    emit('discussion_zone:processed');
+                    emitZoneProcessed();
                     await getActions().fetchArtefacts(discussion_id);
                     await getActions().fetchContextStatus(discussion_id);
                 }
@@ -292,7 +303,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
             await useMemoriesStore().fetchMemories();
             uiStore.addNotification('A new memory has been created.', 'info');
             if (discussion_id === currentDiscussionId.value) {
-                emit('discussion_zone:processed');
+                emitZoneProcessed();
             }
         }
         
@@ -311,7 +322,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
             };
 
             if (discussion_id === currentDiscussionId.value) {
-                emit('discussion_zone:processed');
+                emitZoneProcessed();
             }
         }
     }
