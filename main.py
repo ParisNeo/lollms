@@ -574,6 +574,7 @@ def run_one_time_startup_tasks():
 # --------------------------------------------------------------------------- #
 _loop_heartbeat = {"t": None}
 _stall_thread_started = False
+STALL_THRESHOLD_SECONDS = 30  # Tolerates one-time cold-start imports on Windows
 
 
 async def _loop_heartbeat_task():
@@ -590,7 +591,7 @@ def _stall_watchdog_thread():
         if t is None:
             continue
         now = time.monotonic()
-        if now - t > 10 and now - last_dump > 60:
+        if now - t > STALL_THRESHOLD_SECONDS and now - last_dump > 60:
             last_dump = now
             ASCIIColors.error(
                 f"[watchdog pid {os.getpid()}] event loop blocked for {now - t:.0f}s. Thread dump follows:"
@@ -610,6 +611,9 @@ async def startup_event():
 
     init_database(APP_DB_URL)
     await asyncio.to_thread(run_one_time_startup_tasks)
+
+    from backend.routers.stores import _prewarm_sentence_transformer
+    threading.Thread(target=_prewarm_sentence_transformer, daemon=True, name="sentence_transformers_prewarm").start()
 
     # Per-process state: these live in each worker's memory.
     try:

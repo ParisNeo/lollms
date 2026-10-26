@@ -102,6 +102,24 @@ from backend.task_manager import task_manager, Task
 from backend.db.models.config import RAGBinding as DBRAGBinding, LLMBinding as DBLLMBinding
 from backend.routers.files import extract_text_from_file_bytes
 
+import threading
+from starlette.concurrency import run_in_threadpool
+
+_vectorizer_import_lock = threading.Lock()
+_vectorizer_prewarmed = False
+
+def _prewarm_sentence_transformer():
+    """Pre-warms the heavy sentence_transformers import to avoid blocking the event loop later."""
+    global _vectorizer_prewarmed
+    with _vectorizer_import_lock:
+        if _vectorizer_prewarmed:
+            return
+        try:
+            import sentence_transformers  # noqa: F401
+            _vectorizer_prewarmed = True
+        except ImportError:
+            pass
+
 class DataStoreDetails(BaseModel):
     size_bytes: int
     chunk_count: int
@@ -2517,7 +2535,8 @@ async def list_available_vectorizers(db: Session = Depends(get_db)):
                 if is_sentence_transformer_vectorizer(binding.name, clean_config):
                     clean_config["use_shared_server"] = True
 
-                raw_models_list = safe_store.SafeStore.list_models(
+                raw_models_list = await run_in_threadpool(
+                    safe_store.SafeStore.list_models,
                     vectorizer_name=binding.name,
                     vectorizer_config=clean_config
                 )
@@ -2606,7 +2625,8 @@ async def get_rag_binding_models_public(binding_id: int, db: Session = Depends(g
             config = config.copy()
             del config['model']
             
-        raw_models = safe_store.SafeStore.list_models(
+        raw_models = await run_in_threadpool(
+            safe_store.SafeStore.list_models,
             vectorizer_name=binding.name, 
             vectorizer_config=config
         )
