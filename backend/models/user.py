@@ -375,6 +375,7 @@ class UserUpdate(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: Optional[bool] = None
     image_editing_enabled: Optional[bool] = None
+    inline_widgets_enabled: Optional[bool] = None
     office_tools_enabled: Optional[bool] = None
     powerpoint_enabled: Optional[bool] = None
     word_enabled: Optional[bool] = None

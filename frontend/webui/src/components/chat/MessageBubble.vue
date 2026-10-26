@@ -431,6 +431,66 @@ function handleRegenerateImage(index) {
     discussionsStore.regenerateMessageImage(props.message.id, index);
 }
 
+const transformingImageKeys = ref(new Set());
+
+function isTransformingImage(key) {
+    return transformingImageKeys.value.has(key);
+}
+
+async function handleTransformImageToArtefact(group, index) {
+    const key = `${group.id}-${index}`;
+    if (transformingImageKeys.value.has(key)) return;
+
+    transformingImageKeys.value = new Set(transformingImageKeys.value).add(key);
+    try {
+        const imageUrl = allImages.value[index];
+        const { title: artefactTitle } = await discussionsStore.createArtefactFromImage({
+            discussionId: discussionsStore.currentDiscussionId,
+            title: `image_${_generateImageArtefactId()}`,
+            imageUrl
+        });
+
+        // De-duplicate: remove the image from the message and replace it with an
+        // inline artefact call so it is stored/rendered only once (as an artefact).
+        await _replaceMessageImageWithInlineCall(index, imageUrl, artefactTitle);
+    } catch (e) {
+        // Error notification already surfaced by the store action
+    } finally {
+        const next = new Set(transformingImageKeys.value);
+        next.delete(key);
+        transformingImageKeys.value = next;
+    }
+}
+
+function _generateImageArtefactId() {
+    return (crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function _replaceMessageImageWithInlineCall(index, imageUrl, artefactTitle) {
+    if (isNewManualMessage.value) return; // Manual messages have no persisted images to detach
+
+    const message = discussionsStore.activeMessages.find(m => m.id === props.message.id);
+    if (!message) return;
+
+    const inlineCall = `\n[!](${artefactTitle})`;
+    const updatedImages = (message.image_references || []).filter(
+        (img, i) => i !== index && img !== imageUrl
+    );
+
+    try {
+        // Persist through the exact contract used by handleSaveEdit (saveMessageChanges)
+        await discussionsStore.saveMessageChanges({
+            messageId: props.message.id,
+            newContent: (message.content || '') + inlineCall,
+            keptImagesB64: updatedImages,
+            newImageFiles: []
+        });
+    } catch (e) {
+        console.error('Failed to update message after artefact transformation:', e);
+        uiStore.addNotification('Artefact created, but the message could not be updated.', 'warning');
+    }
+}
+
 function selectView(groupId, index) {
     selectedViewIndices.value[groupId] = index;
 }
@@ -962,6 +1022,15 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                                 :title="isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'Deactivate (Hide from LLM)' : 'Activate (Show to LLM)'">
                                             <IconEye v-if="isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="w-6 h-6" />
                                             <IconEyeOff v-else class="w-6 h-6 text-red-300" />
+                                        </button>
+                                        
+                                        <!-- Transform into Artefact -->
+                                        <button @click.stop="handleTransformImageToArtefact(group, selectedViewIndices[group.id] ?? group.indices[0])" 
+                                                :disabled="isTransformingImage(`${group.id}-${selectedViewIndices[group.id] ?? group.indices[0]}`)"
+                                                class="pointer-events-auto p-3 bg-white/20 hover:bg-white/40 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90 disabled:opacity-50 disabled:cursor-not-allowed" 
+                                                title="Transform into artefact">
+                                            <IconAnimateSpin v-if="isTransformingImage(`${group.id}-${selectedViewIndices[group.id] ?? group.indices[0]}`)" class="w-6 h-6 animate-spin" />
+                                            <IconPhoto v-else class="w-6 h-6" />
                                         </button>
                                     </div>
 

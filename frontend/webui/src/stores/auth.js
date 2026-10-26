@@ -799,7 +799,21 @@ export const useAuthStore = defineStore('auth', () => {
         try {
             const response = await apiClient.put('/api/auth/me', preferences);
             if (user.value) {
-                user.value = { ...user.value, ...response.data };
+                // Field-wise merge: the server response is authoritative for the
+                // fields it returns, but an explicitly-set client value (e.g.
+                // `inline_widgets_enabled: false`) must never be clobbered by a
+                // response that omits the field or re-defaults it.
+                const merged = { ...user.value, ...response.data };
+                for (const [key, value] of Object.entries(preferences)) {
+                    const serverVal = response.data?.[key];
+                    if (serverVal === undefined) {
+                        merged[key] = value;
+                    } else if (typeof value === 'boolean' && typeof serverVal === 'boolean' && serverVal !== value) {
+                        console.warn('[auth] preference drift:', key, 'sent', value, 'server returned', serverVal);
+                        merged[key] = value;
+                    }
+                }
+                user.value = merged;
                 if (preferences.message_font_size) uiStore.message_font_size = preferences.message_font_size;
             }
             if (notify) uiStore.addNotification('Settings saved.', 'success');

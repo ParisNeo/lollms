@@ -915,6 +915,12 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         return { type: 'artefact_image', title: parts[0], index: parseInt(parts[parts.length - 1]), raw: rawBlock };
     }
 
+    // Inline artefact image call: [!](image_uuid.png)
+    const inlineMatch = rawBlock.match(/^\[!\]\(\s*([^)\s]+)\s*\)$/);
+    if (inlineMatch) {
+        return { type: 'artefact_inline_image', src: inlineMatch[1], raw: rawBlock };
+    }
+
     if (rawBlock.includes('<round')) {
         const idMatch = rawBlock.match(/id\s*=\s*["']([^"']*)["']/i);
         const roundId = idMatch ? idMatch[1] : '';
@@ -1279,6 +1285,7 @@ const messageParts = computed(() => {
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
+                { type: 'tool', regex: /\[!\]\(\s*([^)\s]+)\s*\)/g },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b[^>]*>[\s\S]*?(?:<\/processing>(?:\s*<!--\s*status:[a-zA-Z0-9_-]+\s*-->)?|(?=<round\b|<think>|<thought>|$)))/gi },
                 { type: 'tool', regex: /(<lollms_form\b([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi },
@@ -1799,6 +1806,34 @@ async function downloadAnnotatedImage(annotations, event) {
     document.body.removeChild(link);
 }
 
+function openInlineArtefactImage(src) {
+    // The artefact title for image artefacts created via the manual route is the
+    // filename itself (including the .png extension).
+    uiStore.activeSplitArtefactTitle = src;
+    if (!uiStore.isDataZoneVisible) {
+        uiStore.isDataZoneVisible = true;
+    }
+    uiStore.dataZoneTab = 'workspace';
+}
+
+const transformingAnnotateImage = ref(false);
+
+async function transformImageToArtefact(srcOrBlobUrl, suggestedTitle) {
+    if (transformingAnnotateImage.value) return;
+    transformingAnnotateImage.value = true;
+    try {
+        await discussionsStore.createArtefactFromImage({
+            discussionId: effectiveDiscussionId.value,
+            title: suggestedTitle || `image_${Date.now()}`,
+            imageUrl: srcOrBlobUrl
+        });
+    } catch (e) {
+        // Error notification already surfaced by the store action
+    } finally {
+        transformingAnnotateImage.value = false;
+    }
+}
+
 async function deleteArtefactImage(title, index) {
     const confirmed = await uiStore.showConfirmation({
         title: 'Delete Image/Page',
@@ -2310,9 +2345,19 @@ function onMermaidReady({ svg }, partIndex) {
                 <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" @load="onImageLoad($event, part.annotations)"/>
                 <p v-else class="text-sm font-bold" style="color: var(--brand-danger, #ff5252);">Could not find a previous image to annotate.</p>
                 <canvas class="absolute pointer-events-none"></canvas>
-                <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1.5">
                     <button @click="downloadAnnotatedImage(part.annotations, $event)" class="p-1.5 bg-black/50 text-white rounded-full hover:bg-black/80" title="Download Annotated Image">
                         <IconArrowDownTray class="w-4 h-4" />
+                    </button>
+                    <button 
+                        v-if="lastUserImage" 
+                        @click="transformImageToArtefact(lastUserImage, `annotated_${Date.now()}`)" 
+                        :disabled="transformingAnnotateImage" 
+                        class="p-1.5 bg-black/50 text-white rounded-full hover:bg-black/80 disabled:opacity-50 disabled:cursor-not-allowed" 
+                        title="Transform into artefact"
+                    >
+                        <IconAnimateSpin v-if="transformingAnnotateImage" class="w-4 h-4 animate-spin" />
+                        <IconPhoto v-else class="w-4 h-4" />
                     </button>
                 </div>
             </div>
@@ -2401,6 +2446,24 @@ function onMermaidReady({ svg }, partIndex) {
                 />
              </div>
           </template>
+
+          <!-- Inline Artefact Image Call: [!](image_uuid.png) -->
+          <div v-else-if="part.type === 'artefact_inline_image'" class="my-4 artefact-inline-image-mount">
+              <div class="rounded-2xl overflow-hidden shadow-lg group relative border" style="border-color: var(--brand-border-main); background-color: var(--brand-bg-card);">
+                  <AuthenticatedImage
+                      :src="`/api/discussions/${effectiveDiscussionId}/artefacts/${encodeURIComponent(part.src)}/download`"
+                      class="w-full h-auto max-h-[600px] object-contain mx-auto cursor-pointer"
+                      style="background-color: var(--brand-bg-app);"
+                      @click="openInlineArtefactImage(part.src)"
+                  />
+                  <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-between">
+                       <span class="text-[10px] font-black uppercase tracking-widest text-white truncate">{{ part.src }}</span>
+                       <button @click.stop="openInlineArtefactImage(part.src)" class="p-1.5 bg-white/20 hover:bg-white/40 text-white rounded-full transition-all active:scale-90" title="Open in workspace">
+                           <IconMaximize class="w-4 h-4" />
+                       </button>
+                  </div>
+              </div>
+          </div>
 
           <!-- Artefact Image Anchor -->
           <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount card border" style="border-color: var(--brand-border-main); background-color: var(--brand-bg-app);">

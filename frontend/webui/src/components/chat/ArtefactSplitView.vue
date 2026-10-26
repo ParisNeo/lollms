@@ -24,10 +24,13 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { usePyodideStore } from '../../stores/pyodide';
+import { useImageStore } from '../../stores/images';
+import { useRouter } from 'vue-router';
 import InteractiveDataGrid from '../ui/DataGrid/InteractiveDataGrid.vue';
 import { oneDark } from '@codemirror/theme-one-dark';
 
@@ -37,6 +40,8 @@ const discussionsStore = useDiscussionsStore();
 const notesStore = useNotesStore();
 const skillsStore = useSkillsStore();
 const dataStore = useDataStore(); // ADDED: Required for isTtsActive check
+const imageStore = useImageStore();
+const router = useRouter();
 
 const title = computed(() => uiStore.activeSplitArtefactTitle);
 
@@ -1067,6 +1072,36 @@ function releaseSplitThumbnails() {
 }
 const isAsIsImage = computed(() => isImageArtefact.value);
 
+// ── Send to Image Studio ──
+// Downloads the selected version as an authenticated blob, wraps it in a
+// File, and hands it to the Image Studio's existing upload contract.
+const isSendingToStudio = ref(false);
+
+async function sendToImageStudio() {
+    if (isSendingToStudio.value || !title.value || !discussionsStore.currentDiscussionId) return;
+    isSendingToStudio.value = true;
+    try {
+        const version = selectedVersion.value;
+        const downloadUrl = `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${version ? `?version=${version}` : ''}`;
+        const response = await apiClient.get(downloadUrl, { responseType: 'blob' });
+        const mimeExt = (title.value || '').split('.').pop()?.toLowerCase();
+        const mimeMap = {
+            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+            gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml'
+        };
+        const blob = new Blob([response.data], { type: mimeMap[mimeExt] || 'image/png' });
+        const file = new File([blob], title.value, { type: blob.type });
+        await imageStore.uploadImages([file]);
+        router.push('/image-studio');
+    } catch (e) {
+        console.error('[ArtefactSplitView] Failed to send image to studio:', e);
+        uiStore.addNotification('Failed to send image to Image Studio.', 'error');
+    } finally {
+        isSendingToStudio.value = false;
+    }
+}
+
+
 const officeBadgeClass = computed(() => {
     const t = (title.value || '').toLowerCase();
     if (t.endsWith('.pptx')) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300';
@@ -1479,14 +1514,26 @@ function download() {
                         <div v-else class="w-full flex items-center justify-center py-12">
                             <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
                         </div>
-                        <button
-                            type="button"
-                            @click="download"
-                            class="w-full btn btn-primary py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 text-xs font-bold uppercase tracking-wider cursor-pointer active:scale-98 transition-all"
-                        >
-                            <IconArrowDownTray class="w-4 h-4" />
-                            <span>Download Image</span>
-                        </button>
+                        <div class="w-full flex flex-col sm:flex-row gap-3">
+                            <button
+                                type="button"
+                                @click="sendToImageStudio"
+                                :disabled="isSendingToStudio"
+                                class="w-full btn btn-primary py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 text-xs font-bold uppercase tracking-wider cursor-pointer active:scale-98 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <IconAnimateSpin v-if="isSendingToStudio" class="w-4 h-4 animate-spin" />
+                                <IconPhoto v-else class="w-4 h-4" />
+                                <span>Send to Image Studio</span>
+                            </button>
+                            <button
+                                type="button"
+                                @click="download"
+                                class="w-full btn btn-secondary py-3 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider cursor-pointer active:scale-98 transition-all"
+                            >
+                                <IconArrowDownTray class="w-4 h-4" />
+                                <span>Download Image</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 

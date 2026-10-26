@@ -871,21 +871,25 @@ async function toggleWebSearch() {
 
 async function toggleUserPref(key) {
     if (!authStore.user) return;
-    
+
     const currentValue = !!authStore.user[key];
     const newValue = !currentValue;
-    
+
     if (key === 'herd_mode_enabled' && !currentValue && !canEnableHerd.value) {
         uiStore.addNotification("Please configure Herd participants in Settings > User Context first.", "warning");
         return;
     }
-    
+
     try {
-        // Store action now handles optimistic update and API call internally
+        // Store action handles the optimistic update and API call internally.
         await authStore.updateUserPreferences({ [key]: newValue }, true);
     } catch (e) {
         console.error(`Failed to toggle preference [${key}]:`, e);
         uiStore.addNotification(`Failed to save ${key.replace(/_/g, ' ')} setting.`, "error");
+        // Revert the optimistic flip so the switch reflects the persisted state.
+        if (authStore.user) {
+            authStore.user = { ...authStore.user, [key]: currentValue };
+        }
     }
 }
 

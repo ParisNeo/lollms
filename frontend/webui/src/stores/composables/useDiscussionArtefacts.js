@@ -776,6 +776,84 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
+    function _generateImageArtefactId() {
+        return (crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    }
+
+    function _toPngTitle(title) {
+        const uuid = _generateImageArtefactId();
+        let artefactTitle = (title || `image_${uuid}`).trim();
+        // Strip any existing image extension, then force .png so the artefact is
+        // recognized as an actual image file by the workspace/split view.
+        artefactTitle = artefactTitle.replace(/\.(png|jpe?g|webp|gif|bmp|tiff?)$/i, '');
+        return `${artefactTitle}.png`;
+    }
+
+    async function _blobToPngBase64(blob) {
+        // Normalize non-PNG sources (jpeg/webp/...) to true PNG bytes so the
+        // .png extension always matches the actual content.
+        let pngBlob = blob;
+        if (blob.type && blob.type !== 'image/png') {
+            try {
+                const bitmap = await createImageBitmap(blob);
+                const canvas = document.createElement('canvas');
+                canvas.width = bitmap.width;
+                canvas.height = bitmap.height;
+                canvas.getContext('2d').drawImage(bitmap, 0, 0);
+                const reEncoded = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+                bitmap.close?.();
+                if (reEncoded) pngBlob = reEncoded;
+            } catch (e) {
+                // Fall back to the original bytes; the .png title still applies.
+                console.warn('PNG re-encoding failed, using original bytes:', e);
+            }
+        }
+
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(String(reader.result).split(',')[1] || '');
+            reader.onerror = () => reject(new Error('Failed to read image data'));
+            reader.readAsDataURL(pngBlob);
+        });
+    }
+
+    async function createArtefactFromImage({ discussionId, title, imageUrl }) {
+        if (!discussionId || !imageUrl) {
+            uiStore.addNotification('Cannot transform image: missing discussion or image source.', 'error');
+            throw new Error('Missing discussionId or imageUrl');
+        }
+
+        try {
+            // 1. Fetch the image bytes (blob: URLs from local previews, or authenticated API URLs)
+            const response = await fetch(imageUrl);
+            if (!response.ok) throw new Error(`Failed to fetch image (${response.status})`);
+            const blob = await response.blob();
+
+            // 2. Normalize to PNG and convert to base64 (manual artefact contract: images_b64)
+            const imageB64 = await _blobToPngBase64(blob);
+
+            // 3. Create the artefact with a .png title so it is treated as a real image
+            const artefactTitle = _toPngTitle(title);
+            await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/manual`,
+                { title: artefactTitle, content: '', images_b64: [imageB64] },
+                { params: { artefact_type: 'image', auto_load: 'true' } }
+            );
+
+            // 4. Refresh artefact list so it appears in the workspace / split view
+            await fetchArtefacts(discussionId);
+            getActions().fetchContextStatus(discussionId);
+
+            uiStore.activeSplitArtefactTitle = artefactTitle;
+            uiStore.addNotification(`Image transformed into artefact '${artefactTitle}'.`, 'success');
+            return { title: artefactTitle, filename: artefactTitle };
+        } catch (error) {
+            console.error('Failed to create artefact from image:', error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to transform image into artefact.', 'error');
+            throw error;
+        }
+    }
+
     async function deleteArtefactImage({ discussionId, artefactTitle, imageIndex }) {
         const uiStore = useUiStore();
         try {
@@ -918,6 +996,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         importStackOverflowArtefact,
         importYoutubeTranscript,
         importSourceToArtefacts,
+        createArtefactFromImage,
         deleteArtefactImage,
         // --- Added Version Management Exports ---
         fetchArtefactHistory,
