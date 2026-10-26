@@ -55,7 +55,17 @@ export default defineConfig({
             if (id.includes('codemirror') || id.includes('@codemirror')) return 'vendor-editor';
             if (id.includes('highlight.js')) return 'vendor-highlight';
             if (id.includes('pyodide')) return 'vendor-python';
-            if (id.includes('canvg') || id.includes('pdfjs-dist')) return 'vendor-viz';
+            // Keep canvg + pdfjs-dist AND their shared runtime deps in ONE chunk.
+            // pdfjs-dist internally extends classes from modules that canvg also
+            // imports (raf, xmlserializer, ...). If Rollup splits that shared
+            // subgraph across chunk boundaries, the base class evaluates to
+            // undefined at chunk-eval time -> "Class extends value undefined".
+            if (
+              id.includes('canvg') ||
+              id.includes('pdfjs-dist') ||
+              id.includes('node_modules/raf') ||
+              id.includes('node_modules/xmlserializer')
+            ) return 'vendor-viz';
 
             // Standard vendor chunk for smaller libs
             return 'vendor';
