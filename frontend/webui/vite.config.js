@@ -10,18 +10,6 @@ const __dirname = path.dirname(__filename);
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
-  // Pre-bundle dynamically imported preview libraries at dev-server start.
-  // They are only referenced via runtime import() in ArtefactSplitView.vue,
-  // so without this Vite discovers them mid-session, mints a new dep hash,
-  // and already-loaded pages 504 on the stale hashed URL.
-  optimizeDeps: {
-    include: [
-      '@silurus/ooxml/xlsx',
-      'exceljs',
-      'mammoth',
-      'pptx-preview',
-    ],
-  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -47,33 +35,24 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1200,
     rollupOptions: {
+      onwarn(warning, warn) {
+        // Suppress known eval() warning from exceljs (third-party, webpack-compat code)
+        if (warning.code === 'EVAL' && warning.id && warning.id.includes('exceljs')) return;
+        warn(warning);
+      },
       output: {
         // Advanced manual chunking to isolate heavy libraries
         manualChunks(id) {
           if (id.includes('node_modules')) {
-            if (id.includes('mermaid')) return 'vendor-mermaid';
-            if (id.includes('codemirror') || id.includes('@codemirror')) return 'vendor-editor';
             if (id.includes('highlight.js')) return 'vendor-highlight';
             if (id.includes('pyodide')) return 'vendor-python';
-            // Keep canvg + pdfjs-dist AND their shared runtime deps in ONE chunk.
-            // pdfjs-dist internally extends classes from modules that canvg also
-            // imports (raf, xmlserializer, ...). If Rollup splits that shared
-            // subgraph across chunk boundaries, the base class evaluates to
-            // undefined at chunk-eval time -> "Class extends value undefined".
-            if (
-              id.includes('canvg') ||
-              id.includes('pdfjs-dist') ||
-              id.includes('node_modules/raf') ||
-              id.includes('node_modules/xmlserializer')
-            ) return 'vendor-viz';
+            if (id.includes('canvg') || id.includes('pdfjs-dist')) return 'vendor-viz';
 
             // Standard vendor chunk for smaller libs
             return 'vendor';
           }
-          // Split stores into their own chunk to help with circularity
-          if (id.includes('src/stores/')) {
-            return 'app-stores';
-          }
+          // DO NOT separately chunk src/stores/ — it causes circular chunk references
+          // with vendor chunks. Let Rollup inline stores naturally.
         }
       }
     }

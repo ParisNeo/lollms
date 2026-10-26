@@ -1,1 +1,0 @@
-import{a as e}from"./app-stores-CssSSoiv.js";import{f as t,g as n,m as r}from"./vendor-DfSLUlNz.js";const s={},c={width:"50px",height:"50px",viewBox:"0 0 16 16",fill:"none",xmlns:"http://www.w3.org/2000/svg"};function i(l,o){return t(),n("svg",c,[...o[0]||(o[0]=[r("path",{d:"M1 10L1 6L15 6V10L1 10Z",fill:"currentColor"},null,-1)])])}const p=e(s,[["render",i]]);export{p as I};

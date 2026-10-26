@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-26 02:57]
+
+- Cleanup: Remove obsolete frontend assets and consolidate Vite configuration.
+
 ## [2026-10-26 02:34]
 
 - feat(build): group canvg + pdfjs-dist with shared runtime deps in one chunk
