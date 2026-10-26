@@ -1,8 +1,10 @@
 ## HOT:
-- discussions names are not shown, instead I see New Discussion with a uuid.
+when the openai endpoint is called, I see a full lollms client creation with all configuraed bindings and a connection to all mcps!! that's too much
+
 
 new ui:
 
+- OK discussions names are not shown, instead I see New Discussion with a uuid.
 - OK - add edit button to bubbles
 - OK- fix personalities
 - OK - implement MCPS

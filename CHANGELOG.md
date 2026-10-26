@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-26 01:55]
+
+- `Fix display of user name and discussion options for UX improvements in the UI, align with expected workflows.`
+
 ## [2026-10-26 01:54]
 
 - cleanup: Remove unused assets from frontend/dist/assets - about view components
