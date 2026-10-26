@@ -4,7 +4,7 @@ import os
 import asyncio
 import statistics
 import subprocess
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -126,6 +126,62 @@ async def force_all_users_config(payload: ForceGlobalConfigPayload, db: Session 
         db.rollback()
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to apply global configuration: {str(e)}")
+
+def _run_pip_install(task: Task, pkg_name: str, pkg_version: str, extra_flags: Optional[List[str]] = None) -> tuple[bool, List[str]]:
+    """
+    Runs a hardened pip install subprocess, streaming its output to the task log
+    while capturing a bounded tail of the last lines for diagnostics.
+    Returns (success, tail_lines).
+    """
+    cmd = [
+        sys.executable, "-m", "pip", "install",
+        "--no-cache-dir", "--disable-pip-version-check", "--no-input"
+    ]
+    if pkg_version:
+        cmd.append(f"{pkg_name}=={pkg_version}")
+    else:
+        cmd.append("--upgrade")
+        cmd.append(pkg_name)
+    if extra_flags:
+        cmd.extend(extra_flags)
+
+    tail: deque = deque(maxlen=15)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    task.process = process
+    for line in process.stdout:
+        stripped = line.strip()
+        if stripped:
+            task.log(stripped)
+            tail.append(stripped)
+
+    process.wait()
+    return process.returncode == 0, list(tail)
+
+
+def _install_with_pep668_retry(task: Task, pkg_name: str, pkg_version: str) -> tuple[bool, List[str]]:
+    """
+    Attempts a pip install; on failure caused by an externally-managed environment
+    (PEP 668), retries once with --break-system-packages.
+    Returns (success, tail_lines_of_final_attempt).
+    """
+    success, tail = _run_pip_install(task, pkg_name, pkg_version)
+    if success:
+        return True, tail
+
+    if any("externally-managed-environment" in line for line in tail):
+        task.log(
+            "Externally managed environment detected, retrying with --break-system-packages",
+            level="WARNING"
+        )
+        retry_success, retry_tail = _run_pip_install(
+            task, pkg_name, pkg_version, extra_flags=["--break-system-packages"]
+        )
+        if retry_success:
+            return True, retry_tail
+        return False, tail + retry_tail
+
+    return False, tail
+
 
 def _purge_unused_temp_files_task(task: Task):
     task.log("Starting purge of unused temporary files older than 24 hours.")
@@ -651,24 +707,13 @@ async def get_system_requirements(current_user: UserAuthDetails = Depends(get_cu
 async def install_requirement(payload: InstallReqPayload, current_user: UserAuthDetails = Depends(get_current_admin_user)):
     def _install_task(task: Task, pkg_name: str, pkg_version: str):
         task.log(f"Installing {pkg_name}...")
-        cmd = [sys.executable, "-m", "pip", "install"]
-        if pkg_version:
-            cmd.append(f"{pkg_name}=={pkg_version}")
-        else:
-            cmd.append("--upgrade")
-            cmd.append(pkg_name)
-            
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        task.process = process
-        for line in process.stdout:
-            task.log(line.strip())
-        
-        process.wait()
-        if process.returncode == 0:
+        success, tail = _install_with_pep668_retry(task, pkg_name, pkg_version)
+        if success:
             task.log(f"Successfully installed {pkg_name}")
             return {"message": "Installation successful"}
-        else:
-            raise Exception(f"Installation failed with code {process.returncode}")
+        raise Exception(
+            f"Installation of {pkg_name} failed. pip output:\n" + "\n".join(tail)
+        )
 
     target_version = payload.version
     description = f"Installing {payload.name}"
@@ -830,24 +875,15 @@ async def fix_all_requirements(current_user: UserAuthDetails = Depends(get_curre
 
             task.log(f"Fixing {req['name']} (required: {req['required_version'] or 'latest'})...")
             try:
-                cmd = [sys.executable, "-m", "pip", "install"]
-                if req['required_version']:
-                    cmd.append(f"{req['name']}=={req['required_version']}")
-                else:
-                    cmd.append("--upgrade")
-                    cmd.append(req['name'])
-
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                task.process = process
-                for line in process.stdout:
-                    task.log(line.strip())
-
-                process.wait()
-                if process.returncode == 0:
+                success, tail = _install_with_pep668_retry(task, req['name'], req['required_version'])
+                if success:
                     task.log(f"Successfully installed {req['name']}")
                     fixed_count += 1
                 else:
-                    task.log(f"Installation failed for {req['name']} with code {process.returncode}", level="ERROR")
+                    task.log(
+                        f"Installation failed for {req['name']}. pip output:\n" + "\n".join(tail),
+                        level="ERROR"
+                    )
             except Exception as e:
                 task.log(f"Failed to install {req['name']}: {str(e)}", level="ERROR")
 

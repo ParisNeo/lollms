@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-26 08:17]
+
+- fix(admin): harden pip install with PEP 668 retry and richer error output
+
 ## [2026-10-26 03:00]
 
 - feat: import-blocking: prevent startup loop blocking by background-prewarming sentence_transformers
