@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-26 22:03]
+
+- fix: cleanup leftover assets — merged old asset imports into main __vite__mapDeps for consistency
+
 ## [2026-10-26 21:45]
 
 - feat: add image generation and artifact support

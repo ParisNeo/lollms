@@ -23,14 +23,11 @@ import IconPlayCircle from '../assets/icons/IconPlayCircle.vue';
 import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
 import IconPhoto from '../assets/icons/IconPhoto.vue';
 import { useImageStore } from '../stores/images';
-import IconPhoto from '../assets/icons/IconPhoto.vue';
-import { useImageStore } from '../stores/images';
 
 const route = useRoute();
 const router = useRouter();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
-const imageStore = useImageStore();
 const imageStore = useImageStore();
 
 const { activeDiscussionArtefacts } = storeToRefs(discussionsStore);
@@ -181,61 +178,6 @@ function downloadArtefact() {
     link.download = form.value.title || 'artefact.txt';
     link.click();
     URL.revokeObjectURL(url);
-}
-
-const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
-const IMAGE_MIME_MAP = {
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-    gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml'
-};
-
-function isImageArtefactName(name) {
-    const ext = (name || '').split('.').pop()?.toLowerCase();
-    return IMAGE_EXTENSIONS.includes(ext);
-}
-
-const isImageArtefactSelected = computed(() => isImageArtefactName(form.value.title));
-const sendingArtefactId = ref(null);
-
-function decodeBase64ToBytes(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-}
-
-async function sendToImageStudio() {
-    if (!selectedArtefact.value || !form.value.title) return;
-    if (sendingArtefactId.value) return;
-    sendingArtefactId.value = selectedArtefact.value.id || form.value.title;
-    try {
-        const content = (form.value.content || '').trim();
-        if (!content) {
-            uiStore.addNotification('Artefact is empty — nothing to send.', 'warning');
-            return;
-        }
-        const ext = (form.value.title || '').split('.').pop()?.toLowerCase();
-        const mime = IMAGE_MIME_MAP[ext] || 'image/png';
-        let file;
-        if (ext === 'svg') {
-            file = new File([content], form.value.title, { type: mime });
-        } else {
-            // Binary image artefacts are stored as base64 text in the studio
-            // editor; decode to raw bytes before uploading.
-            const bare = content.startsWith('data:') ? content.slice(content.indexOf(',') + 1) : content;
-            file = new File([decodeBase64ToBytes(bare)], form.value.title, { type: mime });
-        }
-        await imageStore.uploadImages([file]);
-        uiStore.addNotification('Image sent to Image Studio.', 'success');
-        router.push('/image-studio');
-    } catch (e) {
-        console.error('Failed to send artefact to Image Studio:', e);
-        uiStore.addNotification('Failed to send image to Image Studio.', 'error');
-    } finally {
-        sendingArtefactId.value = null;
-    }
 }
 
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'];
