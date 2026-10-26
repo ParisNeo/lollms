@@ -669,10 +669,10 @@ async def startup_event():
 
     faulthandler.cancel_dump_traceback_later()
     asyncio.create_task(_loop_heartbeat_task())
-    if not _stall_thread_started:
-        _stall_thread_started = True
-        threading.Thread(target=_stall_watchdog_thread, daemon=True, name="stall_watchdog").start()
-    ASCIIColors.info(f"[pid {os.getpid()}] worker ready, accepting requests.")
+    # if not _stall_thread_started:
+    #     _stall_thread_started = True
+    #     threading.Thread(target=_stall_watchdog_thread, daemon=True, name="stall_watchdog").start()
+    # ASCIIColors.info(f"[pid {os.getpid()}] worker ready, accepting requests.")
 
 
 async def shutdown_event():

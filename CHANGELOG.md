@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-26 21:41]
+
+- `Fix LLM runtime parameter handling and introduce session socket module, enabling better concurrency and caching management for LLM services.`
+
 ## [2026-10-26 08:17]
 
 - fix(admin): harden pip install with PEP 668 retry and richer error output

@@ -1,6 +1,7 @@
 # backend/session.py
 import os
 import json
+import socket
 import time
 import hashlib
 import traceback
@@ -72,6 +73,8 @@ TOKEN_CACHE_TTL = 10 # seconds
 BUILD_WAIT_TIMEOUT = 120     # seconds a request waits for another thread's model load
 FAILURE_COOLDOWN = 60        # seconds a degraded client is reused before a retry
 REGISTRY_MAX_AGE = 1800      # seconds; keep below the MCP access token lifetime
+MCP_FAILURE_COOLDOWN = 120   # seconds to skip an MCP server whose handshake recently failed
+MCP_PROBE_TIMEOUT = 2        # seconds; hard budget for the TCP liveness pre-check
 
 _global_client_registry: Dict[str, LollmsClient] = {}
 _registry_expiry: Dict[str, float] = {}
@@ -696,6 +699,9 @@ def invalidate_user_mcp_cache(username: str):
         if 'servers_infos' in session:
             del session['servers_infos']
         session.pop("lollms_clients_cache", None)
+        # Clear the MCP failure registry so a fixed server is retried immediately
+        # after the user edits its settings.
+        session.pop("mcp_failures", None)
         print(f"INFO: Fully invalidated MCP caches for user: {username}")
 
 def reload_lollms_client_mcp(username: str):
@@ -1223,6 +1229,8 @@ def build_lollms_client_from_params(
             "ttm_binding_config": primary_ttm_config
         }
 
+        attempted_mcp_servers: list[str] = []
+
         if load_llm and load_mcp:
             if servers_infos is None:
                 servers_infos = session.get('servers_infos')
@@ -1230,10 +1238,49 @@ def build_lollms_client_from_params(
                     servers_infos = load_mcps(username)
                     session['servers_infos'] = servers_infos
             if servers_infos:
-                client_init_params["tools_binding_name"] = "mcp"
+                # --- MCP resilience guards -------------------------------------
+                mcp_failures: Dict[str, float] = session.setdefault("mcp_failures", {})
+                now_mono = time.monotonic()
+
+                # Drop expired failure entries so recovered servers are retried.
+                for failed_name in [n for n, ts in mcp_failures.items() if now_mono - ts >= MCP_FAILURE_COOLDOWN]:
+                    mcp_failures.pop(failed_name, None)
+
+                def _probe_mcp_server(server_name: str, server_url: Optional[str]) -> bool:
+                    """Best-effort TCP liveness probe with a hard time budget.
+
+                    Returns True if the server is reachable (or the URL is not
+                    probeable), False otherwise. Never raises.
+                    """
+                    if not server_url:
+                        return False
+                    try:
+                        parsed = urlparse(str(server_url))
+                        host = parsed.hostname
+                        if not host:
+                            return True  # Non-TCP scheme/target: let the client try.
+                        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                        with socket.create_connection((host, port), timeout=MCP_PROBE_TIMEOUT):
+                            return True
+                    except Exception:
+                        return False
+
                 servers_list = []
                 for name, s_info in servers_infos.items():
                     s_url = s_info.get("server_url") or s_info.get("url")
+
+                    # Skip servers whose handshake recently failed (cooldown).
+                    if name in mcp_failures:
+                        ASCIIColors.info(f"[MCP] Skipping '{name}': handshake failed recently (cooldown active).")
+                        continue
+
+                    # Fast liveness pre-check: converts a long handshake timeout
+                    # into a bounded, cheap failure.
+                    if not _probe_mcp_server(name, s_url):
+                        mcp_failures[name] = time.monotonic()
+                        ASCIIColors.warning(f"[MCP] Skipping '{name}': server unreachable at {s_url} (probe failed).")
+                        continue
+
                     s_entry = {
                         "alias": name,
                         "type": "http",
@@ -1243,11 +1290,14 @@ def build_lollms_client_from_params(
                     if "auth_config" in s_info:
                         s_entry["auth_config"] = s_info["auth_config"]
                     servers_list.append(s_entry)
+                    attempted_mcp_servers.append(name)
 
-                client_init_params["tools_binding_config"] = {
-                    "servers": servers_list,
-                    "servers_infos": servers_infos
-                }
+                if servers_list:
+                    client_init_params["tools_binding_name"] = "mcp"
+                    client_init_params["tools_binding_config"] = {
+                        "servers": servers_list,
+                        "servers_infos": servers_infos
+                    }
 
         # Everything that needs the database is done. Release the connection NOW so a slow
         # model load can't hold a pool slot (the outer finally closing again is harmless).
@@ -1255,12 +1305,32 @@ def build_lollms_client_from_params(
 
         try:
             registry_payload = {k: v for k, v in client_init_params.items() if v is not None}
+
+            # Strip volatile runtime-only params from the registry payload so that
+            # temperature/top_p/reasoning changes do NOT trigger a full client rebuild.
+            # These are applied per-request via _apply_runtime after cache retrieval.
+            _VOLATILE_LLM_KEYS = {
+                "temperature", "top_k", "top_p", "repeat_penalty", "repeat_last_n",
+                "reasoning_activation", "reasoning_effort", "reasoning_summary",
+                "put_thoughts_in_context", "max_output_tokens",
+                "think", "thinking", "thinking_effort",
+            }
+            registry_llm_cfg = registry_payload.get("llm_binding_config", {})
+            runtime_from_config = {}
+            if isinstance(registry_llm_cfg, dict):
+                for vk in _VOLATILE_LLM_KEYS:
+                    if vk in registry_llm_cfg:
+                        runtime_from_config[vk] = registry_llm_cfg.pop(vk)
+
             registry_key = _registry_key(registry_payload)
+
+            # Merge runtime params: reasoning fields + volatile llm fields
             runtime = {
                 k: primary_config[k]
                 for k in ("reasoning_activation", "reasoning_effort")
                 if k in primary_config
             }
+            runtime.update(runtime_from_config)
 
             # Fast path: cached client, no build lock.
             lc = _registry_get(registry_key)
@@ -1288,9 +1358,37 @@ def build_lollms_client_from_params(
                     return lc
                 except Exception as engine_err:
                     binding_alias_to_show = target_binding_alias or 'N/A'
-                    ASCIIColors.warning(f"Engine Load Failed >> Binding: {binding_alias_to_show} | Error: {engine_err}")
+                    err_text = str(engine_err)
+                    ASCIIColors.warning(f"Engine Load Failed >> Binding: {binding_alias_to_show} | Error: {err_text}")
                     if callback:
-                        callback(f"⚠️ Configuration Issue: {engine_err}", 24, {})
+                        callback(f"⚠️ Configuration Issue: {err_text}", 24, {})
+
+                    # If the failure looks like an MCP handshake problem, isolate the
+                    # bad servers: record them and retry once with the tools binding removed.
+                    is_mcp_failure = (
+                        isinstance(engine_err, TimeoutError)
+                        or "mcp init" in err_text.lower()
+                        or "failed to initialize mcp" in err_text.lower()
+                    )
+                    tools_cfg = registry_payload.get("tools_binding_config")
+                    if is_mcp_failure and tools_cfg and attempted_mcp_servers:
+                        failure_registry = session.setdefault("mcp_failures", {})
+                        now_fail = time.monotonic()
+                        for server_name in attempted_mcp_servers:
+                            failure_registry[server_name] = now_fail
+                        ASCIIColors.warning(
+                            f"[MCP] Recording handshake failure for: {', '.join(attempted_mcp_servers)}. "
+                            f"Retrying engine without the tools binding."
+                        )
+                        try:
+                            retry_payload = {k: v for k, v in registry_payload.items() if k != "tools_binding_config"}
+                            retry_payload.update(load_tti=False, load_tts=False, load_stt=False)
+                            lc = LollmsClient(**retry_payload)
+                            _configure_client(lc, active_ctx, runtime)
+                            _registry_put(registry_key, lc, ttl=FAILURE_COOLDOWN)
+                            return lc
+                        except Exception as retry_err:
+                            ASCIIColors.warning(f"Engine Load Retry (no MCP) Failed >> {retry_err}")
 
                     degraded_payload = {k: v for k, v in registry_payload.items() if not k.startswith("llm_")}
                     degraded_payload.update(load_llm=False, load_tti=False, load_tts=False, load_stt=False)
@@ -1300,12 +1398,8 @@ def build_lollms_client_from_params(
                     return degraded_lc
             finally:
                 build_lock.release()
-
-        except HTTPException:
-            raise
         except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail="System error during engine registry. See server logs.")
+            trace_exception(e)
     finally:
         db.close()
 

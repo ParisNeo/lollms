@@ -157,10 +157,14 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
         llm_runtime_params["reasoning_effort"] = client_effort
         llm_runtime_params["reasoning_activation"] = True
 
-    # Wrap client build
+    # Wrap client build — only load MCP when tools are declared in the request
     lc = await loop.run_in_executor(
         executor, 
-        lambda: build_lollms_client_from_params(user.username, binding_alias, model_name, llm_params=llm_runtime_params, load_llm=True)
+        lambda: build_lollms_client_from_params(
+            user.username, binding_alias, model_name,
+            llm_params=llm_runtime_params, load_llm=True,
+            load_mcp=bool(request.tools)
+        )
     )
     reset_client_state(lc)
 

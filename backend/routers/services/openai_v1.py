@@ -1066,6 +1066,8 @@ async def chat_completions(
         llm_runtime_params["reasoning_activation"] = True
 
     # Client building can be slow, might involve model loading.
+    # Only load MCP when the request actually declares tools — avoids
+    # expensive MCP discovery/handshake for plain chat completions.
     try:
         lc = await loop.run_in_executor(
             executor,
@@ -1074,7 +1076,8 @@ async def chat_completions(
                 binding_alias=binding_alias,
                 model_name=model_name,
                 llm_params=llm_runtime_params,
-                load_llm=True
+                load_llm=True,
+                load_mcp=bool(request.tools)
             )
         )
     except Exception as e:
@@ -1661,7 +1664,8 @@ async def create_image_generation(
                 tti_binding_alias=tti_binding_alias,
                 tti_model_name=tti_model_name,
                 load_llm=False,
-                load_tti=True
+                load_tti=True,
+                load_mcp=False
             )
         )
 
@@ -1762,6 +1766,7 @@ async def create_image_variation(
                 tti_model_name=tti_model_name,
                 load_llm=False,
                 load_tti=True,
+                load_mcp=False,
             )
         )
 
@@ -1921,6 +1926,7 @@ async def create_image_edit(
                 tti_model_name=tti_model_name,
                 load_llm=False,
                 load_tti=True,
+                load_mcp=False,
             ),
         )
     except Exception as e:
@@ -2010,7 +2016,8 @@ async def create_embeddings(
                 username=user.username,
                 binding_alias=binding_alias,
                 model_name=model_name,
-                load_llm=True
+                load_llm=True,
+                load_mcp=False
             )
         )
     except Exception as e:
@@ -2071,7 +2078,8 @@ async def tokenize_text(
                 username=user.username,
                 binding_alias=binding_alias,
                 model_name=model_name,
-                load_llm=True
+                load_llm=True,
+                load_mcp=False
             )
         )
         tokens = await loop.run_in_executor(executor, lambda: lc.tokenize(request.text))
@@ -2101,7 +2109,8 @@ async def detokenize_tokens(
                 username=user.username,
                 binding_alias=binding_alias,
                 model_name=model_name,
-                load_llm=True
+                load_llm=True,
+                load_mcp=False
             )
         )
         text = await loop.run_in_executor(executor, lambda: lc.detokenize(request.tokens))
@@ -2127,7 +2136,8 @@ async def count_tokens(
                 username=user.username,
                 binding_alias=binding_alias,
                 model_name=model_name,
-                load_llm=True
+                load_llm=True,
+                load_mcp=False
             )
         )
         count = await loop.run_in_executor(executor, lambda: lc.count_tokens(request.text))
@@ -2190,7 +2200,8 @@ async def get_model_context_size(
                 username=user.username,
                 binding_alias=resolved_binding,
                 model_name=resolved_model,
-                load_llm=True
+                load_llm=True,
+                load_mcp=False
             )
         )
         ctx_size = await loop.run_in_executor(executor, lambda: lc.get_ctx_size(resolved_model) or lc.get_ctx_size())
@@ -2252,7 +2263,8 @@ async def create_speech_openai(
                 load_llm=False,
                 load_tts=True,
                 tts_binding_alias=tts_binding_alias,
-                tts_model_name=tts_model_name
+                tts_model_name=tts_model_name,
+                load_mcp=False
             )
         )
         if not hasattr(lc, "tts") or not lc.tts:
@@ -2334,7 +2346,8 @@ async def create_transcription_openai(
                 load_llm=False,
                 load_stt=True,
                 stt_binding_alias=stt_binding_alias,
-                stt_model_name=stt_model_name
+                stt_model_name=stt_model_name,
+                load_mcp=False
             )
         )
         if not hasattr(lc, "stt") or not lc.stt:
@@ -2408,16 +2421,6 @@ async def create_response_openai(
         lambda: resolve_model_name(db, request.model)
     )
 
-    lc = await loop.run_in_executor(
-        executor,
-        lambda: build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
-        )
-    )
-
     # Convert Responses API inputs to message sequence
     messages = []
     if request.instructions:
@@ -2464,7 +2467,8 @@ async def create_response_openai(
             binding_alias=binding_alias,
             model_name=model_name,
             llm_params=llm_runtime_params,
-            load_llm=True
+            load_llm=True,
+            load_mcp=bool(request.tools)
         )
     )
 

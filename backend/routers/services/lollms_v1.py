@@ -529,7 +529,7 @@ async def tokenize_text(request: TokenizeRequest, user: DBUser = Depends(get_use
     loop = asyncio.get_running_loop()
     
     def _tokenize():
-        lc = build_lollms_client_from_params(user.username, binding_alias, model_name)
+        lc = build_lollms_client_from_params(user.username, binding_alias, model_name, load_mcp=False)
         tokens = lc.tokenize(request.text)
         return TokenizeResponse(tokens=tokens, count=len(tokens))
 
@@ -541,7 +541,7 @@ async def detokenize_tokens(request: DetokenizeRequest, user: DBUser = Depends(g
     loop = asyncio.get_running_loop()
     
     def _detokenize():
-        lc = build_lollms_client_from_params(user.username, binding_alias, model_name)
+        lc = build_lollms_client_from_params(user.username, binding_alias, model_name, load_mcp=False)
         text = lc.detokenize(request.tokens)
         return DetokenizeResponse(text=text)
 
@@ -584,7 +584,7 @@ async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(g
         if not resolved_binding:
             resolved_binding, resolved_model = resolve_model_name(db, request.model)
 
-        lc = build_lollms_client_from_params(user.username, resolved_binding, resolved_model, load_llm=True)
+        lc = build_lollms_client_from_params(user.username, resolved_binding, resolved_model, load_llm=True, load_mcp=False)
         context_size = lc.get_ctx_size(resolved_model) or lc.get_ctx_size()
         return ContextSizeResponse(context_size=context_size if context_size else getattr(lc.llm, 'default_ctx_size', 32000))
 
@@ -599,7 +599,7 @@ async def process_long_context(request: LongContextRequest, user: DBUser = Depen
     loop = asyncio.get_running_loop()
     
     def _process():
-        lc = build_lollms_client_from_params(user.username, binding_alias, model_name)
+        lc = build_lollms_client_from_params(user.username, binding_alias, model_name, load_mcp=False)
         result = lc.long_context_processing(text_to_process=request.text, contextual_prompt=request.prompt, expected_generation_tokens=request.max_generation_tokens)
         return {"result": result}
 
@@ -673,7 +673,7 @@ async def edit_image_lollms(request: ImageEditRequest, user: DBUser = Depends(ge
         if request.model and '/' in request.model:
             binding_alias, model_name = request.model.split('/', 1)
         
-        lc = build_lollms_client_from_params(user.username, load_llm=False, load_tti=True, tti_binding_alias=binding_alias, tti_model_name=model_name)
+        lc = build_lollms_client_from_params(user.username, load_llm=False, load_tti=True, tti_binding_alias=binding_alias, tti_model_name=model_name, load_mcp=False)
         if not lc.tti: raise HTTPException(status_code=501, detail="ITI service not configured.")
         try:
             img_b64 = lc.tti.paint(prompt=request.prompt, image=request.image, mask=request.mask)
@@ -730,7 +730,8 @@ async def create_speech(
                 load_llm=False,
                 load_tts=True,
                 tts_binding_alias=tts_binding_alias,
-                tts_model_name=tts_model_name
+                tts_model_name=tts_model_name,
+                load_mcp=False
             )
         )
         
@@ -906,7 +907,8 @@ async def list_voices(
                     load_llm=False,
                     load_tts=True,
                     tts_binding_alias=tts_binding_alias,
-                    tts_model_name=tts_model_name
+                    tts_model_name=tts_model_name,
+                    load_mcp=False
                 )
                 if hasattr(lc, 'tts') and lc.tts and hasattr(lc.tts, 'list_voices'):
                     binding_voices = lc.tts.list_voices()
@@ -1090,7 +1092,8 @@ async def transcribe_speech(
             load_llm=False,
             load_stt=True,
             stt_binding_alias=stt_binding_alias,
-            stt_model_name=stt_model_name
+            stt_model_name=stt_model_name,
+            load_mcp=False
         )
     )
 
@@ -1195,7 +1198,8 @@ async def generate_music(
             load_llm=False,
             load_ttm=True,
             ttm_binding_alias=ttm_alias,
-            ttm_model_name=ttm_model
+            ttm_model_name=ttm_model,
+            load_mcp=False
         )
     )
 
@@ -1313,7 +1317,8 @@ async def generate_video(
             load_llm=False,
             load_ttv=True,
             ttv_binding_alias=ttv_alias,
-            ttv_model_name=ttv_model
+            ttv_model_name=ttv_model,
+            load_mcp=False
         )
     )
 
