@@ -251,12 +251,6 @@ export const useUiStore = defineStore('ui', {
         requestAnimationFrame(() => {
             root.style.transition = 'background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
             window.dispatchEvent(new Event('resize'));
-
-            setTimeout(() => {
-                const computedStyle = getComputedStyle(root);
-                const bgApp = computedStyle.getPropertyValue('--bg-app').trim();
-                console.log(`[UI Debug] Vibe ${targetVibe} applied. Background: ${bgApp}`);
-            }, 100);
         });
 
         console.log(`[UI] Vibe ${targetVibe} applied.`);

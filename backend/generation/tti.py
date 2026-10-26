@@ -42,7 +42,7 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
 from backend.discussion import get_user_discussion, get_user_discussion_manager
-from backend.tasks.image_generation_tasks import _generate_image_task, _generate_slides_task, _image_studio_edit_task
+from backend.tasks.image_generation_tasks import _generate_image_task, _image_studio_edit_task
 from backend.tasks.utils import _to_task_info
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
@@ -137,15 +137,7 @@ def build_tti_generation_router(router: APIRouter):
             # Use custom_prompt if provided, otherwise fallback to the tag's inner content
             final_prompt = request.custom_prompt if request.custom_prompt and request.custom_prompt.strip() else request.tag_content
 
-            if request.tag_type == 'slides':
-                task = task_manager.submit_task(
-                    name="Generating Slides (Regenerate)",
-                    target=_generate_slides_task,
-                    args=(current_user.username, discussion_id, message_id, final_prompt, request.width, request.height, request.num_images),
-                    description=f"Regenerating slides for: {final_prompt[:30]}...",
-                    owner_username=current_user.username
-                )
-            elif request.tag_type == 'generate':
+            if request.tag_type == 'generate':
                 task = task_manager.submit_task(
                     name="Generating Image (Regenerate)",
                     target=_generate_image_task,

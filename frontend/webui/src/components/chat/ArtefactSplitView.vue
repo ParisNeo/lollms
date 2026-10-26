@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useNotesStore } from '../../stores/notes';
@@ -365,14 +365,14 @@ async function handleExecute() {
                     if (payload.kind === 'image' || isImageArtefact.value) {
                         await fetchAsIsBlobUrl(version);
                     } else if (payload.kind === 'office' || isOfficeArtefact.value) {
-                        await fetchOfficeBlobUrl(version);
+                        await buildOfficePreview(version);
                     }
                 } else {
                     dbContent.value = typeof payload === 'string' ? payload : (payload?.content ?? '');
                     if (isImageArtefact.value && !asIsBlobUrl.value) {
                         await fetchAsIsBlobUrl(version);
-                    } else if (isOfficeArtefact.value && !officeBlobUrl.value) {
-                        await fetchOfficeBlobUrl(version);
+                    } else if (isOfficeArtefact.value && !officePreviewHtml.value) {
+                        await buildOfficePreview(version);
                     }
                 }
             }
@@ -386,6 +386,397 @@ async function handleExecute() {
     const isDataArtifact = computed(() => {
         return artefactGroup.value?.versions[0]?.artefact_type === 'data';
     });
+
+const OFFICE_EXTENSIONS = ['pptx', 'pptm', 'docx', 'docm', 'xlsx', 'xlsm', 'xls'];
+const isOfficeArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return OFFICE_EXTENSIONS.some(ext => t.endsWith('.' + ext));
+});
+const isSpreadsheetArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return t.endsWith('.xlsx') || t.endsWith('.xls');
+});
+
+// ── Inline Office / Media preview state ──
+// NOTE: These declarations MUST stay above the watcherKey watch below —
+// the immediate watcher calls resetOfficePreview() during setup, so any
+// ref declared after it would hit the temporal dead zone (TDZ).
+const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'm4v', 'mkv', 'avi'];
+const VIDEO_MIME_MAP = {
+    mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+    m4v: 'video/mp4', mkv: 'video/x-matroska', avi: 'video/x-msvideo'
+};
+const isVideoArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return VIDEO_EXTENSIONS.some(ext => t.endsWith('.' + ext));
+});
+const isDocxArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return t.endsWith('.docx') || t.endsWith('.docm');
+});
+const isXlsxArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return t.endsWith('.xlsx') || t.endsWith('.xlsm') || t.endsWith('.xls');
+});
+const isPptxArtefact = computed(() => {
+    const t = (title.value || '').toLowerCase();
+    return t.endsWith('.pptx') || t.endsWith('.pptm');
+});
+
+const officePreviewHtml = ref('');
+const officePreviewLoading = ref(false);
+const officePreviewError = ref('');
+const xlsxRows = ref([]);
+const xlsxSheets = ref([]);
+const activeSheet = ref('');
+const videoObjectUrl = ref('');
+const pptxContainerRef = ref(null);
+const pptxRenderActive = ref(false);
+const officePreviewFetches = new Map();
+// Unified sheet-rows cache: name → string[][]. Populated by BOTH parsers
+// (ExcelJS and the raw-XML zip fallback) so tab switching works the same.
+const parsedSheetRows = new Map();
+// ── @silurus/ooxml XlsxViewer (Tier 0): WASM/Canvas renderer with ──
+// embedded-image + classic-chart support. Falls back to the cell-text
+// tiers below when a workbook is unsupported.
+const xlsxViewerContainerRef = ref(null);
+let xlsxViewerInstance = null;
+const xlsxRenderMode = ref('silurus'); // 'silurus' | 'exceljs' | 'zip'
+
+function getExt(name) {
+    return (name || '').split('.').pop()?.toLowerCase() || '';
+}
+
+function destroyXlsxViewer() {
+    if (xlsxViewerInstance) {
+        try { xlsxViewerInstance.destroy?.(); } catch { /* noop */ }
+        xlsxViewerInstance = null;
+    }
+}
+
+function resetOfficePreview() {
+    officePreviewHtml.value = '';
+    officePreviewError.value = '';
+    officePreviewLoading.value = false;
+    officePreviewFetches.clear();
+    xlsxRows.value = [];
+    xlsxSheets.value = [];
+    activeSheet.value = '';
+    parsedSheetRows.clear();
+    xlsxBufferCache.clear();
+    destroyXlsxViewer();
+    xlsxRenderMode.value = 'silurus';
+    pptxRenderActive.value = false;
+    if (pptxContainerRef.value) {
+        pptxContainerRef.value.innerHTML = '';
+    }
+    if (videoObjectUrl.value) {
+        URL.revokeObjectURL(videoObjectUrl.value);
+        videoObjectUrl.value = '';
+    }
+}
+
+// Cached ArrayBuffer per title::version so the three render tiers share a
+// single download instead of refetching the blob on every fallback.
+const xlsxBufferCache = new Map();
+
+async function fetchArtefactArrayBuffer(version) {
+    const cacheKey = `${title.value}::v${version ?? 'latest'}`;
+    if (xlsxBufferCache.has(cacheKey)) {
+        return xlsxBufferCache.get(cacheKey);
+    }
+    // Prefix with window.location.origin so axios resolves the URL against
+    // the page origin (Vite dev proxy / same-origin prod) instead of the
+    // apiClient baseURL, which points directly at the backend and triggers
+    // CORS on the blob download.
+    const downloadUrl = `${window.location.origin}/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${version ? `?version=${version}` : ''}`;
+    const response = await apiClient.get(downloadUrl, { responseType: 'blob' });
+    const arrayBuffer = await response.data.arrayBuffer();
+    xlsxBufferCache.set(cacheKey, arrayBuffer);
+    return arrayBuffer;
+}
+
+async function buildDocxPreview(version) {
+    const arrayBuffer = await fetchArtefactArrayBuffer(version);
+    const mammoth = await import('mammoth');
+    const result = await mammoth.convertToHtml({ arrayBuffer });
+    officePreviewHtml.value = result.value || '<p><em>Empty document.</em></p>';
+}
+async function importExcelJS() {
+    try {
+        return await import('exceljs');
+    } catch (e) {
+        // Vite dev-server: stale optimize-deps cache returns 504 "Outdated
+        // Optimize Dep" for the pre-bundled module. Vite re-optimizes on the
+        // next request, so a single retry usually resolves it.
+        console.warn('[ArtefactSplitView] exceljs import failed, retrying once after Vite re-optimization...', e);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        return await import('exceljs');
+    }
+}
+
+// Bounded wait for the container ref: survives residual timing (HMR,
+// double-mount, deferred ref assignment) without blocking the common
+// case, where the ref is already populated on the first check.
+async function waitForXlsxContainer(timeoutMs = 2000) {
+    const start = Date.now();
+    while (!xlsxViewerContainerRef.value) {
+        if (Date.now() - start > timeoutMs) {
+            console.warn('[ArtefactSplitView] container wait timed out; isXlsxArtefact=', isXlsxArtefact.value, 'mode=', xlsxRenderMode.value, 'loading=', officePreviewLoading.value, 'fetching=', isFetching.value);
+            return false;
+        }
+        await nextTick();
+        await new Promise(resolve => setTimeout(resolve, 16));
+    }
+    return true;
+}
+
+async function buildXlsxPreviewViaSilurus(arrayBuffer) {
+    const { XlsxViewer } = await import('@silurus/ooxml/xlsx');
+    // The container div must exist in the DOM before construction. The
+    // template mounts it independently of the loading overlay, so the
+    // ref is normally populated already; the poll only covers edge cases.
+    if (!(await waitForXlsxContainer()) || !xlsxViewerContainerRef.value) {
+        throw new Error('XLSX viewer container not rendered');
+    }
+    destroyXlsxViewer();
+    xlsxViewerInstance = new XlsxViewer(xlsxViewerContainerRef.value, {
+        showZoomSlider: true,
+    });
+    await xlsxViewerInstance.load(arrayBuffer);
+    xlsxRenderMode.value = 'silurus';
+}
+
+async function buildXlsxPreview(version) {
+    // Single download shared by all tiers — a transport failure (CORS,
+    // backend down) short-circuits with a clear message instead of
+    // triggering three doomed refetches.
+    let arrayBuffer;
+    try {
+        arrayBuffer = await fetchArtefactArrayBuffer(version);
+    } catch (e) {
+        console.error('[ArtefactSplitView] Failed to download artefact:', e);
+        officePreviewError.value = 'Could not download the file — check your connection or use the Download button.';
+        return;
+    }
+    // Tier 0: @silurus/ooxml — real rendering engine (images + charts).
+    try {
+        await buildXlsxPreviewViaSilurus(arrayBuffer);
+        return;
+    } catch (e) {
+        console.warn('[ArtefactSplitView] @silurus/ooxml render failed, falling back to cell-text preview:', e);
+        destroyXlsxViewer();
+    }
+    // Tier 1: ExcelJS — cell values only.
+    let workbook = null;
+    try {
+        const ExcelJS = await importExcelJS();
+        workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.load(arrayBuffer);
+    } catch (e) {
+        // ExcelJS chokes on some openpyxl-authored files (hyperlink
+        // reconcile dereferences undefined .anchors). Fall back to
+        // reading the raw OOXML zip directly.
+        console.warn('[ArtefactSplitView] ExcelJS failed to parse xlsx, falling back to raw XML parse:', e);
+        await buildXlsxPreviewViaZip(arrayBuffer);
+        xlsxRenderMode.value = 'zip';
+        return;
+    }
+    xlsxSheets.value = (workbook.worksheets || []).map(ws => ws.name);
+    if (xlsxSheets.value.length === 0) {
+        officePreviewError.value = 'This spreadsheet contains no sheets.';
+        return;
+    }
+    parsedSheetRows.clear();
+    for (const ws of workbook.worksheets) {
+        const rows = [];
+        ws.eachRow({ includeEmpty: true }, (row) => {
+            const width = Math.max(ws.columnCount, 1);
+            const cells = new Array(width).fill('');
+            row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+                if (colNumber - 1 < width)cells[colNumber - 1] = normalizeXlsxCell(cell.value);
+            });
+            rows.push(cells);
+        });
+        parsedSheetRows.set(ws.name, rows);
+    }
+    activeSheet.value = xlsxSheets.value[0];
+    loadXlsxSheet(activeSheet.value);
+    xlsxRenderMode.value = 'exceljs';
+}
+
+function loadXlsxSheet(name) {
+    const rows = parsedSheetRows.get(name);
+    if (!rows) return;
+    activeSheet.value = name;
+    xlsxRows.value = rows;
+}
+
+// Fallback parser: read sheet data straight from the OOXML zip when
+// ExcelJS cannot load the workbook (openpyxl hyperlink quirk, etc.).
+async function buildXlsxPreviewViaZip(arrayBuffer) {
+    const JSZip = await import('jszip');
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const parser = new DOMParser();
+
+    const sharedStringsXml = await zip.file('xl/sharedStrings.xml')?.async('string').catch(() => '') || '';
+    const sharedStrings = [];
+    if (sharedStringsXml) {
+        const ssDoc = parser.parseFromString(sharedStringsXml, 'application/xml');
+        ssDoc.querySelectorAll('si').forEach((si) => {
+            sharedStrings.push(Array.from(si.getElementsByTagName('t')).map((t) => t.textContent).join(''));
+        });
+    }
+
+    const workbookXml = await zip.file('xl/workbook.xml')?.async('string').catch(() => '') || '';
+    const relsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('string').catch(() => '') || '';
+    if (!workbookXml || !relsXml) {
+        officePreviewError.value = 'This spreadsheet contains no readable sheets.';
+        return;
+    }
+
+    const wbDoc = parser.parseFromString(workbookXml, 'application/xml');
+    const relsDoc = parser.parseFromString(relsXml, 'application/xml');
+    const relMap = {};
+    relsDoc.querySelectorAll('Relationship').forEach((rel) => {
+        let target = rel.getAttribute('Target') || '';
+        if (target.startsWith('/xl/')) target = target.slice(1);
+        else if (!target.startsWith('xl/')) target = 'xl/' + target;
+        relMap[rel.getAttribute('Id')] = target;
+    });
+
+    parsedSheetRows.clear();
+    const sheetEls = Array.from(wbDoc.getElementsByTagName('sheet'));
+    for (const sheetEl of sheetEls) {
+        const name = sheetEl.getAttribute('name') || 'Sheet';
+        const rid = sheetEl.getAttribute('r:id') || sheetEl.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+        const path = relMap[rid];
+        if (!path) continue;
+        const xml = await zip.file(path)?.async('string').catch(() => '') || '';
+        if (!xml) continue;
+        const sheetDoc = parser.parseFromString(xml, 'application/xml');
+        const rows = [];
+        sheetDoc.querySelectorAll('sheetData > row').forEach((rowEl) => {
+            const cells = [];
+            Array.from(rowEl.getElementsByTagName('c')).forEach((c) => {
+                const ref = c.getAttribute('r') || '';
+                const col = ref.replace(/\d+/g, '');
+                const colIdx = col.split('').reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
+                const type = c.getAttribute('t') || '';
+                const vEl = c.getElementsByTagName('v')[0];
+                let value = vEl ? vEl.textContent : '';
+                if (type === 's') value = sharedStrings[Number(value)] ?? '';
+                else if (type === 'inlineStr') value = Array.from(c.getElementsByTagName('t')).map((t) => t.textContent).join('');
+                while (cells.length < colIdx) cells.push('');
+                cells[colIdx] = value;
+            });
+            rows.push(cells);
+        });
+        parsedSheetRows.set(name, rows);
+    }
+
+    if (parsedSheetRows.size === 0) {
+        officePreviewError.value = 'This spreadsheet contains no readable sheets.';
+        return;
+    }
+    xlsxSheets.value = Array.from(parsedSheetRows.keys());
+    activeSheet.value = xlsxSheets.value[0];
+    xlsxRows.value = parsedSheetRows.get(activeSheet.value);
+}
+
+function normalizeXlsxCell(value) {
+    if (value === null || value === undefined) return '';
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (value.richText) return value.richText.map(t => t.text).join('');
+    if (value.hyperlink) return String(value.text ?? value.hyperlink);
+    if (value.formula) return String(value.result ?? '');
+    if (value.error) return String(value.error);
+    return String(value);
+}
+
+// Bounded wait for the pptx container ref: mirrors waitForXlsxContainer.
+// The template mounts the container independently of the loading overlay,
+// so the common case exits on the first check with zero added latency.
+async function waitForPptxContainer(timeoutMs = 2000) {
+    const start = Date.now();
+    while (!pptxContainerRef.value || !pptxContainerRef.value.isConnected) {
+        if (Date.now() - start > timeoutMs) {
+            console.warn('[ArtefactSplitView] pptx container wait timed out; isPptxArtefact=', isPptxArtefact.value, 'loading=', officePreviewLoading.value, 'fetching=', isFetching.value);
+            return false;
+        }
+        await nextTick();
+        await new Promise(resolve => setTimeout(resolve, 16));
+    }
+    return true;
+}
+
+// pptx-preview paints each slide into the host as it parses, but its
+// preview() promise can stay pending forever on decks whose embedded
+// media never finishes loading. This watchdog resolves as soon as the
+// host contains rendered content so the loading overlay is always
+// dismissed; it only rejects when nothing at all was painted.
+async function waitForPptxPainted(host, baselineChildCount, timeoutMs = 30000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        if (host.children.length > baselineChildCount) return;
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    if (host.children.length > baselineChildCount || host.innerHTML.trim() !== '') return;
+    throw new Error('PPTX renderer produced no output');
+}
+
+async function buildPptxPreview(version) {
+    // Arm the template branch FIRST so the container mounts before any await.
+    pptxRenderActive.value = true;
+    const arrayBuffer = await fetchArtefactArrayBuffer(version);
+    const { init } = await import('pptx-preview');
+    if (!(await waitForPptxContainer()) || !pptxContainerRef.value) {
+        throw new Error('PPTX viewer container not rendered');
+    }
+    const host = pptxContainerRef.value;
+    host.innerHTML = '';
+    const previewer = init(host, { width: 960, height: 540 });
+    const baselineChildCount = host.children.length;
+    let previewError = null;
+    const previewDone = previewer.preview(arrayBuffer).catch((e) => { previewError = e; });
+    await Promise.race([previewDone, waitForPptxPainted(host, baselineChildCount)]);
+    if (previewError) throw previewError;
+}
+
+async function buildVideoPreview(version) {
+    const downloadUrl = `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${version ? `?version=${version}` : ''}`;
+    const response = await apiClient.get(downloadUrl, { responseType: 'blob' });
+    const blob = new Blob([response.data], { type: VIDEO_MIME_MAP[getExt(title.value)] || 'video/mp4' });
+    videoObjectUrl.value = URL.createObjectURL(blob);
+}
+
+async function buildOfficePreview(version) {
+    if (!title.value || !discussionsStore.currentDiscussionId) return;
+    const cacheKey = `${title.value}::v${version ?? 'latest'}`;
+    if (officePreviewFetches.has(cacheKey)) {
+        await officePreviewFetches.get(cacheKey);
+        return;
+    }
+    officePreviewLoading.value = true;
+    officePreviewError.value = '';
+    const task = (async () => {
+        try {
+            if (isDocxArtefact.value) await buildDocxPreview(version);
+            else if (isXlsxArtefact.value) await buildXlsxPreview(version);
+            else if (isPptxArtefact.value) await buildPptxPreview(version);
+            else if (isVideoArtefact.value) await buildVideoPreview(version);
+        } catch (e) {
+            console.error('Inline preview failed:', e);
+            pptxRenderActive.value = false;
+            officePreviewError.value = 'Preview unavailable — use the Download button instead.';
+        } finally {
+            officePreviewLoading.value = false;
+            officePreviewFetches.delete(cacheKey);
+        }
+    })();
+    officePreviewFetches.set(cacheKey, task);
+    await task;
+}
 
     // Performance Optimisation: Avoid deep watching large nested arrays.
     // Instead, watch a string key combining the file title and versions count.
@@ -407,6 +798,7 @@ async function handleExecute() {
         const isNewFileSelection = !oldVal || newVal.split('-')[0] !== oldVal.split('-')[0];
         if (isNewFileSelection) {
             dbContent.value = ''; // Clear previous text immediately to prevent flickering
+            resetOfficePreview();
         }
 
         const latestVersion = group.versions[0]?.version;
@@ -675,15 +1067,6 @@ function releaseSplitThumbnails() {
 }
 const isAsIsImage = computed(() => isImageArtefact.value);
 
-const OFFICE_EXTENSIONS = ['pptx', 'docx', 'xlsx', 'xls'];
-const isOfficeArtefact = computed(() => {
-    const t = (title.value || '').toLowerCase();
-    return OFFICE_EXTENSIONS.some(ext => t.endsWith('.' + ext));
-});
-const isSpreadsheetArtefact = computed(() => {
-    const t = (title.value || '').toLowerCase();
-    return t.endsWith('.xlsx') || t.endsWith('.xls');
-});
 const officeBadgeClass = computed(() => {
     const t = (title.value || '').toLowerCase();
     if (t.endsWith('.pptx')) return 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300';
@@ -756,6 +1139,7 @@ const asIsMetadata = computed(() => {
 
 onUnmounted(() => {
     releaseSplitThumbnails();
+    destroyXlsxViewer();
     if (audioBlobUrl.value) {
         URL.revokeObjectURL(audioBlobUrl.value);
     }
@@ -764,6 +1148,9 @@ onUnmounted(() => {
     }
     if (officeBlobUrl.value) {
         URL.revokeObjectURL(officeBlobUrl.value);
+    }
+    if (videoObjectUrl.value) {
+        URL.revokeObjectURL(videoObjectUrl.value);
     }
 });
 
@@ -813,6 +1200,14 @@ function download() {
     URL.revokeObjectURL(url);
 }
 </script>
+
+<style scoped>
+.office-doc-preview :deep(img) { max-width: 100%; height: auto; }
+.office-doc-preview :deep(table) { border-collapse: collapse; width: 100%; }
+.office-doc-preview :deep(td), .office-doc-preview :deep(th) { border: 1px solid var(--brand-border-muted, #d1d5db); padding: 4px 8px; }
+.pptx-preview-container { width: 100%; max-width: 960px; }
+.pptx-preview-container :deep(img) { max-width: 100%; height: auto; }
+</style>
 
 <template>
     <div class="h-full flex flex-col" :style="{
@@ -1013,17 +1408,20 @@ function download() {
             </div>
         </div>
         <div class="flex-1 relative bg-white dark:bg-gray-950">
+            <!-- Fetching overlay: NON-GATING sibling so the content area
+                 (including the silurus container) stays mounted while
+                 loadVersion runs its async build. -->
             <div v-if="isFetching" class="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm flex items-center justify-center">
                 <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
             </div>
-            <div v-else-if="loadError" class="absolute inset-0 flex flex-col items-center justify-center text-red-400 p-6 text-center">
+            <div v-if="loadError" class="absolute inset-0 flex flex-col items-center justify-center text-red-400 p-6 text-center">
                 <IconError class="w-12 h-12 mb-4 opacity-50" />
                 <p class="text-sm font-medium">{{ loadError }}</p>
                 <button @click="loadVersion(selectedVersion)" class="mt-4 btn btn-secondary btn-sm">Retry</button>
             </div>
 
             <!-- Conditional Rendering: Native AS-IS File Card, Interactive Data Grid, or CodeMirror Editor -->
-            <template v-else>
+            <template v-if="!loadError">
                 <!-- Interactive Audio Player -->
                 <div v-if="isAudioArtefact" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center" :style="{
                     backgroundColor: 'var(--brand-bg-app)'
@@ -1092,38 +1490,108 @@ function download() {
                     </div>
                 </div>
 
-                <!-- AS-IS Office Document Card (pptx / docx / xlsx / xls) -->
-                <div v-else-if="isOfficeArtefact" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
-                    <div class="max-w-md w-full p-8 bg-white dark:bg-gray-850 rounded-3xl border border-gray-200/80 dark:border-gray-700 shadow-xl space-y-5 animate-in fade-in">
-                        <div class="w-20 h-20 rounded-2xl flex items-center justify-center mx-auto shadow-inner" :class="officeIconClass">
-                            <IconFileText class="w-10 h-10" />
+                <!-- ── Inline Office / Media Previews (docx / xlsx / pptx / video) ── -->
+                <div v-else-if="isOfficeArtefact || isVideoArtefact" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar bg-gray-50/50 dark:bg-gray-900/30">
+                    <!-- PPTX: slide container. Mounted whenever the pptx
+                         builder is armed, INDEPENDENT of the loading state,
+                         so buildPptxPreview can find its DOM node while the
+                         overlay is up (same pattern as the silurus viewer). -->
+                    <div v-if="isPptxArtefact && pptxRenderActive" class="h-full flex flex-col">
+                        <div class="grow overflow-auto custom-scrollbar p-4 flex justify-center">
+                            <div ref="pptxContainerRef" class="pptx-preview-container"></div>
                         </div>
+                    </div>
 
-                        <div class="space-y-1">
-                            <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider font-mono" :class="officeBadgeClass">
-                                {{ (title.split('.').pop() || 'FILE').toUpperCase() }} DOCUMENT
-                            </span>
-                            <h3 class="text-base font-black text-gray-900 dark:text-white break-all">
-                                {{ asIsMetadata?.filename || title }}
-                            </h3>
-                            <p v-if="asIsMetadata?.size" class="text-xs font-mono text-gray-500 dark:text-gray-400">
-                                {{ asIsMetadata.size }}
-                            </p>
-                        </div>
+                    <!-- XLSX: @silurus/ooxml visual viewer (images + charts).
+                         Mounted whenever the mode is silurus, INDEPENDENT of
+                         the loading state, so the async builder can find its
+                         DOM node while the overlay is up. -->
+                    <div v-if="isXlsxArtefact && xlsxRenderMode === 'silurus'" class="h-full flex flex-col">
+                        <div ref="xlsxViewerContainerRef" class="w-full h-full min-h-[400px]"></div>
+                    </div>
 
-                        <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl text-left text-[11px] text-gray-600 dark:text-gray-400 space-y-1 border dark:border-gray-800">
-                            <p class="font-semibold text-gray-800 dark:text-gray-200">Preserved in workspace:</p>
-                            <p class="font-mono text-[10px] text-gray-500 break-all">{{ asIsMetadata?.location || title }}</p>
-                            <p class="text-[10px] italic text-gray-400 pt-1">{{ officeHint }}</p>
-                        </div>
+                    <!-- Loading overlay (non-gating sibling: paints above the
+                         viewer while WASM boots but never unmounts it) -->
+                    <div v-if="officePreviewLoading" class="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm flex flex-col items-center justify-center text-center gap-3">
+                        <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
+                        <p class="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Rendering preview...</p>
+                    </div>
 
-                        <button
-                            type="button"
-                            @click="download"
-                            class="w-full btn btn-primary py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 text-xs font-bold uppercase tracking-wider cursor-pointer active:scale-98 transition-all"
-                        >
+                    <!-- Error fallback -->
+                    <div v-else-if="officePreviewError" class="h-full flex flex-col items-center justify-center text-center p-6 gap-4">
+                        <IconError class="w-12 h-12 text-red-400 opacity-50" />
+                        <p class="text-sm font-medium text-red-400">{{ officePreviewError }}</p>
+                        <button @click="download" class="btn btn-primary btn-sm flex items-center gap-2">
                             <IconArrowDownTray class="w-4 h-4" />
-                            <span>Download {{ (title.split('.').pop() || 'FILE').toUpperCase() }} File</span>
+                            <span>Download File</span>
+                        </button>
+                    </div>
+
+                    <!-- PPTX / XLSX-silurus: slides are rendered by the armed
+                         containers above. This empty branch terminates the
+                         fallback chain so idle/error cards don't stack
+                         underneath the live viewers. -->
+                    <div v-else-if="(isPptxArtefact && pptxRenderActive) || (isXlsxArtefact && xlsxRenderMode === 'silurus')" class="h-0"></div>
+
+                    <!-- DOCX: rendered HTML -->
+                    <div v-else-if="isDocxArtefact && officePreviewHtml" class="p-4 sm:p-8">
+                        <div class="max-w-4xl mx-auto bg-white dark:bg-gray-850 rounded-2xl shadow-lg border border-gray-200/80 dark:border-gray-700 p-6 sm:p-10 office-doc-preview">
+                            <div class="prose prose-sm sm:prose-base dark:prose-invert max-w-none" v-html="officePreviewHtml"></div>
+                        </div>
+                    </div>
+
+                    <!-- XLSX: @silurus/ooxml visual viewer (images + charts) -->
+                    <div v-else-if="isXlsxArtefact && xlsxRenderMode === 'silurus'" class="h-full flex flex-col">
+                        <div ref="xlsxViewerContainerRef" class="w-full h-full min-h-[400px]"></div>
+                    </div>
+
+                    <!-- XLSX: scrollable grid with sheet tabs (fallback tiers) -->
+                    <div v-else-if="isXlsxArtefact && xlsxRows.length > 0" class="h-full flex flex-col">
+                        <div v-if="xlsxSheets.length > 1" class="px-4 pt-3 flex gap-1 overflow-x-auto custom-scrollbar shrink-0">
+                            <button v-for="sheet in xlsxSheets" :key="sheet"
+                                    @click="loadXlsxSheet(sheet)"
+                                    class="px-3 py-1.5 rounded-t-lg text-[11px] font-bold whitespace-nowrap transition-colors"
+                                    :class="activeSheet === sheet ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'">
+                                {{ sheet }}
+                            </button>
+                        </div>
+                        <div class="grow overflow-auto custom-scrollbar p-4">
+                            <table class="border-collapse text-xs font-mono">
+                                <tbody>
+                                    <tr v-for="(row, rowIndex) in xlsxRows" :key="rowIndex">
+                                        <td class="border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-400 px-2 py-1 text-[10px] sticky left-0 select-none">{{ rowIndex + 1 }}</td>
+                                        <td v-for="(cell, colIndex) in row" :key="colIndex"
+                                            class="border border-gray-200 dark:border-gray-700 px-2 py-1 whitespace-nowrap"
+                                            :class="rowIndex === 0 ? 'bg-gray-50 dark:bg-gray-800 font-bold' : 'bg-white dark:bg-gray-850'">
+                                            {{ cell }}
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- PPTX: rendered slides -->
+                    <div v-else-if="isPptxArtefact && pptxSlideCount > 0" class="h-full flex flex-col">
+                        <div class="grow overflow-auto custom-scrollbar p-4 flex justify-center">
+                            <div ref="pptxContainerRef" class="pptx-preview-container"></div>
+                        </div>
+                    </div>
+
+                    <!-- Video: blob-URL player (same lifecycle as audio) -->
+                    <div v-else-if="isVideoArtefact && videoObjectUrl" class="h-full flex flex-col items-center justify-center p-6">
+                        <video :src="videoObjectUrl" controls preload="metadata" class="max-w-full max-h-[80vh] rounded-xl shadow-lg"></video>
+                    </div>
+
+                    <!-- Idle / nothing rendered yet -->
+                    <div v-else class="h-full flex flex-col items-center justify-center text-center p-6 gap-4">
+                        <div class="w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner" :class="officeIconClass">
+                            <IconFileText class="w-8 h-8" />
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">{{ officeHint }}</p>
+                        <button @click="download" class="btn btn-primary btn-sm flex items-center gap-2">
+                            <IconArrowDownTray class="w-4 h-4" />
+                            <span>Download File</span>
                         </button>
                     </div>
                 </div>
