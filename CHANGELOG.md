@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-26 01:54]
+
+- cleanup: Remove unused assets from frontend/dist/assets - about view components
+
 ## [2026-10-26 01:26]
 
 - feat(image-generation): add streaming image generation with live progress
