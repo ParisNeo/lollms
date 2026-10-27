@@ -1238,6 +1238,7 @@ async def chat_completions(
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
                 generation_error = False
+                client_aborted = False
                 try:
                     _prepare_generation(lc)
                     watcher_task = asyncio.ensure_future(watch_disconnect())
@@ -1283,8 +1284,6 @@ async def chat_completions(
 
                      # ── STREAMING PATH ────────────────────────────────────────────────────
                     in_reasoning = False
-
-                    client_aborted = False
 
                     def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
                         nonlocal in_reasoning
