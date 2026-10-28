@@ -1,11 +1,13 @@
 # backend/routers/discussion/artefacts.py
 import base64
 import io
+import time
 import asyncio
 import uuid
 import requests
 import re
 import os
+import mimetypes
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, unquote
@@ -1159,6 +1161,196 @@ def build_artefacts_router(router: APIRouter):
             return _map_artefact_for_ui(artefact_info, discussion_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to create artefact from context: {e}")
+
+    @router.get("/{discussion_id}/workspace/{file_path:path}")
+    async def serve_workspace_file(
+        discussion_id: str,
+        file_path: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Serves raw files from the user's discussion workspace over HTTP.
+
+        Read-only and jail-checked against the discussion's workspace roots so
+        HTML artefacts opened in a real browser tab can resolve relative assets.
+        """
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        decoded = unquote(file_path)
+        try:
+            if "%" in decoded:
+                decoded = unquote(decoded)
+        except Exception:
+            pass
+        if "\x00" in decoded:
+            raise HTTPException(status_code=400, detail="Invalid path.")
+        # Belt-and-braces segment checks (defense in depth on top of is_relative_to)
+        parts = Path(decoded).parts
+        if decoded.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", decoded) or any(p == ".." for p in parts):
+            raise HTTPException(status_code=403, detail="Path traversal detected.")
+        allowed_roots = []
+        if getattr(discussion, "workspace_data_path", None):
+            allowed_roots.append(Path(discussion.workspace_data_path).resolve())
+        if getattr(discussion, "workspace_path", None):
+            root = Path(discussion.workspace_path).resolve()
+            if root not in allowed_roots:
+                allowed_roots.append(root)
+            # Tool-written files may be nested under an extra workspace_data/
+            # prefix inside the discussion root; participate as a jailed root.
+            nested_root = (root / "workspace_data").resolve()
+            if nested_root not in allowed_roots and nested_root.is_dir():
+                allowed_roots.append(nested_root)
+        for root in allowed_roots:
+            candidate = (root / decoded).resolve()
+            if candidate.is_file() and candidate.is_relative_to(root):
+                media_type = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+                return FileResponse(
+                    str(candidate),
+                    media_type=media_type,
+                    filename=candidate.name,
+                    headers={
+                        # Prevent stale cached assets (e.g. re-generated images)
+                        # from being served by the browser.
+                        "Cache-Control": "no-cache, must-revalidate",
+                        "ETag": f'"{candidate.stat().st_mtime_ns}-{candidate.stat().st_size}"',
+                    },
+                )
+
+        # Fallback: resolve by basename anywhere under the jailed workspace roots.
+        # Generated images may live under a different subfolder than the artefact's
+        # parent path, may differ in case on case-sensitive filesystems, and may
+        # have a swapped image extension (e.g. .png vs .webp produced by generators).
+        target_name = Path(decoded).name
+        MIME_OVERRIDES = {
+            ".webp": "image/webp",
+            ".avif": "image/avif",
+            ".heic": "image/heic",
+        }
+        # Budgeted scan: unbounded rglob over a large workspace can starve the
+        # ASGI event loop; cap both entries visited and wall-clock time.
+        MAX_SCAN_ENTRIES = 50_000
+        MAX_SCAN_SECONDS = 2.0
+        if target_name:
+            target_stem = Path(target_name).stem.lower()
+            deadline = time.monotonic() + MAX_SCAN_SECONDS
+            for root in allowed_roots:
+                found_candidate = None
+                visited = 0
+                try:
+                    for candidate in root.rglob("*"):
+                        visited += 1
+                        if visited > MAX_SCAN_ENTRIES or time.monotonic() > deadline:
+                            print(f"WARNING: Workspace file fallback scan budget exhausted for '{decoded}' after {visited} entries.")
+                            break
+                        try:
+                            if not candidate.is_file():
+                                continue
+                            if candidate.name.lower() == target_name.lower():
+                                resolved = candidate.resolve()
+                            elif (
+                                candidate.suffix.lower() in IMAGE_EXTENSIONS
+                                and candidate.stem.lower() == target_stem
+                            ):
+                                resolved = candidate.resolve()
+                            else:
+                                continue
+                        except OSError:
+                            continue
+                        if resolved.is_file() and resolved.is_relative_to(root):
+                            found_candidate = resolved
+                            break
+                except OSError:
+                    continue
+                if found_candidate:
+                    print(f"INFO: Workspace file '{decoded}' resolved via fallback to '{found_candidate}'.")
+                    media_type = (
+                        mimetypes.guess_type(found_candidate.name)[0]
+                        or MIME_OVERRIDES.get(found_candidate.suffix.lower(), "application/octet-stream")
+                    )
+                    return FileResponse(
+                        str(found_candidate),
+                        media_type=media_type,
+                        filename=found_candidate.name,
+                        headers={"Cache-Control": "no-cache, must-revalidate"},
+                    )
+
+        print(
+            f"WARNING: Workspace file 404: requested='{decoded}' basename='{target_name}' "
+            f"discussion='{discussion_id}' roots={[str(r) for r in allowed_roots]}"
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Workspace file not found: '{decoded}' (searched for '{target_name}'). "
+                f"Checked roots: {[str(r) for r in allowed_roots]}. "
+                "Possible causes: (1) File generation is still in progress, "
+                "(2) Filename case mismatch (check exact casing), "
+                "(3) File is in a different discussion/workspace, or "
+                "(4) The HTML references a subdirectory that doesn't exist. "
+                "Verify the file exists in the discussion's data_workspace folder, "
+                "then retry once generation has completed."
+            )
+        )
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/serve_html")
+    async def serve_artefact_html(
+        discussion_id: str,
+        artefact_title: str,
+        version: Optional[int] = Query(None),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Serves an HTML artefact as a real web page with a <base> tag pointing
+        at the workspace file server, so relative src/href references resolve."""
+        from fastapi.responses import HTMLResponse
+
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        decoded_title = unquote(artefact_title)
+        try:
+            if "%" in decoded_title:
+                decoded_title = unquote(decoded_title)
+        except Exception:
+            pass
+
+        artefact = discussion.get_artefact(title=decoded_title, version=version)
+        if not artefact:
+            # Case-insensitive fallback identical to the download endpoint scan
+            try:
+                for art in discussion.list_artefacts():
+                    if art.get("title", "").lower() == decoded_title.lower():
+                        artefact = discussion.get_artefact(title=art["title"], version=version)
+                        decoded_title = art["title"]
+                        break
+            except Exception:
+                pass
+        if not artefact:
+            raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found")
+
+        content = artefact.get("content", "")
+        # The artefact lookup above already succeeded; only the <base> href
+        # computation needs a sane path. Defensively fold residual literal
+        # percent-escapes in stored titles (e.g. "games%2Fknight.html") into
+        # real characters so Path(...).parent computes a correct folder.
+        clean_title = decoded_title
+        if "%" in clean_title:
+            try:
+                further = unquote(clean_title)
+                clean_title = further if "%" not in further else re.sub(r"%[0-9A-Fa-f]{2}", "_", further)
+            except Exception:
+                clean_title = re.sub(r"%[0-9A-Fa-f]{2}", "_", clean_title)
+        parent = str(Path(clean_title).parent).replace("\\", "/")
+        parent = "" if parent == "." else parent.strip("/") + "/"
+        base_href = f"/api/discussions/{discussion_id}/workspace/{parent}"
+        base_tag = f'<base href="{base_href}">'
+        if re.search(r"<head[^>]*>", content, re.IGNORECASE):
+            html = re.sub(r"(<head[^>]*>)", r"\1" + base_tag, content, count=1, flags=re.IGNORECASE)
+        elif re.search(r"<html[^>]*>", content, re.IGNORECASE):
+            html = re.sub(r"(<html[^>]*>)", r"\1<head>" + base_tag + "</head>", content, count=1, flags=re.IGNORECASE)
+        else:
+            html = base_tag + content
+        return HTMLResponse(
+            content=html,
+            headers={"Cache-Control": "no-cache, must-revalidate"},
+        )
 
     @router.get("/{discussion_id}/artefacts/{artefact_title:path}/content")
     async def get_discussion_artefact_content(

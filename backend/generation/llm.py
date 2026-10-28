@@ -17,6 +17,7 @@ import zipfile
 import platform
 import time
 import requests
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 import safe_store
 from safe_store import SafeStore
@@ -151,7 +152,7 @@ def build_rag_tool(
                         if hasattr(gs, "query_graph_hybrid"):
                             hybrid_res = gs.query_graph_hybrid(
                                 query_text=query,
-                                top_k=effective_top_k,
+                                top_k=int(effective_top_k) if effective_top_k is not None else 5,
                                 dense_weight=dense_weight,
                                 bm25_weight=bm25_weight,
                                 graph_weight=graph_weight
@@ -498,7 +499,7 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
 
     try:
         lc = build_lollms_client_from_params(
-            username=user.username,
+            username=str(user.username),
             load_llm=False,
             load_tti=True
         )
@@ -585,7 +586,8 @@ def process_street_view_tags(text: str, user: DBUser, db: Session, discussion_ob
     """
     pattern = re.compile(r'<street_view>(.*?)</street_view>', re.DOTALL | re.IGNORECASE)
     matches = list(pattern.finditer(text))
-    if not matches or not user.google_api_key:
+    google_api_key = str(user.google_api_key) if user.google_api_key else None
+    if not matches or not google_api_key:
         return text, [], [], []
 
     images_b64 = []
@@ -667,7 +669,7 @@ def process_google_workspace_tags(text: str, user: DBUser, main_loop=None, strea
 
     return text, messages
 
-def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None, current_turn_images: List[str] = None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
+def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None, current_turn_images: Optional[List[str]] = None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
     """
     Parses <edit_image> tags to edit previously generated images.
     Returns: (cleaned_text, list_of_base64_images, list_of_image_metadata, list_of_groups)
@@ -683,7 +685,7 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
 
     try:
         lc = build_lollms_client_from_params(
-            username=user.username,
+            username=str(user.username),
             load_llm=False,
             load_tti=True
         )
@@ -705,12 +707,12 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
     
     # 1. Load historical messages if needed to ensure we have the images
     if discussion_obj.messages is None:
-        if hasattr(discussion_obj, 'load_messages'):
+        if hasattr(discussion_obj, 'load_messages') and callable(getattr(discussion_obj, 'load_messages', None)):
             discussion_obj.load_messages()
         else:
             discussion_obj.messages = []
     # 2. Iterate chronologically through all messages
-    for msg in discussion_obj.messages:
+    for msg in (discussion_obj.messages or []):
         # Check for images in 'images' list or 'image_references'
         # lollms_client usually stores as list of b64 strings in `images`
         msg_images = msg.get_active_images() # Returns list of b64 strings
@@ -871,12 +873,14 @@ def perform_search_single(query: str, provider: str, user: DBUser) -> List[Dict[
     
     actual_query = query
     base_provider = provider
+    google_api_key = str(user.google_api_key) if user.google_api_key else None
+    google_cse_id = str(user.google_cse_id) if user.google_cse_id else None
     if provider in site_map:
         actual_query = f"{site_map[provider]} {query}"
-        base_provider = "google" if (user.google_api_key and user.google_cse_id) else "duckduckgo"
+        base_provider = "google" if (google_api_key and google_cse_id) else "duckduckgo"
 
-    if base_provider == "google" and user.google_api_key and user.google_cse_id:
-        return perform_google_search(actual_query, user.google_api_key, user.google_cse_id)
+    if base_provider == "google" and google_api_key and google_cse_id:
+        return perform_google_search(actual_query, google_api_key, google_cse_id)
     
     if base_provider == "duckduckgo" or base_provider in site_map:
         pm.ensure_packages("duckduckgo_search")
@@ -884,7 +888,7 @@ def perform_search_single(query: str, provider: str, user: DBUser) -> List[Dict[
             from duckduckgo_search import DDGS
             with DDGS() as ddgs:
                 results = [r for r in ddgs.text(actual_query, max_results=5)]
-                return [{'title': r.get('title'), 'link': r.get('href'), 'snippet': r.get('body')} for r in results]
+                return [{'title': r.get('title') or '', 'link': r.get('href') or '', 'snippet': r.get('body') or ''} for r in results]
         except Exception: pass
     return []
 
@@ -916,7 +920,7 @@ def process_herd_logic(
     main_loop, 
     stream_queue, 
     db_session: Session,
-    all_events: List[Dict] = None
+    all_events: Optional[List[Dict]] = None
 ):
     """
     Executes the 4-phase Herd Mode workflow:
@@ -929,13 +933,15 @@ def process_herd_logic(
     postcode_crew = []
     
     # --- DYNAMIC CREW GENERATION ---
-    if user.herd_dynamic_mode and user.herd_model_pool:
+    herd_dynamic_mode = bool(user.herd_dynamic_mode) if user.herd_dynamic_mode is not None else False
+    herd_model_pool = user.herd_model_pool if user.herd_model_pool else None
+    if herd_dynamic_mode and herd_model_pool:
         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Herd Manager: analyzing task and assembling dynamic teams..."})) + "\n")
         
         try:
             # 1. Prepare inputs
-            model_pool_desc = json.dumps(user.herd_model_pool, indent=2)
-            leader_client = get_user_lollms_client(user.username)
+            model_pool_desc = json.dumps(herd_model_pool, indent=2)
+            leader_client = get_user_lollms_client(str(user.username))
             
             # 2. Construct Manager Prompt
             manager_prompt = f"""You are the Herd Manager.
@@ -1000,12 +1006,12 @@ Return ONLY a valid JSON object. No markdown formatting.
 
     # --- FALLBACK TO STATIC IF DYNAMIC FAILED OR DISABLED ---
     if not precode_crew and not postcode_crew:
-        precode_crew = user.herd_precode_participants or []
-        postcode_crew = user.herd_postcode_participants or []
+        precode_crew = list(user.herd_precode_participants) if user.herd_precode_participants else []
+        postcode_crew = list(user.herd_postcode_participants) if user.herd_postcode_participants else []
         
         # Legacy fallback
         if not precode_crew and not postcode_crew:
-            legacy_crew = user.herd_participants or []
+            legacy_crew = list(user.herd_participants) if user.herd_participants else []
             precode_crew = legacy_crew
             postcode_crew = legacy_crew
 
@@ -1019,14 +1025,14 @@ Return ONLY a valid JSON object. No markdown formatting.
     history_text = ""
     # Ensure messages are loaded
     if discussion_obj.messages is None:
-        if hasattr(discussion_obj, 'load_messages'):
+        if hasattr(discussion_obj, 'load_messages') and callable(getattr(discussion_obj, 'load_messages', None)):
             discussion_obj.load_messages()
         else:
             discussion_obj.messages = []
 
     
     # Simple approach: Take last 10 messages for context
-    recent_messages = discussion_obj.messages[-10:] 
+    recent_messages = (discussion_obj.messages or [])[-10:] 
     
     for msg in recent_messages:
         # Skip the currently generating AI message (if it exists as a placeholder)
@@ -1094,7 +1100,7 @@ Return ONLY a valid JSON object. No markdown formatting.
 
         try:
             temp_client = build_lollms_client_from_params(
-                username=user.username,
+                username=str(user.username),
                 binding_alias=binding_alias,
                 model_name=model_name,
                 load_llm=True,

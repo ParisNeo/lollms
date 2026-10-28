@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-28 01:07]
+
+- feat: (LLM) Fix concurrency issues in generation backend and add URL parsing functionality for external API calls
+
 ## [2026-10-27 15:11]
 
 - fix: move `client_aborted` initialization before the main generation try-block

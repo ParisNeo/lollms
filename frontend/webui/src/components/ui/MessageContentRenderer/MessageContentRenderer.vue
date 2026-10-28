@@ -1924,6 +1924,14 @@ function openWidgetInNewTab(widget) {
     const source = getWidgetContent(widget);
     if (!source) return;
 
+    // HTML artefacts backed by a discussion workspace run via the backend
+    // runner so relative asset paths (images/knight.png) resolve server-side.
+    const widgetTitle = widget.title || widget.id;
+    if (effectiveDiscussionId.value && widgetTitle && /\.(html?|svg)$/i.test(widgetTitle)) {
+        window.open(`/api/discussions/${effectiveDiscussionId.value}/artefacts/${encodeURIComponent(widgetTitle)}/serve_html`, '_blank');
+        return;
+    }
+
     const fullHtml = wrapInIsolatedShell(source, widget.id || 'widget');
     const blob = new Blob([fullHtml], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
@@ -2147,7 +2155,8 @@ function onMermaidReady({ svg }, partIndex) {
             <summary class="think-summary p-3 cursor-pointer hover:bg-opacity-10 hover:bg-black flex items-center justify-between" style="background-color: var(--brand-bg-elevated);">
               <IconChevronRight class="w-3 h-3 text-blue-500 transition-transform duration-200 think-arrow shrink-0" />
               <IconAnimateSpin v-if="!part.isClosed" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
-              <IconThinking v-else class="h-4 w-4 text-blue-400 shrink-0" />
+              <IconThinking class="h-4 w-4 text-blue-400 shrink-0" />
+              <IconCheckCircle v-if="part.isClosed" class="w-3.5 h-3.5 text-emerald-500 shrink-0" />
               <div class="flex items-center justify-between w-full pr-2 min-w-0 gap-3">
                   <div class="flex items-center gap-2 min-w-0">
                       <span class="text-xs font-semibold text-blue-800 dark:text-blue-200 shrink-0">Thinking Process</span>

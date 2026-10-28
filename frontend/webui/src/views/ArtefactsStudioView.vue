@@ -44,6 +44,8 @@ const form = ref({
     content: ''
 });
 
+
+
 const isExecutableType = computed(() => {
     const t = (form.value.type || '').toLowerCase();
     const title = (form.value.title || '').toLowerCase();
@@ -235,6 +237,21 @@ async function sendToImageStudio() {
     }
 }
 
+const canRunInBrowser = computed(() => {
+    const title = (form.value.title || '').toLowerCase();
+    return isExecutableType.value
+        && title.endsWith('.html')
+        && !!discussionsStore.currentDiscussionId
+        && selectedArtefact.value
+        && selectedArtefact.value.discussion_id !== 'saved';
+});
+
+function runInBrowser() {
+    if (!canRunInBrowser.value) return;
+    const url = `/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(selectedArtefact.value.title)}/serve_html`;
+    window.open(url, '_blank');
+}
+
 function handleExternalSelectEvent(event) {
     if (event.detail && event.detail.id) {
         const found = artefacts.value.find(a => String(a.id || a.title) === String(event.detail.id));
@@ -298,12 +315,12 @@ watch(() => route.query.artefactId, (newId) => {
                                 <span>Code Editor</span>
                             </button>
                             <button 
-                                @click="activeViewMode = 'preview'" 
+                                @click="(form.type === 'html' || form.title.toLowerCase().endsWith('.html')) && canRunInBrowser ? runInBrowser() : (activeViewMode = 'preview')" 
                                 class="px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5"
                                 :class="activeViewMode === 'preview' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-text-dim'"
                             >
                                 <component :is="isExecutableType ? IconPlayCircle : IconEye" class="w-3.5 h-3.5 text-emerald-500" />
-                                <span>{{ isExecutableType ? 'Live Execution' : 'Render Preview' }}</span>
+                                <span>{{ isExecutableType ? 'Run / Preview' : 'Render Preview' }}</span>
                             </button>
                         </div>
 
@@ -311,10 +328,9 @@ watch(() => route.query.artefactId, (newId) => {
                             <IconPlus class="w-3.5 h-3.5" />
                             <span class="hidden md:inline">New</span>
                         </button>
-                        <button v-if="isImageArtefactSelected" @click="sendToImageStudio" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Send to Image Studio" :disabled="!!sendingArtefactId">
-                            <IconAnimateSpin v-if="!!sendingArtefactId" class="w-3.5 h-3.5 animate-spin" />
-                            <IconPhoto v-else class="w-3.5 h-3.5" />
-                            <span class="hidden md:inline">Send to Image Studio</span>
+                        <button v-if="canRunInBrowser" @click="runInBrowser" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Run in browser with workspace assets">
+                            <IconPlayCircle class="w-3.5 h-3.5 text-emerald-500" />
+                            <span class="hidden md:inline">Run in browser</span>
                         </button>
                         <button v-if="isImageArtefactSelected" @click="sendToImageStudio" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Send to Image Studio" :disabled="!!sendingArtefactId">
                             <IconAnimateSpin v-if="!!sendingArtefactId" class="w-3.5 h-3.5 animate-spin" />
@@ -353,13 +369,32 @@ watch(() => route.query.artefactId, (newId) => {
 
                     <!-- Mode: Live Execution & Interactive Runner -->
                     <div v-else class="grow overflow-hidden rounded-2xl border border-border-main bg-bg-card shadow-sm flex flex-col">
-                        <!-- HTML Sandboxed Live Runtime -->
-                        <iframe 
-                            v-if="form.type === 'html' || form.title.toLowerCase().endsWith('.html')" 
-                            :srcdoc="form.content" 
-                            sandbox="allow-scripts allow-forms allow-modals"
-                            class="w-full h-full border-0 bg-white"
-                        ></iframe>
+                        <!-- HTML runs via the backend runner so relative workspace
+                             assets (images/knight.png) resolve. Sandboxed srcdoc
+                             iframes have a null origin and cannot load them. -->
+                        <div 
+                            v-if="form.type === 'html' || form.title.toLowerCase().endsWith('.html')"
+                            class="w-full h-full flex flex-col items-center justify-center gap-5 p-10 text-center"
+                        >
+                            <div class="p-5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-600">
+                                <IconPlayCircle class="w-12 h-12" />
+                            </div>
+                            <div class="max-w-md">
+                                <h3 class="text-lg font-bold text-text-main mb-2">Run this artefact in a browser tab</h3>
+                                <p class="text-sm text-text-dim leading-relaxed">
+                                    HTML artefacts are served by the backend so relative workspace assets
+                                    (images, CSS, scripts from this discussion) resolve correctly.
+                                    Sandboxed previews cannot access those files.
+                                </p>
+                            </div>
+                            <button v-if="canRunInBrowser" @click="runInBrowser" class="btn btn-primary flex items-center gap-2">
+                                <IconPlayCircle class="w-4 h-4" />
+                                <span>Run in Browser</span>
+                            </button>
+                            <p v-else class="text-xs text-text-dim italic">
+                                Save this artefact inside an active discussion to enable browser execution.
+                            </p>
+                        </div>
 
                         <!-- SVG Vector Rendering -->
                         <div 
