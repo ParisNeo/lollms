@@ -32,7 +32,7 @@ python-dotenv==1.2.4
 -e ../ascii_colors/ascii_colors
 -e ../pipmaster
 openai==2.1.0
-tiktoken==0.11.0
+tiktoken==0.14.0
 
 # --- Data Validation & Numerical Core ---
 pydantic==2.12.5
@@ -41,7 +41,7 @@ numpy==2.2.6
 Pillow==13.0.0
 
 # --- SafeStore & Vector / Graph Engine ---
--e ../safe_stor
+-e ../safe_store
 wcwidth==0.2.14
 
 # --- Document Parsing, Ingestion & Office Formats ---

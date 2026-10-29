@@ -32,7 +32,7 @@ lollms-client==1.21.0
 ascii_colors==0.13.0
 pipmaster==1.2.2
 openai==2.1.0
-tiktoken==0.11.0
+tiktoken==0.14.0
 
 # --- Data Validation & Numerical Core ---
 pydantic==2.12.5

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-29 16:41]
+
+- chore: update tiktoken version and fix safe_store path; remove obsolete run_windows.bat
+
 ## [2026-10-29 08:41]
 
 - feat(social): add AI-generated post support and JSON extraction utilities

@@ -42,7 +42,7 @@ if not exist "%VENV_DIR%\Scripts\activate.bat" (
     )
     call .\%VENV_DIR%\Scripts\activate.bat
     echo [INFO] Installing dependencies...
-    python -m pip install --upgrade pip
+    python -m pip install --upgrade pip wheel setuptools wheel
     pip install --no-cache-dir -r %REQUIREMENTS_FILE%
     echo [SUCCESS] Initial setup complete!
 ) else (
