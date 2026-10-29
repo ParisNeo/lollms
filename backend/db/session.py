@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker
 engine = None
 SessionLocal = None
@@ -33,6 +33,38 @@ def init_database(db_url: str):
                 cursor.close()
 
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        _apply_lightweight_migrations()
+
+def _apply_lightweight_migrations():
+    """
+    Idempotently adds columns that were introduced after the initial schema.
+    Uses SQLAlchemy inspector so it works across SQLite/Postgres/MySQL.
+    Safe to run on every startup.
+    """
+    if engine is None:
+        return
+
+    # (table_name, column_name, ddl_type)
+    migrations = [
+        ("posts", "tags", "JSON"),
+        ("posts", "theme", "VARCHAR(50)"),
+    ]
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with engine.begin() as conn:
+        for table, column, ddl_type in migrations:
+            if table not in existing_tables:
+                continue
+            existing_cols = {c["name"] for c in inspector.get_columns(table)}
+            if column in existing_cols:
+                continue
+            try:
+                conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {ddl_type}'))
+                print(f"[DB MIGRATION] Added column '{column}' to table '{table}'.")
+            except Exception as e:
+                print(f"[DB MIGRATION] Failed to add '{column}' to '{table}': {e}")
 
 def get_db():
     if SessionLocal is None:

@@ -20,7 +20,7 @@ from ascii_colors import trace_exception
 
 from backend.settings import settings
 from backend.task_manager import task_manager
-from backend.tasks.social_tasks import _respond_to_mention_task, _moderate_content_task
+from backend.tasks.social_tasks import _respond_to_mention_task, _moderate_content_task, _auto_tag_post_task
 from backend.db import get_db
 from backend.db.base import PostVisibility, FriendshipStatus, follows_table
 from backend.db.models.user import User as DBUser, Friendship as DBFriendship
@@ -36,7 +36,9 @@ from backend.models import (
 )
 from backend.models.social import (
     GeneratePostDraftRequest,
-    GeneratePostDraftResponse
+    GeneratePostDraftResponse,
+    TagSuggestionResponse,
+    ThemeSummary
 )
 from backend.tasks.social_tasks import _distill_search_query
 from backend.session import (
@@ -696,6 +698,15 @@ def create_post(
             owner_username='lollms' # System/Bot owns this task
         )
 
+    # Auto-tag with LLM in background
+    task_manager.submit_task(
+        name=f"Auto-tag post {new_post.id}",
+        target=_auto_tag_post_task,
+        args=(new_post.id,),
+        description=f"Extracting hashtags and theme for post {new_post.id}",
+        owner_username='lollms'
+    )
+
     post_public_obj = get_post_public(db, new_post, current_user.id)
     manager.broadcast_sync({"type": "new_post", "data": post_public_obj.model_dump(mode="json")})
     return post_public_obj
@@ -1141,6 +1152,97 @@ def get_main_feed(
         trace_exception(e)
         raise HTTPException(status_code=500, detail="An error occurred while fetching the feed.")
 
+
+@social_router.get("/themes", response_model=List[ThemeSummary])
+def list_themes(
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Returns all distinct themes with post counts."""
+    rows = db.query(
+        DBPost.theme,
+        func.count(DBPost.id)
+    ).filter(
+        DBPost.theme.isnot(None),
+        DBPost.moderation_status != 'flagged'
+    ).group_by(DBPost.theme).order_by(func.count(DBPost.id).desc()).all()
+
+    return [ThemeSummary(theme=r[0], count=r[1]) for r in rows if r[0]]
+
+@social_router.get("/tags", response_model=List[Dict[str, Any]])
+def list_tags(
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Returns all distinct tags with post counts."""
+    posts = db.query(DBPost.tags).filter(
+        DBPost.tags.isnot(None),
+        DBPost.moderation_status != 'flagged'
+    ).all()
+
+    tag_counts: Dict[str, int] = {}
+    for (tags,) in posts:
+        if isinstance(tags, list):
+            for t in tags:
+                if isinstance(t, str) and t:
+                    tag_counts[t] = tag_counts.get(t, 0) + 1
+
+    sorted_tags = sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)
+    return [{"tag": t, "count": c} for t, c in sorted_tags]
+
+@social_router.get("/search", response_model=List[PostPublic])
+def search_posts(
+    q: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+    theme: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Search posts by text, tag, or theme."""
+    query = db.query(DBPost).options(
+        joinedload(DBPost.author),
+        joinedload(DBPost.comments).joinedload(DBComment.author),
+        joinedload(DBPost.likes)
+    ).filter(
+        DBPost.visibility == PostVisibility.public,
+        DBPost.moderation_status != 'flagged'
+    )
+
+    if q and q.strip():
+        query = query.filter(DBPost.content.ilike(f"%{q.strip()}%"))
+
+    if theme and theme.strip():
+        query = query.filter(DBPost.theme == theme.strip())
+
+    if tag and tag.strip():
+        clean_tag = tag.strip().lower().lstrip('#')
+        # JSON contains check via cast for portability
+        query = query.filter(cast(DBPost.tags, String).contains(f'"{clean_tag}"'))
+
+    posts = query.order_by(DBPost.created_at.desc()).limit(100).all()
+    return get_posts_public_batched(db, posts, current_user.id)
+
+@social_router.post("/posts/{post_id}/retag", response_model=PostPublic)
+def retag_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Manually trigger re-tagging of a post (author or admin)."""
+    post = db.query(DBPost).filter(DBPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+    if post.author_id != current_user.id and not getattr(current_user, 'is_admin', False):
+        raise HTTPException(status_code=403, detail="Not authorized.")
+
+    task_manager.submit_task(
+        name=f"Re-tag post {post_id}",
+        target=_auto_tag_post_task,
+        args=(post_id,),
+        description=f"Re-extracting hashtags and theme for post {post_id}",
+        owner_username='lollms'
+    )
+    return get_post_public(db, post, current_user.id)
 
 @social_router.get("/posts/{post_id}/comments", response_model=List[CommentPublic])
 def get_comments_for_post(

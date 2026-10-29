@@ -40,6 +40,8 @@ class PostPublic(PostBase):
     visibility: PostVisibility
     is_pinned: bool = False
     is_ai_generated: bool = False
+    tags: Optional[List[str]] = None
+    theme: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
     comments: List[CommentPublic] = []
@@ -57,3 +59,11 @@ class GeneratePostDraftResponse(BaseModel):
     content: str
     sources: Optional[List[str]] = Field(default_factory=list)
     tools_used: Optional[List[str]] = Field(default_factory=list)
+
+class TagSuggestionResponse(BaseModel):
+    tags: List[str] = Field(default_factory=list)
+    theme: Optional[str] = None
+
+class ThemeSummary(BaseModel):
+    theme: str
+    count: int

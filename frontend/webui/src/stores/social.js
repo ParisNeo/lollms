@@ -20,6 +20,15 @@ export const useSocialStore = defineStore('social', () => {
     const comments = ref({});
     const isLoadingComments = ref({});
 
+    // Theme & Tag state
+    const themes = ref([]);
+    const tags = ref([]);
+    const activeTheme = ref(null);
+    const activeTag = ref(null);
+    const searchQuery = ref('');
+    const searchResults = ref([]);
+    const isSearching = ref(false);
+
     // Social Groups State
     const socialGroups = ref([]);
     const isLoadingGroups = ref(false);
@@ -305,6 +314,59 @@ export const useSocialStore = defineStore('social', () => {
             console.error("Failed to fetch main feed:", error);
         } finally {
             isLoadingFeed.value = false;
+        }
+    }
+
+    async function fetchThemes() {
+        try {
+            const response = await apiClient.get('/api/social/themes');
+            themes.value = response.data || [];
+        } catch (error) {
+            console.error("Failed to fetch themes:", error);
+            themes.value = [];
+        }
+    }
+
+    async function fetchTags() {
+        try {
+            const response = await apiClient.get('/api/social/tags');
+            tags.value = response.data || [];
+        } catch (error) {
+            console.error("Failed to fetch tags:", error);
+            tags.value = [];
+        }
+    }
+
+    async function searchPosts({ q = '', tag = null, theme = null } = {}) {
+        isSearching.value = true;
+        try {
+            const params = {};
+            if (q) params.q = q;
+            if (tag) params.tag = tag;
+            if (theme) params.theme = theme;
+            const response = await apiClient.get('/api/social/search', { params });
+            searchResults.value = response.data || [];
+            return searchResults.value;
+        } catch (error) {
+            console.error("Search failed:", error);
+            searchResults.value = [];
+            return [];
+        } finally {
+            isSearching.value = false;
+        }
+    }
+
+    async function retagPost(postId) {
+        try {
+            const response = await apiClient.post(`/api/social/posts/${postId}/retag`);
+            const updated = response.data;
+            const feedIdx = feedPosts.value.findIndex(p => p.id === postId);
+            if (feedIdx !== -1) feedPosts.value[feedIdx] = { ...feedPosts.value[feedIdx], ...updated };
+            useUiStore().addNotification('Re-tagging started...', 'info');
+            return updated;
+        } catch (error) {
+            useUiStore().addNotification('Failed to re-tag post.', 'error');
+            throw error;
         }
     }
     
@@ -945,6 +1007,13 @@ export const useSocialStore = defineStore('social', () => {
         isLoadingGroupDetails.value = false;
         groupFeedPosts.value = [];
         isLoadingGroupFeed.value = false;
+        themes.value = [];
+        tags.value = [];
+        activeTheme.value = null;
+        activeTag.value = null;
+        searchQuery.value = '';
+        searchResults.value = [];
+        isSearching.value = false;
     }
 
     return {
@@ -963,6 +1032,13 @@ export const useSocialStore = defineStore('social', () => {
         socialGroups,
         activeGroupDetails,
         groupFeedPosts,
+        themes,
+        tags,
+        activeTheme,
+        activeTag,
+        searchQuery,
+        searchResults,
+        isSearching,
 
         // LOADING STATES
         isLoadingFriends, 
@@ -992,6 +1068,7 @@ export const useSocialStore = defineStore('social', () => {
         fetchPendingRequests, fetchBlockedUsers, fetchUserProfile, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser,
         handleNewDm, handleNewComment, handleIncomingFriendRequest, markConversationAsRead,
         fetchFeed, fetchUserPosts, uploadPostMedia, fetchLinkPreview, createPost, updatePost, togglePinPost, deletePost, fetchComments, createComment, deleteComment,
+        fetchThemes, fetchTags, searchPosts, retagPost,
         async generatePostDraft(payload) {
             try {
                 const response = await apiClient.post('/api/social/generate-post-draft', payload);
@@ -1017,6 +1094,13 @@ export const useSocialStore = defineStore('social', () => {
             const exists = feedPosts.value.some(p => String(p.id) === String(post.id));
             if (!exists) {
                 feedPosts.value.unshift(post);
+            }
+        },
+        handlePostUpdated(post) {
+            if (!post || !post.id) return;
+            const idx = feedPosts.value.findIndex(p => String(p.id) === String(post.id));
+            if (idx !== -1) {
+                feedPosts.value[idx] = { ...feedPosts.value[idx], ...post };
             }
         },
         $reset

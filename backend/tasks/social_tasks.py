@@ -338,6 +338,90 @@ def _run_moderation_loop(task, db, items, total_count):
     db.commit()
     task.set_progress(100)
 
+def _auto_tag_post_task(task: Task, post_id: int):
+    """Reads a post and uses the LLM to assign hashtags and a theme."""
+    task.log(f"Auto-tagging post {post_id}...")
+    db = next(get_db())
+    try:
+        post = db.query(DBPost).filter(DBPost.id == post_id).first()
+        if not post:
+            task.log("Post not found.", "WARNING")
+            return
+
+        try:
+            lc = build_lollms_client_from_params(username='lollms')
+        except Exception as e:
+            task.log(f"Failed to init LLM: {e}", "ERROR")
+            return
+
+        if not lc or not getattr(lc, 'llm', None):
+            task.log("LLM unavailable, skipping auto-tag.", "WARNING")
+            return
+
+        system_prompt = (
+            "You are a content categorization assistant. Analyze the social post and return a JSON object "
+            "with two keys: 'tags' (a list of 3-6 lowercase hashtag strings WITHOUT the # symbol, e.g. ['ai','python']) "
+            "and 'theme' (a single short Title-Case category like 'Technology', 'Science', 'Art', 'Politics', 'Health', 'Business', 'Entertainment', 'Education', 'Sports', 'Other'). "
+            "Return ONLY valid JSON, no markdown fences."
+        )
+        user_prompt = f"Post content:\n{post.content[:4000]}\n\nReturn the JSON now."
+
+        try:
+            raw = lc.generate_text(user_prompt, system_prompt=system_prompt, max_new_tokens=200, temperature=0.1)
+        except Exception as gen_err:
+            task.log(f"LLM generation failed (model may not be loaded): {gen_err}", "WARNING")
+            return
+
+        # Normalize response: some bindings return dicts, some return strings
+        if isinstance(raw, dict):
+            data = raw
+        else:
+            raw_str = raw if isinstance(raw, str) else str(raw or "")
+            clean = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw_str.strip(), flags=re.MULTILINE).strip()
+            try:
+                data = json.loads(clean)
+            except json.JSONDecodeError:
+                task.log(f"Failed to parse tag JSON: {clean[:120]}", "WARNING")
+                return
+
+        if not isinstance(data, dict):
+            task.log(f"Unexpected tag payload type: {type(data).__name__}", "WARNING")
+            return
+
+        tags = data.get("tags") or []
+        theme = data.get("theme") or "Other"
+
+        # Sanitize
+        clean_tags = []
+        for t in tags:
+            if isinstance(t, str):
+                tt = re.sub(r'[^a-z0-9_]', '', t.lower().replace('#', '').replace(' ', '_'))[:30]
+                if tt and tt not in clean_tags:
+                    clean_tags.append(tt)
+        clean_tags = clean_tags[:8]
+
+        post.tags = clean_tags
+        post.theme = str(theme)[:50]
+        db.commit()
+        db.refresh(post)
+
+        task.log(f"Tagged post {post_id} with {clean_tags} in theme '{theme}'.")
+
+        from backend.routers.social import get_post_public
+        try:
+            post_public = get_post_public(db, post, post.author_id)
+            manager.broadcast_sync({"type": "post_updated", "data": post_public.model_dump(mode="json")})
+        except Exception:
+            pass
+
+        task.set_progress(100)
+        return {"post_id": post_id, "tags": clean_tags, "theme": theme}
+    except Exception as e:
+        task.log(f"Auto-tag error: {e}", "ERROR")
+        trace_exception(e)
+    finally:
+        db.close()
+
 def _distill_search_query(raw_topic: str, max_words: int = 8) -> str:
     """Transforms a potentially long instruction prompt into a clean search-engine keyword phrase."""
     if not raw_topic:

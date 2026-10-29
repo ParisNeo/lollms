@@ -128,6 +128,11 @@ async function handleTogglePin() {
     await socialStore.togglePinPost(props.post.id);
 }
 
+async function handleRetag() {
+    closeOptionsMenu();
+    await socialStore.retagPost(props.post.id);
+}
+
 async function handleDelete() {
     closeOptionsMenu();
     if (confirm('Are you sure you want to delete this post?')) {
@@ -213,12 +218,14 @@ async function handleAiAction(action = 'explain') {
 
 <template>
   <div 
-    class="bg-white dark:bg-gray-800 rounded-2xl shadow-md border dark:border-gray-700/60 overflow-visible flex flex-col transition-all relative" 
+    class="group bg-[var(--brand-bg-card)] rounded-xl shadow-sm hover:shadow-lg border border-[var(--brand-border-main)] overflow-visible flex flex-col transition-all duration-300 relative hover:-translate-y-0.5 hover:border-[var(--brand-primary)]" 
     :class="[
       {'ring-2 ring-amber-500/40 border-amber-400 dark:border-amber-600 shadow-amber-500/5': post.is_pinned},
       {'z-30': isOptionsMenuOpen}
     ]"
   >
+    <!-- Left accent stripe -->
+    <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl bg-gradient-to-b from-[var(--brand-primary)] via-[var(--brand-secondary)] to-[var(--brand-accent)] opacity-0 group-hover:opacity-100 transition-opacity"></div>
 
     <!-- Pinned / Featured Announcement Header -->
     <div v-if="post.is_pinned" class="rounded-t-2xl px-4 py-1.5 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 dark:from-amber-500/20 dark:to-transparent border-b border-amber-300/40 dark:border-amber-700/40 flex items-center justify-between text-amber-800 dark:text-amber-300 select-none">
@@ -254,6 +261,11 @@ async function handleAiAction(action = 'explain') {
             <span class="text-xs text-gray-500 dark:text-gray-400">
               · {{ formatTimestamp(post.created_at) }}
             </span>
+
+            <!-- Theme Badge -->
+            <span v-if="post.theme" class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-[var(--brand-bg-subtle)] text-[var(--brand-primary)] border border-[var(--brand-border-main)] select-none shadow-xs">
+              {{ post.theme }}
+            </span>
           </div>
 
           <!-- Options Menu -->
@@ -270,6 +282,11 @@ async function handleAiAction(action = 'explain') {
               <button v-if="isAdmin" @click="handleTogglePin" class="w-full text-left flex items-center px-4 py-2 text-xs font-bold text-amber-600 dark:text-amber-400 hover:bg-gray-100 dark:hover:bg-gray-800">
                 <span class="mr-3 text-sm">📌</span>
                 {{ post.is_pinned ? 'Unpin Announcement' : 'Feature / Pin to Top' }}
+              </button>
+
+              <button v-if="isAuthor || isAdmin" @click="handleRetag" class="w-full text-left flex items-center px-4 py-2 text-xs font-medium text-purple-600 dark:text-purple-400 hover:bg-gray-100 dark:hover:bg-gray-800">
+                <span class="mr-3 text-sm">🏷️</span>
+                Re-tag with AI
               </button>
 
               <button @click="handleCopyMarkdown" class="w-full text-left flex items-center px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -312,6 +329,18 @@ async function handleAiAction(action = 'explain') {
         <!-- Post Content View -->
         <div v-else>
           <MessageContentRenderer :content="post.content" class="mt-2 prose prose-sm dark:prose-invert max-w-none" />
+
+          <!-- Hashtag Chips -->
+          <div v-if="post.tags && post.tags.length > 0" class="mt-3 flex flex-wrap gap-1.5">
+            <button
+              v-for="tag in post.tags"
+              :key="tag"
+              @click.stop="socialStore.searchPosts({ tag })"
+              class="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-[var(--brand-bg-subtle)] text-[var(--brand-primary)] border border-[var(--brand-border-main)] hover:bg-[var(--brand-bg-hover)] transition-colors"
+            >
+              #{{ tag }}
+            </button>
+          </div>
 
           <!-- Multi-Modal Media Rendering Pipeline (Images, Videos, Link Cards) -->
           <div v-if="post.media && post.media.length > 0" class="mt-4 space-y-3">

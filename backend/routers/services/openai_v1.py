@@ -767,10 +767,75 @@ def extract_json_candidates(text: str) -> List[str]:
     return candidates
 
 
+def _parse_xml_tool_calls(content: str) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
+    """
+    Parses XML-style tool calls emitted by opencode / Qwen / DeepSeek native formats:
+
+        <tool_call>
+        <function=NAME>
+        <parameter=KEY>VALUE</parameter>
+        ...
+        </function>
+        </tool_call>
+
+    Values are JSON-decoded when possible, otherwise kept as raw strings.
+    Returns (content_before_first_tool_call_or_None, tool_calls_or_None).
+    """
+    tool_call_pattern = re.compile(
+        r"<tool_call>\s*<function=([^>\s]+)>(.*?)</function>\s*</tool_call>",
+        re.DOTALL | re.IGNORECASE,
+    )
+    param_pattern = re.compile(
+        r"<parameter=([^>\s]+)>(.*?)</parameter>",
+        re.DOTALL | re.IGNORECASE,
+    )
+
+    matches = list(tool_call_pattern.finditer(content))
+    if not matches:
+        return None, None
+
+    tool_calls: List[ToolCall] = []
+    for match in matches:
+        func_name = match.group(1).strip()
+        body = match.group(2)
+
+        arguments: Dict[str, Any] = {}
+        for p_match in param_pattern.finditer(body):
+            key = p_match.group(1).strip()
+            raw_value = p_match.group(2).strip()
+            try:
+                arguments[key] = json.loads(raw_value)
+            except (json.JSONDecodeError, ValueError):
+                arguments[key] = raw_value
+
+        tool_calls.append(
+            ToolCall(
+                id=generate_mistral_compatible_id(),
+                type="function",
+                function=FunctionCall(
+                    name=func_name,
+                    arguments=json.dumps(arguments),
+                ),
+            )
+        )
+
+    if not tool_calls:
+        return None, None
+
+    first_start = matches[0].start()
+    text_before = content[:first_start].strip()
+    final_content = text_before if text_before else None
+
+    ASCIIColors.success(f"Parsed {len(tool_calls)} XML tool call(s).")
+    return final_content, tool_calls
+
+
 def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
     """
-    Parses the LLM output to find JSON tool calls.
-    PRIORITIZES content inside ```json code blocks, but falls back to scanning.
+    Parses the LLM output to find tool calls.
+    Strategy 0: XML <tool_call> blocks (opencode / Qwen / DeepSeek native).
+    Strategy 1: JSON inside ```json code blocks.
+    Strategy 2: Raw JSON scanning fallback.
     """
     ASCIIColors.yellow("--- TOOL PARSING START ---")
     
@@ -782,6 +847,12 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
         content = str(content)
 
     ASCIIColors.cyan(f"Raw LLM Output (First 500 chars):\n{content[:500]}...")
+
+    # Strategy 0: XML-style tool calls (highest priority — unambiguous when present)
+    xml_content, xml_tool_calls = _parse_xml_tool_calls(content)
+    if xml_tool_calls:
+        ASCIIColors.yellow("--- TOOL PARSING END (Success - XML) ---")
+        return xml_content, xml_tool_calls
 
     valid_tool_call_data = None
     matched_text_segment = None
