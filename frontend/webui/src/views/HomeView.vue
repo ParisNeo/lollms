@@ -23,7 +23,7 @@ watch(() => discussionsStore.currentDiscussionId, (newId) => {
 </script>
 
 <template>
-  <div class="h-full w-full">
+  <div class="h-full w-full min-w-0">
     <template v-if="isAuthenticated">
       <FeedComponent v-if="mainView === 'feed'" />
       <ChatView v-else-if="mainView === 'chat'" />

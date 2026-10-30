@@ -56,7 +56,9 @@ class DiscussionInfo(BaseModel):
     rag_datastore_ids: Optional[List[str]] = None
     active_tools: List[str] = Field(default_factory=list)
     created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
     last_activity_at: Optional[datetime.datetime] = None
+    discussion_metadata: Optional[Dict[str, Any]] = None
     active_branch_id: Optional[str] = None
     data_zone: Optional[str] = None
     discussion_images: List[dict|str] = Field(default_factory=list)

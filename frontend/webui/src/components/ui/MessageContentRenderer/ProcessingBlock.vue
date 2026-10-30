@@ -110,7 +110,7 @@ function copyAllLogs() {
         <button 
             type="button"
             @click="isExpanded = !isExpanded"
-            class="group flex items-center gap-2 text-left transition-all focus:outline-none py-1 px-2.5 rounded-xl border shadow-2xs select-none cursor-pointer"
+            class="group flex items-center gap-2 text-left transition-all focus:outline-none py-1 px-2.5 rounded-xl border shadow-2xs select-none cursor-pointer w-full min-w-0 box-border"
             style="background-color: var(--input-bg); border-color: var(--border-muted); color: var(--text-main);"
         >
             <!-- Status Indicator -->
@@ -155,7 +155,7 @@ function copyAllLogs() {
             leave-from-class="max-h-[800px] opacity-100"
             leave-to-class="max-h-0 opacity-0"
         >
-            <div v-if="isExpanded" class="mt-3 ml-2 pl-4 border-l-2 border-gray-200 dark:border-gray-800 relative space-y-4 animate-in fade-in">
+            <div v-if="isExpanded" class="processing-content mt-2 px-2.5 pt-2.5 pb-1 relative space-y-3 animate-in fade-in w-full max-w-full min-w-0 box-border rounded-xl border" style="width:100%;max-width:100%;min-width:0;box-sizing:border-box;background-color:var(--input-bg);border-color:var(--border-muted);">
                 
                 <div v-if="steps.length === 0" class="text-xs font-mono text-gray-400 italic py-1">
                     {{ isClosed ? 'Process finished (no detailed log output).' : 'Waiting for execution events...' }}
@@ -164,11 +164,11 @@ function copyAllLogs() {
                 <div 
                     v-for="(step, idx) in steps" 
                     :key="idx"
-                    class="relative group/step"
+                    class="processing-timeline-row relative group/step w-full min-w-0"
                 >
                     <!-- Timeline Dot -->
                     <div 
-                        class="absolute -left-[22px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-white dark:bg-gray-950 transition-colors"
+                        class="absolute left-1 top-1.5 w-2.5 h-2.5 rounded-full border-2 bg-white dark:bg-gray-950 transition-colors"
                         :class="[
                             idx === steps.length - 1 && !isClosed 
                             ? 'border-blue-500 animate-pulse bg-blue-100' 
@@ -179,9 +179,9 @@ function copyAllLogs() {
                     ></div>
 
                     <!-- Step Content -->
-                    <div class="flex flex-col gap-1">
+                    <div class="flex flex-col gap-1 w-full min-w-0 pl-4">
                         <!-- Main Step Text -->
-                        <div class="flex items-center justify-between gap-4">
+                        <div class="flex items-center justify-between gap-4 w-full min-w-0">
                             <span 
                                 class="text-xs font-medium leading-snug transition-colors font-mono"
                                 :class="[
@@ -241,5 +241,18 @@ function copyAllLogs() {
 /* Remove default details chevron */
 summary::-webkit-details-marker {
   display: none;
+}
+
+.processing-block-root,
+.processing-content {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.processing-timeline-row {
+  width: 100%;
+  min-width: 0;
 }
 </style>

@@ -1996,7 +1996,8 @@ function onMermaidReady({ svg }, partIndex) {
       <!-- Dynamic Style Enforcement for Markdown generated code -->
       <!-- Uses a scoped style block to inject CSS variables for headers, code, and text elements safely -->
       <component :is="'style'" nonce="lollms-theme-styles">
-        .message-prose { color: var(--brand-text-main); }
+        .theme-aware-root { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+        .message-prose { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; display: block; color: var(--brand-text-main); }
         .message-prose p { color: var(--brand-text-main); margin-bottom: 0.75rem; }
         .message-prose h1, .message-prose h2, .message-prose h3, .message-prose h4 { color: var(--brand-accent); }
         .message-prose h1 { font-size: 1.5rem; margin-top: 1.25rem; margin-bottom: 0.75rem; }

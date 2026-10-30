@@ -96,7 +96,7 @@ function clearFilters() {
 <template>
   <div class="flex flex-col h-full">
     <div class="grow bg-[var(--brand-bg-app)] overflow-y-auto">
-      <div class="mx-auto py-4 px-4 w-full max-w-7xl">
+      <div class="feed-zone mx-auto py-4 px-4 w-full min-w-0 box-border">
 
         <!-- Theme-aware Hero Header -->
         <div class="relative mb-4 rounded-2xl overflow-hidden shadow-lg border border-[var(--brand-border-main)]">
@@ -121,11 +121,14 @@ function clearFilters() {
           </div>
         </div>
 
-        <!-- Two-column layout on wide screens -->
-        <div class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+        <!-- Two-column layout on wide screens (collapses to single column when sidebar is empty) -->
+        <div
+          class="grid grid-cols-1 gap-4"
+          :class="(themes.length > 0 || tags.length > 0) ? 'lg:grid-cols-[minmax(0,1fr)_320px]' : 'lg:grid-cols-1'"
+        >
 
           <!-- Main column -->
-          <div class="min-w-0">
+          <div class="min-w-0 w-full col-span-1">
             <!-- Search Bar -->
             <div class="mb-3 relative">
               <IconMagnifyingGlass class="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--brand-text-dim)] pointer-events-none" />
@@ -292,3 +295,12 @@ function clearFilters() {
     <DmFooter v-if="canChat" />
   </div>
 </template>
+
+<style scoped>
+.feed-zone {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+</style>

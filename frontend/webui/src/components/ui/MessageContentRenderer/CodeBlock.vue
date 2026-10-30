@@ -728,8 +728,8 @@ async function downloadCreatedFile(filename) {
 </style>
 
 <style scoped>
-.code-block-container { overflow: hidden; font-family: 'Fira Code', 'Courier New', monospace; border-radius: 8px; }
-.code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; width: 100%; cursor: pointer; }
+.code-block-container { display: block; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; overflow: hidden; font-family: 'Fira Code', 'Courier New', monospace; border-radius: 8px; }
+.code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; width: 100%; box-sizing: border-box; cursor: pointer; }
 .code-language { font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
 .code-action-btn { display: flex; align-items: center; gap: 6px; border-radius: 5px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer; transition: background-color 0.2s, color 0.2s; }
 .code-action-btn:disabled { cursor: not-allowed; opacity: 0.6; }
@@ -740,7 +740,7 @@ async function downloadCreatedFile(filename) {
 .file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
 .remove-file-btn { font-size: 1rem; line-height: 1; border-radius: 50%; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; }
 .remove-file-btn:hover { background-color: rgba(0,0,0,0.1); }
-.code-block-scrollable { margin: 0; padding: 16px; max-height: 400px; overflow-y: auto; overflow-x: auto; }
+.code-block-scrollable { margin: 0; padding: 16px; width: 100%; max-width: 100%; box-sizing: border-box; max-height: 400px; overflow-y: auto; overflow-x: auto; }
 .code-block-scrollable > .hljs { background-color: transparent !important; padding: 0 !important; }
 .code-execution-output { padding: 12px; font-size: 0.8rem; }
 .code-execution-output pre { margin: 0; white-space: pre-wrap; word-break: break-word; }

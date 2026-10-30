@@ -471,6 +471,11 @@ async def update_discussion_tools(
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
     discussion_obj.set_metadata_item('active_tools', update_request.tools)
+    try:
+        discussion_obj.touch()
+        discussion_obj.commit()
+    except Exception:
+        pass
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=current_user.id, discussion_id=discussion_id).first() is not None
 
     return DiscussionInfo(
@@ -481,5 +486,7 @@ async def update_discussion_tools(
         active_tools=discussion_obj.metadata.get('active_tools'),
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
-        last_activity_at=discussion_obj.updated_at
+        updated_at=discussion_obj.updated_at,
+        last_activity_at=discussion_obj.updated_at,
+        discussion_metadata=discussion_obj.metadata or {}
     )

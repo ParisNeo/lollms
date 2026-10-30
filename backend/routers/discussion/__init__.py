@@ -47,6 +47,76 @@ from backend.routers.discussion.utils import build_utils_router
 from backend.db.models.discussion import SharedDiscussionLink
 from .helpers import get_discussion_and_owner_for_request
 
+_EPOCH_SENTINEL = datetime(1970, 1, 1)
+
+def _coerce_dt(value) -> datetime:
+    """Coerce a value into a naive UTC datetime. NULL/invalid -> 1970-01-01 sentinel."""
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo is not None else value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=None) if parsed.tzinfo is not None else parsed
+        except Exception:
+            return _EPOCH_SENTINEL
+    return _EPOCH_SENTINEL
+
+def _serialize_discussion_summary(row: dict, *, title: Optional[str] = None,
+                                  is_starred: bool = False,
+                                  permission_level: Optional[str] = None,
+                                  group_id: Optional[str] = None,
+                                  has_artefacts: Optional[bool] = None) -> DiscussionInfo:
+    """Build a DiscussionInfo summary from a raw list_discussions() row, coercing timestamps."""
+    if not isinstance(row, dict):
+        row = {}
+    raw_meta = row.get('discussion_metadata') or row.get('metadata') or {}
+    if isinstance(raw_meta, str):
+        try:
+            raw_meta = json.loads(raw_meta)
+        except Exception:
+            raw_meta = {}
+    if not isinstance(raw_meta, dict):
+        raw_meta = {}
+
+    created = _coerce_dt(row.get('created_at'))
+    if created == _EPOCH_SENTINEL:
+        created = datetime.utcnow()
+    updated = _coerce_dt(row.get('updated_at'))
+    if updated == _EPOCH_SENTINEL:
+        updated = created
+
+    resolved_title = title or raw_meta.get('title') or row.get('title') or f"Discussion {str(row.get('id', ''))[:8]}"
+    resolved_group = group_id if group_id is not None else raw_meta.get('group_id')
+    resolved_has_art = has_artefacts if has_artefacts is not None else bool(raw_meta.get('has_artefacts', False))
+
+    return DiscussionInfo(
+        id=row.get('id'),
+        title=resolved_title,
+        is_starred=is_starred,
+        rag_datastore_ids=raw_meta.get('rag_datastore_ids'),
+        active_tools=raw_meta.get('active_tools', []) or [],
+        created_at=created,
+        updated_at=updated,
+        last_activity_at=updated,
+        discussion_metadata=raw_meta,
+        active_branch_id=row.get('active_branch_id'),
+        group_id=resolved_group,
+        permission_level=permission_level,
+        has_artefacts=resolved_has_art,
+    )
+
+def _touch_discussion(discussion) -> None:
+    """Bump updated_at via touch()+commit(). Never raises."""
+    if discussion is None:
+        return
+    try:
+        if hasattr(discussion, 'touch'):
+            discussion.touch()
+        if hasattr(discussion, 'commit'):
+            discussion.commit()
+    except Exception as e:
+        trace_exception(e)
+
 def build_discussions_router():
     # safe_store is needed for RAG callbacks
     router = APIRouter(prefix="/api/discussions", tags=["Discussions"])
@@ -153,44 +223,18 @@ def build_discussions_router():
                         or f"Discussion {disc_id[:8]}"
                     )
 
-                    info = DiscussionInfo(
-                        id=disc_id,
+                    info = _serialize_discussion_summary(
+                        disc_data,
                         title=resolved_title,
                         is_starred=(disc_id in starred_ids),
-                        rag_datastore_ids=metadata.get('rag_datastore_ids'),
-                        active_tools=metadata.get('active_tools', []),
-                        active_branch_id=disc_data.get('active_branch_id'),
-                        created_at=disc_data.get('created_at'),
-                        last_activity_at=disc_data.get('updated_at'),
-                        discussion_images=[], 
-                        active_discussion_images=[], 
-                        group_id=metadata.get('group_id'),
-                        owner_username=None,
                         permission_level="shared_by_me" if is_shared_by_me else None,
-                        share_id=None,
-                        has_artefacts=has_art
+                        has_artefacts=has_art,
                     )
                     infos.append(info)
                 except Exception as e:
                     trace_exception(e)
 
-            from datetime import timezone
-            def _safe_timestamp(val):
-                if not val:
-                    return 0.0
-                if isinstance(val, (int, float)):
-                    return float(val)
-                if isinstance(val, datetime):
-                    return val.replace(tzinfo=timezone.utc).timestamp() if val.tzinfo is None else val.timestamp()
-                if isinstance(val, str):
-                    try:
-                        dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-                        return dt.replace(tzinfo=timezone.utc).timestamp() if dt.tzinfo is None else dt.timestamp()
-                    except Exception:
-                        return 0.0
-                return 0.0
-
-            return sorted(infos, key=lambda d: _safe_timestamp(d.last_activity_at or d.created_at), reverse=True)
+            return sorted(infos, key=lambda d: d.updated_at or _EPOCH_SENTINEL, reverse=True)
         except Exception as e:
             trace_exception(e)
             return []
@@ -205,6 +249,7 @@ def build_discussions_router():
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         discussion_obj.set_metadata_item('active_tools', update_payload.tools)
+        _touch_discussion(discussion_obj)
 
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
@@ -218,7 +263,9 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
+            updated_at=discussion_obj.updated_at,
             last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=metadata,
             has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
     @router.get("/{discussion_id}/participants", response_model=List[UserPublic])
@@ -377,7 +424,9 @@ def build_discussions_router():
             active_tools=[],
             active_branch_id=None,
             created_at=discussion_obj.created_at,
+            updated_at=discussion_obj.updated_at,
             last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=metadata,
             has_artefacts=False
         )
 
@@ -476,8 +525,10 @@ def build_discussions_router():
             is_starred=False, rag_datastore_ids=new_discussion.metadata.get('rag_datastore_ids'),
             active_tools=new_discussion.metadata.get('active_tools', []),
             active_branch_id=new_discussion.active_branch_id, created_at=new_discussion.created_at,
+            updated_at=new_discussion.updated_at,
             last_activity_at=new_discussion.updated_at, discussion_images=discussion_images_b64,
             active_discussion_images=active_discussion_images, group_id=new_discussion.metadata.get('group_id'),
+            discussion_metadata=new_discussion.metadata or {},
             has_artefacts=len(new_discussion.list_artefacts()) > 0
         )
 
@@ -507,7 +558,9 @@ def build_discussions_router():
                 active_tools=cloned_discussion.metadata.get('active_tools', []),
                 active_branch_id=cloned_discussion.active_branch_id,
                 created_at=cloned_discussion.created_at,
+                updated_at=cloned_discussion.updated_at,
                 last_activity_at=cloned_discussion.updated_at,
+                discussion_metadata=cloned_discussion.metadata or {},
                 discussion_images=cloned_discussion.images or [],
                 active_discussion_images= [img_info['active'] for img_info in cloned_discussion.images] if cloned_discussion.images else [],
                 has_artefacts=len(cloned_discussion.list_artefacts()) > 0
@@ -531,7 +584,7 @@ def build_discussions_router():
 
             if new_title:
                 discussion_obj.set_metadata_item('title', new_title)
-                discussion_obj.commit()
+                _touch_discussion(discussion_obj)
                 manager.send_personal_message_sync({
                     "type": "discussion_updated",
                     "data": {
@@ -555,7 +608,9 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
+            updated_at=discussion_obj.updated_at,
             last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=metadata,
             has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
 
@@ -650,7 +705,7 @@ def build_discussions_router():
 
         try:
             discussion_obj.switch_branch(branch_request.active_branch_id)
-            discussion_obj.commit()
+            _touch_discussion(discussion_obj)
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
@@ -665,14 +720,16 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            updated_at=discussion_obj.updated_at,
+            last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=metadata
         )
 
     @router.put("/{discussion_id}/title", response_model=DiscussionInfo)
     async def update_discussion_title(discussion_id: str, title_update: DiscussionTitleUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         discussion_obj.set_metadata_item('title', title_update.title)
-        discussion_obj.commit()
+        _touch_discussion(discussion_obj)
 
         manager.send_personal_message_sync({
             "type": "discussion_updated",
@@ -692,7 +749,9 @@ def build_discussions_router():
             active_tools=discussion_obj.metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
+            updated_at=discussion_obj.updated_at,
             last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=discussion_obj.metadata or {},
             has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
 
@@ -727,6 +786,8 @@ def build_discussions_router():
             db.add(UserStarredDiscussion(user_id=db_user.id, discussion_id=discussion_id))
             db.commit()
 
+        _touch_discussion(discussion_obj)
+
         metadata = discussion_obj.metadata or {}
         return DiscussionInfo(
             id=discussion_id,
@@ -736,7 +797,9 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            updated_at=discussion_obj.updated_at,
+            last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=metadata
         )
 
     @router.delete("/{discussion_id}/star", status_code=200, response_model=DiscussionInfo)
@@ -749,6 +812,8 @@ def build_discussions_router():
             db.delete(star)
             db.commit()
 
+        _touch_discussion(discussion_obj)
+
         metadata = discussion_obj.metadata or {}
         return DiscussionInfo(
             id=discussion_id,
@@ -758,7 +823,9 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            updated_at=discussion_obj.updated_at,
+            last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=metadata
         )
 
     @router.put("/{discussion_id}/group", response_model=DiscussionInfo)
@@ -779,7 +846,7 @@ def build_discussions_router():
                 raise HTTPException(status_code=404, detail="Group not found or you do not have permission to use it.")
 
         discussion_obj.set_metadata_item('group_id', payload.group_id)
-        discussion_obj.commit()
+        _touch_discussion(discussion_obj)
 
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
@@ -794,7 +861,9 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
+            updated_at=discussion_obj.updated_at,
             last_activity_at=discussion_obj.updated_at,
+            discussion_metadata=metadata,
             has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
 

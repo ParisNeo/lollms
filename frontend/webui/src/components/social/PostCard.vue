@@ -327,8 +327,8 @@ async function handleAiAction(action = 'explain') {
         </div>
 
         <!-- Post Content View -->
-        <div v-else>
-          <MessageContentRenderer :content="post.content" class="mt-2 prose prose-sm dark:prose-invert max-w-none" />
+        <div v-else class="w-full min-w-0">
+          <MessageContentRenderer :content="post.content" class="mt-2 max-w-none feed-message-content w-full min-w-0 box-border" />
 
           <!-- Hashtag Chips -->
           <div v-if="post.tags && post.tags.length > 0" class="mt-3 flex flex-wrap gap-1.5">
@@ -495,3 +495,27 @@ async function handleAiAction(action = 'explain') {
     </div>
   </div>
 </template>
+
+<style scoped>
+.feed-message-content {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.feed-message-content :deep(.theme-aware-root),
+.feed-message-content :deep(.message-prose),
+.feed-message-content :deep(pre),
+.feed-message-content :deep(.code-block-container),
+.feed-message-content :deep(.code-block-scrollable),
+.feed-message-content :deep(.processing-block-root),
+.feed-message-content :deep(.processing-content) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.feed-message-content :deep(*) {
+  max-width: 100%;
+}
+</style>

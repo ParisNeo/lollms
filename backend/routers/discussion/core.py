@@ -18,6 +18,7 @@ from backend.models import (UserAuthDetails, DiscussionTitleUpdate)
 from backend.session import get_current_active_user, get_user_lollms_client
 from backend.task_manager import task_manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
+from backend.routers.discussion import _touch_discussion
 
 from lollms_client import LollmsDiscussion, LollmsDataManager, LollmsClient
 
@@ -91,7 +92,7 @@ def build_core_router(router: APIRouter):
             raise HTTPException(status_code=404, detail="Discussion not found.")
         db_discussion = discussion_obj.discussion
         db_discussion.title = title_update.title
-        discussion_obj.commit()
+        _touch_discussion(discussion_obj)
         return {"message": f"Discussion title updated successfully."}
 
     @router.get("/{discussion_id}", response_model=Dict[str, Any])
@@ -194,7 +195,7 @@ def build_core_router(router: APIRouter):
         if discussion_obj is None:
             raise HTTPException(status_code=404, detail="Discussion not found.")
         discussion_obj.switch_to_branch(branch_id)
-        discussion_obj.commit()
+        _touch_discussion(discussion_obj)
         return {"message": "Switched branch successfully"}
 
     class DiscussionToolsUpdate(BaseModel):
@@ -215,7 +216,7 @@ def build_core_router(router: APIRouter):
             meta = dict(getattr(discussion_obj.discussion, 'discussion_metadata', {}) or {})
             meta['active_tools'] = list(payload.tools)
             discussion_obj.discussion.discussion_metadata = meta
-        discussion_obj.commit()
+        _touch_discussion(discussion_obj)
         return {"message": "Discussion tools updated successfully", "active_tools": payload.tools}
 
     @router.delete("/{discussion_id}", status_code=200)
@@ -381,7 +382,7 @@ def build_core_router(router: APIRouter):
             sender_type="assistant"
         )
 
-        new_discussion_obj.commit()
+        _touch_discussion(new_discussion_obj)
 
         ASCIIColors.success(f"Created compressed fork {new_discussion_obj.id} from {discussion_id}")
 
