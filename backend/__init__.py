@@ -12,3 +12,8 @@ async def prewarm_heavy_imports():
         daemon=True, 
         name="sentence_transformers_prewarm"
     ).start()
+
+    # Filesystem personalities bootstrap: guarantee handbag roots exist and
+    # the data folder is writable (fail fast with a clear log otherwise).
+    from backend.personalities import ensure_personality_roots
+    ensure_personality_roots()

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-03 01:11]
+
+- fix security vulnerabilities in backend and improve frontend UX for managing personality data
+
 ## [2026-10-30 07:50]
 
 - feat(discussion): support active tools in discussion configuration

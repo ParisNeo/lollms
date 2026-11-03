@@ -2,6 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import GenericModal from './GenericModal.vue';
+import apiClient from '../../services/api';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
 import { useUiStore } from '../../stores/ui';
@@ -19,8 +20,11 @@ const { on, off } = useEventBus();
 
 const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
 
+const props = defineProps({ personality: { type: Object, default: null } });
+const emit = defineEmits(['close', 'saved']);
+
 const modalProps = computed(() => uiStore.modalData('personalityEditor'));
-const personality = computed(() => modalProps.value?.personality);
+const personality = computed(() => props.personality || modalProps.value?.personality);
 
 const getInitialFormState = () => ({
     id: null, name: '', category: '', author: '', description: '',
@@ -31,6 +35,10 @@ const getInitialFormState = () => ({
 });
 
 const form = ref(getInitialFormState());
+// A handbag-backed row has no numeric `id` — only `handbag_name` + `scope`.
+// Both must count as "editing" so the header does not say "Create" while the
+// user is modifying an existing personality on disk.
+const isEditing = computed(() => Boolean(form.value.id || form.value.handbag_name));
 const fileInput = ref(null);
 const staticTextInputRef = ref(null);
 const isLoading = ref(false);
@@ -108,15 +116,44 @@ watch(() => form.value.data_source_type, (newType, oldType) => {
 });
 
 
+function handleClose() {
+    // Visibility is controlled by the parent (v-if + @close). The previous
+    // `uiStore.closeModal('personalityEditor')` could never fire because the
+    // modal is never opened through uiStore.openModal — no state to close.
+    emit('close');
+}
+
 async function handleSubmit() {
     isLoading.value = true;
     try {
-        if (form.value.id) {
+        if (form.value.handbag_name && form.value.scope) {
+            // Handbag-backed personality: update manifest + SOUL.md on disk.
+            await apiClient.put(
+                `/api/personalities/studio/handbags/${form.value.scope}/${encodeURIComponent(form.value.handbag_name)}`,
+                {
+                    display_name: form.value.name,
+                    description: form.value.description,
+                    author: form.value.author,
+                    category: form.value.category,
+                    prompt_text: form.value.prompt_text,
+                });
+            uiStore.addNotification('Personality handbag updated.', 'success');
+            emit('saved');
+        } else if (form.value.id) {
+            // Legacy DB personality (will be bridged to a handbag on next catalog load).
             await dataStore.updatePersonality(form.value);
         } else {
             await dataStore.addPersonality(form.value);
         }
-        uiStore.closeModal('personalityEditor');
+        handleClose();
+    } catch (e) {
+        const detail = e?.response?.data?.detail;
+        const message = typeof detail === 'string' && detail
+            ? detail
+            : (detail ? JSON.stringify(detail) : (e?.message || 'Failed to save personality.'));
+        uiStore.addNotification(message, 'error');
+        // eslint-disable-next-line no-console
+        console.error('[PersonalityEditorModal] save failed', e);
     } finally {
         isLoading.value = false;
     }
@@ -222,7 +259,7 @@ async function handleExport() {
 </script>
 
 <template>
-  <GenericModal modal-name="personalityEditor" :title="form.id ? 'Edit Personality' : 'Create Personality'" maxWidthClass="max-w-4xl">
+  <GenericModal :title="isEditing ? 'Edit Personality' : 'Create Personality'" maxWidthClass="max-w-4xl">
     <template #body>
       <form v-if="personality" @submit.prevent="handleSubmit" class="space-y-6">
         <!-- Icon and Basic Info -->
@@ -371,7 +408,7 @@ async function handleExport() {
                 </button>
             </div>
             <div class="flex gap-2">
-                <button @click="uiStore.closeModal('personalityEditor')" type="button" class="btn btn-secondary">Cancel</button>
+                <button @click="handleClose" type="button" class="btn btn-secondary">Cancel</button>
                 <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save' }}</button>
             </div>
         </div>

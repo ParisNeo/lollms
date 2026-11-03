@@ -487,6 +487,7 @@ def _do_startup_tasks():
     plan = [
         ("Database tables check/creation", lambda: Base.metadata.create_all(bind=db_session_module.engine), True),
         ("Schema migration & bootstrap", _schema_migration, True),
+        ("Legacy personality migration", _bootstrap_personalities, False),
         ("Legacy discussion migration", _migrate_legacy_discussions, False),
         ("Default admin & DB entries", _ensure_default_admin, False),
         ("App Zoo repository setup",
@@ -534,6 +535,21 @@ def _do_startup_tasks():
 def _sync_fs_db():
     with db_scope() as db:
         synchronize_filesystem_and_db(db)
+
+
+def _bootstrap_personalities():
+    """Materialise every legacy ``DBPersonality`` as a handbag folder, then
+    delete the DB rows, then seed the first-run ``lollms`` handbag.
+
+    Must run **after** ``_schema_migration`` (so new columns exist) and after
+    ``init_database()`` has wired the SQLAlchemy engine — before this point
+    ``next(get_db())`` has nothing to bind to. Idempotent: once the DB is
+    empty, subsequent calls are no-ops because the query returns nothing.
+    Failures are non-fatal; the server keeps booting.
+    """
+    from backend.bootstrap_personalities import run_personalities_bootstrap
+    with db_scope() as db:
+        run_personalities_bootstrap(db)
 
 
 def run_one_time_startup_tasks():

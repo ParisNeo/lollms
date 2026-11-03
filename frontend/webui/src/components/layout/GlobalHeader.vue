@@ -8,6 +8,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useSocialStore } from '../../stores/social';
 import useEventBus from '../../services/eventBus';
+import apiClient from '../../services/api';
 
 import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 import TasksManagerButton from './TasksManagerButton.vue';
@@ -179,7 +180,11 @@ const ttmModelSearchTerm = ref('');
 const isMenuOpen = ref(false);
 
 // Active Selections
-const activePersonalityId = computed({ get: () => user.value?.active_personality_id, set: (id) => authStore.updateUserPreferences({ active_personality_id: id }) });
+// NOTE: activePersona is backed by UserPersonalityPreference via the
+// /api/personalities/preference endpoints, NOT the legacy
+// users.active_personality_id column. The legacy field is still written by
+// other parts of the app but is no longer read/written here.
+const activePersona = ref(null); // { scope, handbag_name, owner_id } | null
 const activeModelName = computed({ get: () => user.value?.lollms_model_name, set: (name) => authStore.updateUserPreferences({ lollms_model_name: name }) });
 const activeTtiModelName = computed({ get: () => user.value?.tti_binding_model_name, set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name }) });
 const activeTtsModelName = computed({ get: () => user.value?.tts_binding_model_name, set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name }) });
@@ -187,8 +192,60 @@ const activeSttModelName = computed({ get: () => user.value?.stt_binding_model_n
 const activeTtvModelName = computed({ get: () => user.value?.ttv_binding_model_name, set: (name) => authStore.updateUserPreferences({ ttv_binding_model_name: name }) });
 const activeTtmModelName = computed({ get: () => user.value?.ttm_binding_model_name, set: (name) => authStore.updateUserPreferences({ ttm_binding_model_name: name }) });
 
+// Hydrate the active handbag persona from UserPersonalityPreference.
+// 404 = no preference set — a legitimate default (chat falls back server-side);
+// the header must NOT pretend that fallback is the user's choice.
+async function loadActivePersona() {
+    try {
+        const resp = await apiClient.get('/api/personalities/preference');
+        activePersona.value = resp.data;
+    } catch (e) {
+        if (e?.response?.status === 404) {
+            activePersona.value = null;
+        } else {
+            console.warn('[GlobalHeader] preference load failed:', e);
+            activePersona.value = null;
+        }
+    }
+}
+
+// Persist the selected handbag persona. Shared-scope rows from the catalog
+// currently lack an integer owner_id, so they are selectable only from the
+// Personality Studio (which has the full context) and disabled here.
+async function selectPersonalityHandbag(item) {
+    if (!item || !item.handbag_name) return;
+    if (item.scope === 'shared' && typeof item.owner_id !== 'number') {
+        uiStore.addNotification(
+            'Shared personas must be selected from the Personality Studio.', 'warning');
+        return;
+    }
+    const body = {
+        scope: item.scope,
+        handbag_name: item.handbag_name,
+        owner_id: item.scope === 'shared' ? item.owner_id : null,
+    };
+    try {
+        const resp = await apiClient.put('/api/personalities/preference', body);
+        activePersona.value = resp.data;
+        uiStore.addNotification(`Active persona: ${item.name}`, 'success');
+    } catch (e) {
+        const detail = e?.response?.data?.detail || e.message || 'Unknown error';
+        uiStore.addNotification(`Could not set persona: ${detail}`, 'error');
+    } finally {
+        isMenuOpen.value = false;
+    }
+}
+
 // Available Data
-const availablePersonalities = computed(() => [{ isGroup: true, label: 'Personal', items: dataStore.userPersonalities }, { isGroup: true, label: 'Public', items: dataStore.publicPersonalities }]);
+const availablePersonalities = computed(() => {
+    const groups = [
+        { isGroup: true, label: 'Personal', items: dataStore.userPersonalities || [] },
+        { isGroup: true, label: 'Public', items: dataStore.publicPersonalities || [] },
+    ];
+    const shared = dataStore.sharedPersonalities || [];
+    if (shared.length > 0) groups.push({ isGroup: true, label: 'Shared', items: shared });
+    return groups;
+});
 const formattedAvailableModels = computed(() => dataStore.availableLLMModelsGrouped);
 const formattedAvailableTtiModels = computed(() => dataStore.availableTtiModelsGrouped);
 const formattedAvailableTtsModels = computed(() => dataStore.availableTtsModelsGrouped);
@@ -198,7 +255,19 @@ const formattedAvailableTtmModels = computed(() => dataStore.availableTtmModelsG
 
 // Selected Items
 const selectedModel = computed(() => formattedAvailableModels.value.flatMap(g => g.items).find(m => m.id === activeModelName.value));
-const selectedPersonality = computed(() => availablePersonalities.value.flatMap(g => g.items).find(p => p.id === activePersonalityId.value));
+const selectedPersonality = computed(() => {
+    if (!activePersona.value) return null;
+    const all = availablePersonalities.value.flatMap(g => g.items);
+    return all.find(p =>
+        p.handbag_name === activePersona.value.handbag_name &&
+        (p.scope || 'personal') === (activePersona.value.scope || 'personal')) || null;
+});
+
+const selectedPersonalityLabel = computed(() => {
+    if (!activePersona.value) return 'No persona selected';
+    if (selectedPersonality.value) return selectedPersonality.value.name;
+    return `Unavailable: ${activePersona.value.handbag_name}`;
+});
 
 // Individual Selection Status Flags
 const isLlmSelected = computed(() => Boolean(activeModelName.value && selectedModel.value));
@@ -207,7 +276,7 @@ const isTtsSelected = computed(() => Boolean(activeTtsModelName.value));
 const isSttSelected = computed(() => Boolean(activeSttModelName.value));
 const isTtmSelected = computed(() => Boolean(activeTtmModelName.value));
 const isTtvSelected = computed(() => Boolean(activeTtvModelName.value));
-const isPersonalitySelected = computed(() => Boolean(activePersonalityId.value && selectedPersonality.value));
+const isPersonalitySelected = computed(() => Boolean(activePersona.value));
 
 // Category Availability Flags
 const isTtiAvailable = computed(() => formattedAvailableTtiModels.value.length > 0);
@@ -296,6 +365,7 @@ onMounted(() => {
         isMenuOpen.value = false;
         isSubmenuActive.value = false;
     });
+    loadActivePersona();
 });
 onUnmounted(() => {
     eventBusOff('close-all-dropdowns');
@@ -306,7 +376,8 @@ async function handleRefreshModels() {
     try {
         await Promise.allSettled([
             dataStore.refreshAllModels(),
-            dataStore.fetchPersonalities()
+            dataStore.fetchPersonalities(),
+            loadActivePersona(),
         ]);
         uiStore.addNotification('Models, binding profiles, and personalities refreshed.', 'success');
     } catch (e) {
@@ -559,12 +630,82 @@ async function handleRefreshModels() {
                             </div>
                          </DropdownSubmenu>
 
+                         <!-- TTV Model Profile Submenu -->
+                         <DropdownSubmenu 
+                            v-if="formattedAvailableTtvModels.length > 0" 
+                            title="TTV Profile" 
+                            :status-color="isTtvSelected ? 'green' : 'red'"
+                            :status-text="isTtvSelected ? 'Selected' : 'None'"
+                         >
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
+                                <input type="text" v-model="ttvModelSearchTerm" @click.stop placeholder="Search TTV profiles..." class="input-field-sm w-full">
+                            </div>
+                            <div class="p-1 grow overflow-y-auto max-h-96">
+                                <button 
+                                    @click="selectTtvModel(null)" 
+                                    class="menu-item-button" 
+                                    :class="{'!bg-gray-100 dark:!bg-gray-700 font-bold': !activeTtvModelName}"
+                                >
+                                    <span class="truncate">None (No TTV Profile)</span>
+                                    <span v-if="!activeTtvModelName" class="text-[9px] font-black uppercase text-gray-400">Active</span>
+                                </button>
+                                <div v-for="group in filteredAvailableTtvModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button 
+                                            @click="selectTtvModel(item.id)" 
+                                            class="menu-item-button grow !justify-between" 
+                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:!text-blue-300 font-bold': activeTtvModelName === item.id}"
+                                        >
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                            <IconCheckCircle v-if="activeTtvModelName === item.id" class="w-4 h-4 text-emerald-500 shrink-0" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                         </DropdownSubmenu>
+
+                         <!-- TTM Model Profile Submenu -->
+                         <DropdownSubmenu 
+                            v-if="formattedAvailableTtmModels.length > 0" 
+                            title="TTM Profile" 
+                            :status-color="isTtmSelected ? 'green' : 'red'"
+                            :status-text="isTtmSelected ? 'Selected' : 'None'"
+                         >
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
+                                <input type="text" v-model="ttmModelSearchTerm" @click.stop placeholder="Search TTM profiles..." class="input-field-sm w-full">
+                            </div>
+                            <div class="p-1 grow overflow-y-auto max-h-96">
+                                <button 
+                                    @click="selectTtmModel(null)" 
+                                    class="menu-item-button" 
+                                    :class="{'!bg-gray-100 dark:!bg-gray-700 font-bold': !activeTtmModelName}"
+                                >
+                                    <span class="truncate">None (No TTM Profile)</span>
+                                    <span v-if="!activeTtmModelName" class="text-[9px] font-black uppercase text-gray-400">Active</span>
+                                </button>
+                                <div v-for="group in filteredAvailableTtmModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button 
+                                            @click="selectTtmModel(item.id)" 
+                                            class="menu-item-button grow !justify-between" 
+                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:!text-blue-300 font-bold': activeTtmModelName === item.id}"
+                                        >
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                            <IconCheckCircle v-if="activeTtmModelName === item.id" class="w-4 h-4 text-emerald-500 shrink-0" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                         </DropdownSubmenu>
+
                          <!-- Personality Submenu -->
                          <DropdownSubmenu 
                             title="Personality" 
                             icon="user-circle"
                             :status-color="isPersonalitySelected ? 'green' : 'red'"
-                            :status-text="isPersonalitySelected ? (selectedPersonality?.name || 'Custom') : 'Default'"
+                            :status-text="selectedPersonalityLabel"
                          >
                             <div class="flex flex-col sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <router-link to="/personality-studio" @click="isMenuOpen = false" class="flex items-center gap-3 py-2.5 px-4 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-orange-600 transition-colors border-b dark:border-gray-700">
@@ -578,18 +719,18 @@ async function handleRefreshModels() {
                             <div class="p-1 grow overflow-y-auto max-h-96">
                                 <div v-for="group in filteredAvailablePersonalities" :key="group.label">
                                      <h4 class="px-2 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ group.label }}</h4>
-                                     <div v-for="item in group.items" :key="item.id" class="relative group/p">
+                                     <div v-for="item in group.items" :key="item.scope + '|' + item.handbag_name" class="relative group/p">
                                         <button 
-                                            @click="selectPersonality(item.id)" 
-                                            class="menu-item-button w-full" 
-                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:!text-blue-300 font-bold': activePersonalityId === item.id}"
+                                            @click="selectPersonalityHandbag(item)" 
+                                            :disabled="item.scope === 'shared'"
+                                            class="menu-item-button w-full disabled:opacity-50 disabled:cursor-not-allowed" 
+                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:!text-blue-300 font-bold': activePersona?.handbag_name === item.handbag_name && activePersona?.scope === item.scope}"
                                         >
                                             <div class="flex items-center gap-2 truncate">
-                                                <img v-if="item.icon_base64" :src="item.icon_base64" class="h-5 w-5 rounded object-cover" />
-                                                <IconUserCircle v-else class="h-5 w-5 text-gray-400" />
+                                                <IconUserCircle class="h-5 w-5 text-gray-400" />
                                                 <span class="truncate">{{ item.name }}</span>
                                             </div>
-                                            <IconCheckCircle v-if="activePersonalityId === item.id" class="w-4 h-4 text-emerald-500 shrink-0" />
+                                            <IconCheckCircle v-if="activePersona?.handbag_name === item.handbag_name && activePersona?.scope === item.scope" class="w-4 h-4 text-emerald-500 shrink-0" />
                                         </button>
                                     </div>
                                 </div>

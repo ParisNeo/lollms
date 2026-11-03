@@ -1073,14 +1073,24 @@ Return ONLY a valid JSON object. No markdown formatting.
         if is_dynamic:
             sys_prompt = agent_def.get('system_prompt', "You are a helpful assistant.")
         else:
-            # Static Logic: Load from DB
+            # Static logic: load the persona's prompt from its handbag SOUL.md.
             sys_prompt = f"You are participating in a {phase_name} session."
             if persona_name:
-                pers = db_session.query(DBPersonality).filter(
-                    (DBPersonality.name == persona_name) | (DBPersonality.id == persona_name)
-                ).first()
-                if pers:
-                    sys_prompt = pers.prompt_text
+                try:
+                    from backend.personalities import (
+                        resolve_handbag_path, slugify_handbag_name,
+                        read_handbag_detail)
+                    slug = slugify_handbag_name(str(persona_name))
+                    path = (
+                        resolve_handbag_path("personal", slug, user, db=db_session)
+                        or resolve_handbag_path("global", slug, user, db=db_session)
+                    )
+                    if path is not None:
+                        soul_text = read_handbag_detail(path).get("prompt_text")
+                        if soul_text:
+                            sys_prompt = soul_text
+                except Exception as pers_lookup_err:
+                    print(f"Herd persona lookup failed for {persona_name}: {pers_lookup_err}")
             
             if phase_name == "Pre-code Brainstorming":
                 sys_prompt += "\n\nTask: Brainstorm ideas, architecture, and high-level solutions for the user's request. Do not write full code yet. Critique previous ideas if any."
@@ -2025,17 +2035,21 @@ def build_llm_generation_router(router: APIRouter):
                     except Exception as rpc_err:
                         ASCIIColors.warning(f"[MCP] Connection note for '{alias}' at {s_url}: {rpc_err}")
 
-        if db_pers:
-            active_personality = LollmsPersonality(
-                name=db_pers.name,
-                author=db_pers.author,
-                category=db_pers.category,
-                description=db_pers.description,
-                system_prompt=dynamic_preamble + db_pers.prompt_text,
-                tools=None,
-                data_source=static_data_source,
-                data_sources=multi_rag_data_sources if multi_rag_data_sources else None
-            )
+        from backend.personalities import get_active_personality
+
+        hb_personality = get_active_personality(owner_db_user, db)
+        if hb_personality is not None:
+            # Handbag-first runtime: SOUL.md seeds the system prompt; the
+            # dynamic preamble is prepended and user RAG sources are merged.
+            hb_personality.system_prompt = dynamic_preamble + (hb_personality.system_prompt or "")
+            existing_sources = list(getattr(hb_personality, "data_sources", None) or [])
+            merged_sources = existing_sources + (multi_rag_data_sources or [])
+            if merged_sources:
+                try:
+                    hb_personality.data_sources = merged_sources
+                except Exception:
+                    pass
+            active_personality = hb_personality
         else:
             active_personality = LollmsPersonality(
                 name="Lollms",

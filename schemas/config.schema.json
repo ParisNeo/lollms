@@ -157,6 +157,39 @@
       },
       "required": ["chunk_size", "chunk_overlap", "global_default_vectorizer"],
       "additionalProperties": false
+    },
+    "voices_studio": {
+      "type": "object",
+      "description": "Persisted Voices Studio selection state. The canonical, validated home for the active voice id — do NOT use lollms_client_defaults.ai_name for this (that is a prompt label).",
+      "properties": {
+        "active_voice_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "ID of the currently selected voice profile. Must match an `id` in the voice registry returned by GET /voices. This is the single source of truth for `which voice is active` and prevents silent fallback to a default persona."
+        },
+        "available_voices": {
+          "type": "array",
+          "description": "Optional cached snapshot of the voice registry used for offline UI hydration.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Voice registry identifier."
+              },
+              "display_name": {
+                "type": "string",
+                "description": "Human-readable label shown in the UI."
+              }
+            },
+            "required": ["id"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["active_voice_id"],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -164,7 +197,8 @@
     "app_settings",
     "initial_admin_user",
     "lollms_client_defaults",
-    "safe_store_defaults"
+    "safe_store_defaults",
+    "voices_studio"
   ],
   "additionalProperties": false
 }

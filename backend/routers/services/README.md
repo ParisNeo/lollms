@@ -382,26 +382,73 @@ Applies inpainting or prompt-based edits to an existing image.
 ---
 
 ### Personalities Catalog (`GET /personalities`)
-Lists all accessible AI personalities (system public conditionings and user-owned personas).
+Returns a catalog of **filesystem handbags** discovered across three scopes:
+the **global** scope (`data/personalities/global/`, visible to all users), the
+caller's **personal** scope (`data/personalities/users/<user_id>/`), and the
+**shared** scope (friends'/groups' personal handbags visible through the
+sharing ACL). Entries are grouped by scope so the global header can organize
+personas by `global / personal / shared`.
+
+Discovery is a lightweight manifest scan of each handbag folder (`handbag.yaml`,
+`SOUL.md`, and the presence of `tools/`, `rag/`, `docs/`, `skills/`
+subdirectories) — the database is never involved for personality content.
 
 **Response (`200 OK`)**:
 ```json
 {
   "object": "list",
-  "data": [
-    {
-      "id": "c8b411-personality-uuid",
-      "name": "Code Architect",
-      "category": "Coding",
-      "author": "ParisNeo",
-      "description": "Senior system architect focused on clean, secure code",
-      "is_public": true,
-      "owner_username": "System",
-      "created_at": "2026-01-01T00:00:00Z"
-    }
-  ]
+  "scopes": ["global", "personal", "shared"],
+  "data": {
+    "global": [
+      {
+        "name": "Code Architect",
+        "handbag_name": "code_architect",
+        "scope": "global",
+        "owner": null,
+        "category": "Coding",
+        "author": "ParisNeo",
+        "description": "Senior system architect focused on clean, secure code",
+        "has_soul": true,
+        "has_tools": true,
+        "has_rag": false,
+        "has_docs": true,
+        "has_skills": true
+      }
+    ],
+    "personal": [
+      {
+        "name": "My Research Assistant",
+        "handbag_name": "my_research_assistant",
+        "scope": "personal",
+        "owner": "parisneo",
+        "has_soul": true,
+        "has_tools": false,
+        "has_rag": true,
+        "has_docs": false,
+        "has_skills": false
+      }
+    ],
+    "shared": [
+      {
+        "name": "Team Legal Reviewer",
+        "handbag_name": "team_legal_reviewer",
+        "scope": "shared",
+        "owner": "alice",
+        "has_soul": true,
+        "has_tools": false,
+        "has_rag": true,
+        "has_docs": true,
+        "has_skills": false
+      }
+    ]
+  }
 }
 ```
+
+**Query Parameters**
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `scope` | `string` | No | Restrict results to one of `global`, `personal`, `shared`. |
 
 ---
 
@@ -450,7 +497,7 @@ Unified generation endpoint supporting streaming, functions/tools, multi-modal v
 | `tool_choice` | `string` or `object` | No | `"none"`, `"auto"`, `"required"`, or `{"type": "function", "function": {"name": "..."}}`. |
 | `response_format` | `object` or `string` | No | Structured output configuration. Supports `{"type": "json_schema", "json_schema": {...}}` and `{"type": "json_object"}`. |
 | `reasoning_effort`| `string` | No | `"low"`, `"medium"`, or `"high"` for reasoning/thinking models. |
-| `personality` | `string` | No | Optional UUID of a LoLLMs personality conditioning to prepend. |
+| `personality` | `string` | No | Optional handbag reference `scope:handbag_name` (e.g. `global:code_architect`) selecting a personality from the Personalities Catalog to prepend. Shared handbags use `shared:<owner>:<handbag_name>`. |
 
 #### Standard Request (Non-Streaming)
 ```bash

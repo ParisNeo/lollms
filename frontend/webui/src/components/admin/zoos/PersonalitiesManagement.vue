@@ -24,7 +24,6 @@ const {
     personalityZooRepositories, isLoadingPersonalityZooRepositories, 
     zooPersonalities, isLoadingZooPersonalities 
 } = storeToRefs(adminStore);
-const { publicPersonalities } = storeToRefs(dataStore);
 const { tasks } = storeToRefs(tasksStore);
 
 const activeSubTab = ref('zoo');
@@ -32,6 +31,7 @@ const newRepo = ref({ type: 'git', name: '', url: '', path: '' });
 const isAddRepoFormVisible = ref(false);
 const isLoadingAction = ref(null);
 const isRefreshingCache = ref(false);
+const previousTaskStatuses = ref({});
 
 const searchQuery = computed({
   get: () => personalityFilters.searchQuery,
@@ -136,6 +136,24 @@ watch(starredItems, (newStarred) => {
     } 
 }, { deep: true });
 
+// Refresh zoo + personality catalog whenever an install task completes,
+// so the newly-materialized global handbag is visible without a manual reload.
+watch(tasks, (newTasks) => {
+    let needsRefresh = false;
+    (newTasks || []).forEach(task => {
+        if (!task?.name?.startsWith('Installing personality: ')) return;
+        const previousStatus = previousTaskStatuses.value[task.id];
+        if (previousStatus && previousStatus !== 'completed' && task.status === 'completed') {
+            needsRefresh = true;
+        }
+        previousTaskStatuses.value = { ...previousTaskStatuses.value, [task.id]: task.status };
+    });
+    if (needsRefresh) {
+        fetchZooItems();
+        dataStore.fetchPersonalities();
+    }
+}, { deep: true });
+
 onMounted(() => {
     dataStore.fetchPersonalities();
     adminStore.fetchPersonalityZooRepositories();
@@ -186,11 +204,15 @@ async function handleUpdateItem(item) {
 }
 
 async function handleUninstallItem(personality) {
-    const installed = publicPersonalities.value.find(p => p.name === personality.name && p.owner_username === 'System');
-    if (!installed) return;
+    // Global personalities are now filesystem handbags at
+    // data/personalities/global/<folder_name>/ — there is no DB row to delete,
+    // so we surface a clear hint instead of performing a stale DB delete.
     if (await uiStore.showConfirmation({ title: `Uninstall '${personality.name}'?` })) {
-        await dataStore.deletePersonality(installed.id);
-        await fetchZooItems();
+        const handbagName = personality.folder_name || personality.name;
+        uiStore.addNotification(
+            `Uninstall of filesystem handbags is not available here yet. Remove the folder from data/personalities/global/${handbagName} on the server.`,
+            'warning'
+        );
     }
 }
 

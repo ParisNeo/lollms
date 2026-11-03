@@ -45,7 +45,7 @@ const hasNeither = computed(() => !isTtsActive.value && !isSttActive.value);
 
 // --- Mode 1: Interactive TTS Speech Generator Console State ---
 const synthText = ref('Welcome to LoLLMs Voices Studio. You can synthesize high-fidelity speech, craft voice cloning profiles, and transcribe audio.');
-const synthSelectedVoiceId = ref(user.value?.active_voice_id || '');
+const synthSelectedVoiceId = ref('');
 const synthLanguage = ref(user.value?.ai_response_language && user.value.ai_response_language !== 'auto' ? user.value.ai_response_language : 'en');
 const synthSpeed = ref(1.0);
 const isSynthesizing = ref(false);
@@ -86,6 +86,23 @@ const s2sTranslateText = ref(true);
 const s2sResult = ref(null);
 const s2sMediaRecorder = ref(null);
 const s2sAudioChunks = ref([]);
+
+// Single source of truth: mirror the persisted `active_voice_id` into the
+// synthesis and s2s selectors. This is what fixes the "selected Aristotle but
+// still displaying Architect Pro" mismatch — the previous code initialized the
+// selector once at setup time and never re-synced when the store updated the
+// user's selection, so the select remained stale until a full page reload.
+watch(
+    () => user.value?.active_voice_id,
+    (newVoiceId) => {
+        if (!newVoiceId) return;
+        synthSelectedVoiceId.value = newVoiceId;
+        if (!s2sSelectedVoiceId.value) {
+            s2sSelectedVoiceId.value = newVoiceId;
+        }
+    },
+    { immediate: true }
+);
 
 const availableLanguages = [
     { code: 'en', name: 'English' },
@@ -243,6 +260,12 @@ async function handleDeleteVoice(voice) {
 
 async function handleSetActiveVoice(voiceId) {
     await voicesStore.setActiveVoice(voiceId);
+    // Optimistic mirror: guarantees the selector updates even if the store's
+    // reactive `user` field lags behind the API response.
+    synthSelectedVoiceId.value = voiceId;
+    if (!s2sSelectedVoiceId.value) {
+        s2sSelectedVoiceId.value = voiceId;
+    }
 }
 
 // --- STT Methods ---

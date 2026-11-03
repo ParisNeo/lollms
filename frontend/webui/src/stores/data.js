@@ -503,13 +503,36 @@ export const useDataStore = defineStore('data', () => {
     }
 
     async function fetchPersonalities() {
-         try {
-            const [ownedRes, publicRes] = await Promise.all([
-                apiClient.get('/api/personalities/my'),
-                apiClient.get('/api/personalities/public')
-            ]);
-            userPersonalities.value = Array.isArray(ownedRes.data) ? ownedRes.data : [];
-            publicPersonalities.value = Array.isArray(publicRes.data) ? publicRes.data : [];
+        // Personalities are filesystem-backed handbags now; the legacy DB
+        // endpoints (``/api/personalities/my`` and ``/public``) are gone.
+        // The chat header dropdown groups ``userPersonalities`` under
+        // "PERSONAL" and ``publicPersonalities`` under "PUBLIC", so we
+        // map the catalog scopes onto those two lists while preserving
+        // every field consumers key off (``id``, ``handbag_name``,
+        // ``scope``, ``name``, ``author``, ``category``, capability flags).
+        try {
+            const res = await apiClient.get('/api/personalities/catalog');
+            const catalog = res.data ?? {};
+            const toPersonality = (hb, isGlobal) => ({
+                id: `${isGlobal ? 'global' : 'personal'}:${hb.handbag_name}`,
+                handbag_name: hb.handbag_name,
+                scope: isGlobal ? 'global' : 'personal',
+                owner: hb.owner ?? null,
+                name: hb.name,
+                author: hb.author || (isGlobal ? 'LoLLMs' : 'Unknown'),
+                category: hb.category || (isGlobal ? 'General' : 'Custom'),
+                description: hb.description || '',
+                is_public: isGlobal,
+                has_soul: hb.has_soul,
+                has_tools: hb.has_tools,
+                has_rag: hb.has_rag,
+                has_docs: hb.has_docs,
+                has_skills: hb.has_skills,
+            });
+            userPersonalities.value = (Array.isArray(catalog.personal) ? catalog.personal : [])
+                .map(h => toPersonality(h, false));
+            publicPersonalities.value = (Array.isArray(catalog.global) ? catalog.global : [])
+                .map(h => toPersonality(h, true));
         } catch (error) {
             userPersonalities.value = [];
             publicPersonalities.value = [];

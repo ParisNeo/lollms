@@ -367,7 +367,10 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                         "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
                         "lollms_model_name": db_user.lollms_model_name,
                         "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
-                        "active_personality_id": db_user.active_personality_id,
+                        # `active_personality_id` is legacy (DBPersonality is deprecated).
+                        # Handbag-based active state lives in UserPersonalityPreference
+                        # and is exposed via GET /api/personalities/preference.
+                        "active_personality_id": None,
                     }
 
         user_model_full = db_user.lollms_model_name
@@ -382,7 +385,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
             "lollms_model_name": db_user.lollms_model_name,
             "llm_params": {},
-            "active_personality_id": db_user.active_personality_id,
+            # Legacy field: real handbag preference is served by /api/personalities/preference.
+            "active_personality_id": None,
         })
         if session.get("lollms_model_name") != user_model_full:
             session["lollms_model_name"] = user_model_full
@@ -451,7 +455,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
             "lollms_model_name": db_user.lollms_model_name,
             "llm_params": {},
-            "active_personality_id": db_user.active_personality_id,
+            # Legacy field: real handbag preference is served by /api/personalities/preference.
+            "active_personality_id": None,
         })
         effective_safe_store_vectorizer = user_sess.get("active_vectorizer")
 

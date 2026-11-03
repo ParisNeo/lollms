@@ -27,6 +27,11 @@ from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items, get_all_categories, force_build_full_cache
 from backend.routers.extensions.app_utils import to_task_info, pull_repo_task
 from backend.routers.zoos.prompts_zoo import PromptZooRepositoryCreate, PromptZooRepositoryPublic
+from backend.personalities import (
+    ensure_personality_roots,
+    global_personalities_root,
+    install_handbag_from_folder,
+)
 
 personalities_zoo_router = APIRouter(
     prefix="/api/personalities_zoo",
@@ -67,42 +72,14 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
             'disclaimer': legacy_data.get('disclaimer'), 'tools': legacy_data.get('dependencies', [])
         }
 
-    with task.db_session_factory() as db:
-        icon_path = next((p for p in [source_path / "icon.png", source_path / "assets" / "logo.png"] if p.exists()), None)
-        icon_b64 = None
-        if icon_path:
-            with open(icon_path, 'rb') as f:
-                icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
-
-        existing = db.query(DBPersonality).filter(DBPersonality.name == config['name'], DBPersonality.owner_user_id.is_(None)).first()
-        if existing:
-            existing.author = config.get('author') or existing.author
-            existing.category = config.get('category') or existing.category
-            existing.description = config.get('description') or existing.description
-            existing.prompt_text = config.get('prompt_text', '') or existing.prompt_text
-            existing.disclaimer = config.get('disclaimer')
-            if icon_b64:
-                existing.icon_base64 = icon_b64
-            existing.tools = config.get('tools')
-            existing.version = str(config.get('version', existing.version or '1.0'))
-            existing.repository = repo_name
-            existing.folder_name = folder_name
-            db.commit()
-            task.log(f"Personality '{config['name']}' updated to version {existing.version}.", "INFO")
-            return {"message": "Personality updated."}
-
-        new_personality = DBPersonality(
-            name=config.get('name'), author=config.get('author'), category=config.get('category'),
-            description=config.get('description'), prompt_text=config.get('prompt_text', ''),
-            disclaimer=config.get('disclaimer'), icon_base64=icon_b64, tools=config.get('tools'),
-            owner_user_id=None, is_public=True, version=str(config.get('version', 'N/A')),
-            repository=repo_name, folder_name=folder_name
-        )
-        db.add(new_personality)
-        db.commit()
-
-    task.log(f"Personality '{config['name']}' installed successfully.", "INFO")
-    return {"message": "Personality installed."}
+    ensure_personality_roots()
+    final_path = install_handbag_from_folder(
+        Path(source_path),
+        global_personalities_root(),
+        handbag_name=folder_name,
+    )
+    task.log(f"Personality '{config['name']}' installed to {final_path}.", "INFO")
+    return {"message": "Personality installed.", "path": str(final_path)}
 
 @personalities_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
 def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_user)):

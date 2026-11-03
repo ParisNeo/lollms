@@ -87,6 +87,61 @@ For detailed information on all available settings, please refer to the comments
 *   **Swagger UI:** `http://localhost:9642/docs`
 *   **ReDoc:** `http://localhost:9642/redoc`
 
+## 🧳 Personalities (Handbags)
+
+Personalities are **filesystem handbags**, not database rows. Behavior (system
+prompt, tools, skills, RAG, docs) is defined by each handbag folder's contents
+(`SOUL.md`, `handbag.yaml`, `tools/`, `skills/`, `rag/`, `docs/`) and loaded at
+runtime via `LollmsPersonality.from_handbag()`.
+
+**Storage layout** (under the app `data` folder):
+
+```
+data/personalities/
+├── global/            # admin / zoo / uploaded handbags, visible to all users
+└── users/<user_id>/   # per-user handbags from the Personality Studio or zip upload
+```
+
+**Installing** a personality is a folder copy: zip uploads are extracted to a
+staging directory and atomically renamed into the target root; zoo installs are
+plain copies. The DB never stores prompt text, tools, skills, or RAG metadata.
+
+**Scopes**: the global header groups personas by `global / personal / shared`.
+Users can **share** a personal handbag with friends or groups — sharing is a
+metadata-only ACL (`PersonalityShareLink`); the handbag physically stays in the
+owner's folder and consumers get read-only discovery. The only other DB table
+is `UserPersonalityPreference`, a pointer to the user's selected `(scope,
+handbag_name, owner_id)`.
+
+Discussions resolve the active preference to a handbag path (with ACL
+enforcement for shared scope) and call:
+
+```python
+from lollms_client.lollms_personality import LollmsPersonality
+personality = LollmsPersonality.from_handbag(resolved_handbag_path)
+```
+
+Missing or malformed folders degrade gracefully: the path is logged and the
+chat loop falls back to a safe default (NullPersonality contract).
+
+## 🎙️ Voices Studio
+
+Voice-profile selection is persisted under `[voices_studio]` in `config.toml`
+(mirrored on the user record as `active_voice_id`).
+
+*   `voices_studio.active_voice_id` — **required**. The id of the currently
+    selected voice profile. It must match an `id` returned by the voice
+    registry (`GET /voices`). This key is the single source of truth for
+    "which voice is active." Do **not** reuse `lollms_client_defaults.ai_name`
+    for this — that field is a prompt label, not a voice selector, and
+    conflating the two is a common cause of persisted-selection overwrites.
+
+**Troubleshooting:** if the wrong persona appears after selecting a different
+voice, verify in `config.toml` that `voices_studio.active_voice_id` matches the
+desired voice's `id`, and that the id is present in `GET /voices`. A mismatch
+between these two makes the UI render the previous persona even though the new
+one was clicked.
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request.

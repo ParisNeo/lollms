@@ -1,454 +1,367 @@
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue';
-import { storeToRefs } from 'pinia';
-import { useAuthStore } from '../../stores/auth';
-import { useDataStore } from '../../stores/data';
-import { useUiStore } from '../../stores/ui';
-import PersonalityCard from '../ui/Cards/PersonalityCard.vue';
-import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
-import IconSparkles from '../../assets/icons/IconSparkles.vue';
-import IconPlus from '../../assets/icons/IconPlus.vue';
-import IconMagnifyingGlass from '../../assets/icons/IconMagnifyingGlass.vue';
-import IconXMark from '../../assets/icons/IconXMark.vue';
+import { ref, onMounted } from 'vue';
+import apiClient from '@/services/api';
+import { useUiStore } from '@/stores/ui';
+import { useAuthStore } from '@/stores/auth';
+import PersonalityEditorModal from '@/components/modals/PersonalityEditorModal.vue';
+import SharePersonalityModal from '@/components/modals/SharePersonalityModal.vue';
+import IconCheckCircle from '@/assets/icons/IconCheckCircle.vue';
+import IconUserCircle from '@/assets/icons/IconUserCircle.vue';
+import IconUserGroup from '@/assets/icons/IconUserGroup.vue';
+import IconGlobeAlt from '@/assets/icons/IconGlobeAlt.vue';
+import IconCode from '@/assets/icons/IconCode.vue';
+import IconDataZone from '@/assets/icons/IconDataZone.vue';
+import IconDocumentText from '@/assets/icons/IconDocumentText.vue';
+import IconMagic from '@/assets/icons/IconMagic.vue';
+import IconBookOpen from '@/assets/icons/IconBookOpen.vue';
+import IconPencil from '@/assets/icons/IconPencil.vue';
+import IconShare from '@/assets/icons/IconShare.vue';
+import IconTrash from '@/assets/icons/IconTrash.vue';
 
-const authStore = useAuthStore();
-const dataStore = useDataStore();
 const uiStore = useUiStore();
+const authStore = useAuthStore();
 
-const { user } = storeToRefs(authStore);
-const { userPersonalities, publicPersonalities } = storeToRefs(dataStore);
+const catalog = ref({ global: [], personal: [], shared: [] });
+const activePreference = ref(null);
+const isLoading = ref(true);
+const loadError = ref(null);
 
-const STARRED_LOCALSTORAGE_KEY = 'lollms-starred-personalities';
+const showEditor = ref(false);
+const editorHandbag = ref(null);
+const showShareModal = ref(false);
+const shareHandbagName = ref(null);
+const shareOwner = ref(null);
+const receivedShares = ref([]);
 
-const activePersonalityId = ref('');
-const savingPersonalityId = ref(null);
-const searchQuery = ref('');
-const selectedCategory = ref('All');
-const starredPersonalityIds = ref(new Set());
-const importInputRef = ref(null);
-const isSearchFocused = ref(false);
+const uploadInput = ref(null);
 
-const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
+const canEdit = (item) =>
+  item.scope === 'personal' ||
+  (item.scope === 'global' && Boolean(authStore.user?.is_admin));
 
-// Category configuration with colors and icons
-const categoryConfig = {
-    'Creative': { color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300', icon: '✨' },
-    'Coding': { color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300', icon: '💻' },
-    'Educational': { color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300', icon: '📚' },
-    'Technical Support': { color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300', icon: '🔧' },
-    'Writing': { color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300', icon: '✍️' },
-    'Language': { color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300', icon: '🌐' },
-    'Art': { color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300', icon: '🎨' },
-    'Music': { color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300', icon: '🎵' },
-    'Science': { color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300', icon: '🔬' },
-    'Business': { color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', icon: '💼' },
-    'Fun': { color: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300', icon: '🎭' },
-    'Generic': { color: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300', icon: '🤖' },
-    'default': { color: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300', icon: '🎯' }
-};
-
-function getCategoryStyle(category) {
-    return categoryConfig[category] || categoryConfig['default'];
+function describeError(e) {
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (detail) return JSON.stringify(detail);
+  if (e?.message) return e.message;
+  return null;
 }
 
-const allCategories = computed(() => {
-    const categories = new Set(['All', 'Starred']);
-    allPersonalities.value.forEach(p => {
-        if (p.category) categories.add(p.category);
+/* ---------- Avatar helpers (catalog has no icon field) ---------- */
+function initials(name) {
+  const source = String(name || '?').trim();
+  if (!source) return '?';
+  const words = source.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  const chars = words.slice(0, 2).map((w) => w[0]);
+  return chars.join('').toUpperCase();
+}
+
+function hashColor(str) {
+  const source = String(str || '');
+  let hash = 0;
+  for (let i = 0; i < source.length; i += 1) {
+    // Deterministic hue from char codes; keep it simple and stable.
+    hash = (hash * 31 + source.charCodeAt(i)) >>> 0;
+  }
+  return `hsl(${hash % 360}, 65%, 45%)`;
+}
+
+/* ------------------------------------------------------------- */
+
+async function fetchCatalog() {
+  isLoading.value = true;
+  loadError.value = null;
+
+  const [catRes, prefRes, sharesRes] = await Promise.allSettled([
+    apiClient.get('/api/personalities/catalog'),
+    apiClient.get('/api/personalities/preference'),
+    apiClient.get('/api/personalities/share/received'),
+  ]);
+
+  if (catRes.status === 'fulfilled') {
+    const raw = catRes.value?.data ?? {};
+    catalog.value = {
+      global: Array.isArray(raw.global) ? raw.global : [],
+      personal: Array.isArray(raw.personal) ? raw.personal : [],
+      shared: Array.isArray(raw.shared) ? raw.shared : [],
+    };
+  } else {
+    loadError.value = describeError(catRes.reason) || 'Failed to load personalities catalog.';
+    // eslint-disable-next-line no-console
+    console.error('[PersonalitiesSettings] /catalog failed', catRes.reason);
+  }
+
+  activePreference.value = prefRes.status === 'fulfilled'
+    ? (prefRes.value?.data ?? null)
+    : null;
+
+  const sharesPayload = sharesRes.status === 'fulfilled'
+    ? sharesRes.value?.data
+    : null;
+  receivedShares.value = Array.isArray(sharesPayload)
+    ? sharesPayload.filter((l) => l?.shared_with_user_id != null || l?.group_id != null)
+    : [];
+
+  isLoading.value = false;
+}
+
+const isActive = (item) =>
+  Boolean(activePreference.value) &&
+  activePreference.value.scope === item.scope &&
+  activePreference.value.handbag_name === item.handbag_name &&
+  (item.scope !== 'shared' || activePreference.value.owner_id === item.owner_id);
+
+async function selectHandbag(item) {
+  const payload = { scope: item.scope, handbag_name: item.handbag_name };
+  if (item.scope === 'shared') payload.owner_id = item.owner_id ?? null;
+  try {
+    await apiClient.put('/api/personalities/preference', payload);
+    activePreference.value = payload;
+    uiStore.addNotification(`Active personality set to "${item.name}"`, 'success');
+  } catch (e) {
+    uiStore.addNotification(
+      describeError(e) || 'Failed to set active personality.',
+      'error'
+    );
+  }
+}
+
+function openEditor(item) {
+  editorHandbag.value = item;
+  showEditor.value = true;
+}
+
+async function deleteHandbag(item) {
+  if (!confirm(`Delete personality "${item.name}"? Its handbag folder will be removed.`)) return;
+  try {
+    await apiClient.delete(
+      `/api/personalities/studio/handbags/${item.scope}/${encodeURIComponent(item.handbag_name)}`
+    );
+    uiStore.addNotification(`"${item.name}" deleted.`, 'success');
+    fetchCatalog();
+  } catch (e) {
+    uiStore.addNotification(describeError(e) || 'Failed to delete personality.', 'error');
+  }
+}
+
+async function handleUploadZip(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  try {
+    await apiClient.post('/api/personalities/studio/upload', form, {
+      params: { scope: 'personal' },
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
-    return Array.from(categories).sort((a, b) => {
-        if (a === 'All') return -1; if (b === 'All') return 1;
-        if (a === 'Starred') return -1; if (b === 'Starred') return 1;
-        return a.localeCompare(b);
-    });
-});
-
-const filteredList = computed(() => {
-    let list = allPersonalities.value;
-
-    if (selectedCategory.value === 'Starred') {
-        list = list.filter(p => starredPersonalityIds.value.has(p.id));
-    } else if (selectedCategory.value !== 'All') {
-        list = list.filter(p => p.category === selectedCategory.value);
-    }
-    
-    const query = searchQuery.value.toLowerCase().trim();
-    if (query) {
-        list = list.filter(p => 
-            p.name.toLowerCase().includes(query) ||
-            (p.description && p.description.toLowerCase().includes(query)) ||
-            (p.category && p.category.toLowerCase().includes(query))
-        );
-    }
-    return list;
-});
-
-const filteredUserPersonalities = computed(() => filteredList.value.filter(p => !p.is_public && p.owner_username !== 'System'));
-const filteredPublicPersonalities = computed(() => filteredList.value.filter(p => p.is_public || p.owner_username === 'System'));
-
-const isShared = (personality) => {
-    return personality.author && personality.author.startsWith('Sent by ');
-};
-
-const getSharedByUsername = (personality) => {
-    if (isShared(personality)) {
-        return personality.author.replace('Sent by ', '').trim();
-    }
-    return '';
-};
-
-// Stats for the header
-const totalPersonalities = computed(() => userPersonalities.value.length);
-const publicCount = computed(() => publicPersonalities.value.filter(p => p.owner_username === 'System').length);
-
-onMounted(() => {
-    dataStore.fetchPersonalities();
-    try {
-        const storedStarred = localStorage.getItem(STARRED_LOCALSTORAGE_KEY);
-        if (storedStarred) starredPersonalityIds.value = new Set(JSON.parse(storedStarred));
-    } catch (e) {
-        console.error("Failed to load starred personalities from localStorage:", e);
-        starredPersonalityIds.value = new Set();
-    }
-    if (user.value) {
-        activePersonalityId.value = user.value.active_personality_id || '';
-        selectedCategory.value = user.value.personalities_view_category || 'All';
-    }
-});
-
-watch(() => user.value?.active_personality_id, (newId) => { activePersonalityId.value = newId || ''; });
-watch(() => user.value?.personalities_view_category, (newCategory) => { selectedCategory.value = newCategory || 'All'; });
-
-watch(selectedCategory, (newCategory) => {
-    if (user.value && newCategory !== (user.value.personalities_view_category || 'All')) {
-        authStore.updateUserPreferences({ personalities_view_category: newCategory });
-    }
-});
-
-async function handleToggleStar(personality) {
-    const newStarredSet = new Set(starredPersonalityIds.value);
-    if (newStarredSet.has(personality.id)) newStarredSet.delete(personality.id);
-    else newStarredSet.add(personality.id);
-    starredPersonalityIds.value = newStarredSet;
-    try {
-        localStorage.setItem(STARRED_LOCALSTORAGE_KEY, JSON.stringify(Array.from(newStarredSet)));
-    } catch (error) {
-        console.error("Failed to save starred personalities:", error);
-        uiStore.showToast({ message: 'Could not save favorite status.', type: 'error' });
-    }
+    uiStore.addNotification('Personality installed.', 'success');
+    fetchCatalog();
+  } catch (e) {
+    uiStore.addNotification(describeError(e) || 'Failed to install personality ZIP.', 'error');
+  }
 }
 
-async function handleSelectPersonality(personality) {
-    if (savingPersonalityId.value) return;
-    if (!personality || activePersonalityId.value === personality.id) {
-        await handleDeselectAll();
-        return;
-    }
-    savingPersonalityId.value = personality.id;
-    try {
-        await authStore.updateUserPreferences({ active_personality_id: personality.id });
-    } finally {
-        savingPersonalityId.value = null;
-    }
+function openShare(item) {
+  shareHandbagName.value = item.handbag_name;
+  shareOwner.value = item.owner;
+  showShareModal.value = true;
 }
 
-async function handleDeselectAll() {
-    if (!activePersonalityId.value || savingPersonalityId.value) return;
-    savingPersonalityId.value = activePersonalityId.value;
-    try {
-        await authStore.updateUserPreferences({ active_personality_id: null });
-    } finally {
-        savingPersonalityId.value = null;
-    }
+async function revokeShare(link) {
+  try {
+    await apiClient.delete(`/api/personalities/share/${link.id}`);
+    receivedShares.value = receivedShares.value.filter((l) => l.id !== link.id);
+    uiStore.addNotification('Share revoked.', 'success');
+  } catch (e) {
+    uiStore.addNotification(describeError(e) || 'Failed to revoke share.', 'error');
+  }
 }
 
-function openEditor(personality = null) {
-    let personalityData;
-    if (personality) {
-        personalityData = { ...personality };
-        if ((personality.is_public || personality.owner_username === 'System') && !authStore.user.is_admin) {
-            personalityData.id = null;
-            personalityData.is_public = false;
-            personalityData.owner_type = 'user';
-        }
-    } else {
-        personalityData = { id: null, name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null };
-    }
-    uiStore.openModal('personalityEditor', { personality: personalityData });
-}
+const sectionIcon = (scope) =>
+  scope === 'global' ? IconGlobeAlt : scope === 'personal' ? IconUserCircle : IconUserGroup;
 
-function openGeneratePersonalityModal() {
-    uiStore.openModal('generatePersonality');
-}
-
-async function handleDeletePersonality(personality) {
-    const confirmed = await uiStore.showConfirmation({
-        title: `Delete ${personality.name}`,
-        message: 'Are you sure you want to delete this personality? This cannot be undone.',
-        confirmText: 'Delete',
-        confirmClass: 'btn-danger'
-    });
-    if (confirmed) {
-        if (activePersonalityId.value === personality.id) await handleDeselectAll();
-        if (starredPersonalityIds.value.has(personality.id)) handleToggleStar(personality);
-        await dataStore.deletePersonality(personality.id);
-    }
-}
-
-async function handleShare(personality) {
-    uiStore.openModal('sharePersonality', {
-        personalityId: personality.id,
-        title: personality.name
-    });
-}
-
-function triggerImport() {
-    importInputRef.value.click();
-}
-
-async function handleImport(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    await dataStore.importPersonality(file);
-    event.target.value = '';
-}
-
-function clearSearch() {
-    searchQuery.value = '';
-}
+onMounted(fetchCatalog);
 </script>
 
 <template>
-    <section class="space-y-6">
-        <!-- Enhanced Header -->
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div>
-                <h2 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    <span class="text-2xl">🎭</span>
-                    Personality Studio
-                </h2>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {{ totalPersonalities }} personal • {{ publicCount }} public personalities available
-                </p>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-                <input type="file" ref="importInputRef" @change="handleImport" class="hidden" accept=".zip">
-                <button @click="triggerImport" class="btn btn-secondary flex items-center gap-2 hover:shadow-md transition-shadow" title="Import from Zip">
-                    <IconArrowUpTray class="w-4 h-4" /> 
-                    <span class="hidden sm:inline">Import</span>
-                </button>
-                <button @click="openGeneratePersonalityModal()" class="btn btn-primary flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg transition-all">
-                    <IconSparkles class="w-4 h-4" />
-                    <span class="hidden sm:inline">Generate</span>
-                </button>
-                <button @click="openEditor()" class="btn btn-secondary flex items-center gap-2 hover:shadow-md transition-shadow">
-                    <IconPlus class="w-4 h-4" />
-                    <span class="hidden sm:inline">Create New</span>
-                </button>
-            </div>
-        </div>
-        
-        <!-- Enhanced Search & Filter Bar -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 space-y-4">
-            <div class="flex flex-col sm:flex-row gap-3">
-                <!-- Search Input -->
-                <div class="relative flex-1">
-                    <IconMagnifyingGlass class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 transition-colors" :class="{ 'text-blue-500': isSearchFocused }" />
-                    <input 
-                        type="text" 
-                        v-model="searchQuery" 
-                        @focus="isSearchFocused = true"
-                        @blur="isSearchFocused = false"
-                        placeholder="Search personalities by name, description, or category..."
-                        class="input-field w-full !pl-10 !pr-10 transition-all"
-                        :class="{ 'ring-2 ring-blue-500/20 border-blue-300': isSearchFocused }"
-                    />
-                    <button 
-                        v-if="searchQuery" 
-                        @click="clearSearch" 
-                        class="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                        <IconXMark class="w-4 h-4" />
-                    </button>
-                </div>
-                <!-- Category Dropdown -->
-                <div class="relative min-w-[160px]">
-                    <select v-model="selectedCategory" class="input-field w-full appearance-none cursor-pointer">
-                        <option v-for="cat in allCategories" :key="cat" :value="cat">
-                            {{ cat === 'All' ? '📋 All Categories' : cat === 'Starred' ? '⭐ Starred' : cat }}
-                        </option>
-                    </select>
-                    <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Quick Category Chips (when not searching) -->
-            <div v-if="!searchQuery && selectedCategory === 'All'" class="flex flex-wrap gap-2">
-                <button 
-                    v-for="cat in allCategories.filter(c => c !== 'All' && c !== 'Starred')" 
-                    :key="cat"
-                    @click="selectedCategory = cat"
-                    class="px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:scale-105"
-                    :class="getCategoryStyle(cat).color"
-                >
-                    {{ getCategoryStyle(cat).icon }} {{ cat }}
-                </button>
-            </div>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">Personalities</h3>
+      <div class="flex items-center gap-2">
+        <input ref="uploadInput" type="file" accept=".zip" class="hidden" @change="handleUploadZip">
+        <button
+          class="px-3 py-1.5 text-sm rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300"
+          @click="uploadInput?.click()"
+        >
+          Upload ZIP
+        </button>
+        <button
+          class="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+          :disabled="isLoading"
+          @click="fetchCatalog"
+        >
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <p v-if="loadError" class="text-sm text-red-600 dark:text-red-400">{{ loadError }}</p>
+    <p v-if="isLoading" class="text-sm text-gray-500 dark:text-gray-400">Loading catalog…</p>
+
+    <template v-else>
+      <section
+        v-for="scope in ['global', 'personal', 'shared']"
+        :key="scope"
+        class="space-y-3"
+      >
+        <div class="flex items-center gap-2">
+          <component :is="sectionIcon(scope)" class="w-5 h-5 text-gray-600 dark:text-gray-300" />
+          <h4 class="text-base font-medium capitalize text-gray-700 dark:text-gray-200">
+            {{ scope === 'personal' ? 'My Personalities' : scope === 'global' ? 'Global Personalities' : 'Shared With Me' }}
+          </h4>
+          <span class="text-xs text-gray-500">({{ catalog[scope].length }})</span>
         </div>
 
-        <!-- Content Sections -->
-        <div class="space-y-8">
-            <!-- Starred Section (when selected) -->
-            <div v-if="selectedCategory === 'Starred'">
-                <div class="flex items-center gap-2 mb-4">
-                    <span class="text-xl">⭐</span>
-                    <h3 class="text-lg font-bold text-gray-900 dark:text-white">Starred Personalities</h3>
-                    <span class="px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300 text-xs font-medium">
-                        {{ filteredList.length }}
-                    </span>
-                </div>
-                <div v-if="filteredList.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    <PersonalityCard
-                        v-for="p in filteredList"
-                        :key="p.id"
-                        :personality="p"
-                        :is-user-personality="p.owner_username === user.username || (user && user.is_admin)"
-                        :is-active="p.id === activePersonalityId"
-                        :is-saving="p.id === savingPersonalityId"
-                        :is-starred="starredPersonalityIds.has(p.id)"
-                        :is-shared="isShared(p)"
-                        :shared-by="getSharedByUsername(p)"
-                        :category-style="getCategoryStyle(p.category)"
-                        @select="handleSelectPersonality($event)"
-                        @toggle-star="handleToggleStar($event)"
-                        @clone="openEditor($event)"
-                        @edit="openEditor($event)"
-                        @delete="handleDeletePersonality($event)"
-                        @share="handleShare($event)"
-                    />
-                </div>
-                <div v-else class="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                    <span class="text-4xl mb-3 block">⭐</span>
-                    <p class="text-gray-500 dark:text-gray-400 font-medium">
-                        {{ searchQuery ? 'No starred personalities match your search.' : 'No starred personalities yet' }}
-                    </p>
-                    <p v-if="!searchQuery" class="text-sm text-gray-400 dark:text-gray-500 mt-1">
-                        Click the star icon on any personality to add it here
-                    </p>
-                </div>
+        <ul v-if="catalog[scope].length" class="divide-y divide-gray-200 dark:divide-gray-700 rounded border border-gray-200 dark:border-gray-700">
+          <li
+            v-for="item in catalog[scope]"
+            :key="`${item.scope}:${item.owner || ''}:${item.handbag_name}`"
+            class="flex items-center justify-between gap-3 p-3"
+            :class="{ 'bg-blue-50 dark:bg-blue-900/20': isActive(item) }"
+          >
+            <!-- Avatar -->
+            <div class="shrink-0">
+              <img
+                v-if="item.icon_base64"
+                :src="item.icon_base64"
+                alt=""
+                class="w-10 h-10 rounded-xl object-cover"
+              >
+              <div
+                v-else
+                class="w-10 h-10 rounded-xl flex items-center justify-center text-white text-sm font-bold select-none"
+                :style="{ backgroundColor: hashColor(item.handbag_name || item.name) }"
+                :title="item.name"
+              >
+                {{ initials(item.name) }}
+              </div>
             </div>
-            
-            <template v-else>
-                <!-- Your Personalities Section -->
-                <div>
-                    <div class="flex items-center gap-2 mb-4">
-                        <span class="text-xl">👤</span>
-                        <h3 class="text-lg font-bold text-gray-900 dark:text-white">Your Personalities</h3>
-                        <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs font-medium">
-                            {{ filteredUserPersonalities.length }}
-                        </span>
-                    </div>
-                    
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                        <!-- No Personality Card -->
-                        <div
-                            @click="handleDeselectAll"
-                            class="group flex flex-col items-center justify-center h-full min-h-[180px] bg-white dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 transition-all hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer hover:shadow-md"
-                            :class="{ '!border-solid !border-green-500 !bg-green-50 dark:!bg-green-900/20 !shadow-lg': !activePersonalityId }"
-                        >
-                            <div class="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-3 transition-transform group-hover:scale-110" :class="{ '!bg-green-100 dark:!bg-green-800': !activePersonalityId }">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400 transition-colors" :class="{ '!text-green-600': !activePersonalityId }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                                </svg>
-                            </div>
-                            <span class="font-bold text-sm text-gray-700 dark:text-gray-300">No Personality</span>
-                            <span class="text-xs text-gray-500 dark:text-gray-400 mt-1">Use default behavior</span>
-                            <span v-if="!activePersonalityId" class="mt-2 px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-300 text-xs font-medium">Active</span>
-                        </div>
 
-                        <!-- User Personality Cards -->
-                        <PersonalityCard
-                            v-for="p in filteredUserPersonalities"
-                            :key="p.id"
-                            :personality="p"
-                            :is-user-personality="true"
-                            :is-active="p.id === activePersonalityId"
-                            :is-saving="p.id === savingPersonalityId"
-                            :is-starred="starredPersonalityIds.has(p.id)"
-                            :is-shared="isShared(p)"
-                            :shared-by="getSharedByUsername(p)"
-                            :category-style="getCategoryStyle(p.category)"
-                            @select="handleSelectPersonality($event)"
-                            @toggle-star="handleToggleStar($event)"
-                            @edit="openEditor($event)"
-                            @delete="handleDeletePersonality($event)"
-                            @share="handleShare($event)"
-                        />
-                    </div>
-                    
-                    <!-- Empty State -->
-                    <div v-if="filteredUserPersonalities.length === 0 && userPersonalities.length === 0 && selectedCategory === 'All' && !searchQuery" class="mt-6 text-center py-12 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 rounded-xl border border-blue-100 dark:border-blue-800">
-                        <span class="text-5xl mb-4 block">🎭</span>
-                        <h4 class="text-lg font-bold text-gray-900 dark:text-white mb-2">Create Your First Personality</h4>
-                        <p class="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-4">
-                            Personalities let you customize how the AI behaves. Create a coding assistant, a creative writer, or any character you can imagine.
-                        </p>
-                        <div class="flex gap-2 justify-center">
-                            <button @click="openGeneratePersonalityModal()" class="btn btn-primary flex items-center gap-2">
-                                <IconSparkles class="w-4 h-4" />
-                                Generate with AI
-                            </button>
-                            <button @click="openEditor()" class="btn btn-secondary flex items-center gap-2">
-                                <IconPlus class="w-4 h-4" />
-                                Create Manually
-                            </button>
-                        </div>
-                    </div>
-                    <p v-else-if="filteredUserPersonalities.length === 0" class="text-center py-8 text-gray-500 dark:text-gray-400">
-                        No matches found in your personalities.
-                    </p>
-                </div>
+            <div class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-medium truncate">{{ item.name }}</span>
+                <code class="text-[11px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">{{ item.handbag_name }}</code>
+                <span v-if="isActive(item)" class="inline-flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                  <IconCheckCircle class="w-4 h-4" /> Active
+                </span>
+                <span v-if="item.scope === 'shared'" class="text-xs text-gray-500">
+                  by {{ item.owner }}
+                </span>
+              </div>
+              <p class="text-xs text-gray-500 truncate">
+                {{ item.category || 'Uncategorized' }} · {{ item.author || 'Unknown author' }}
+              </p>
+              <p v-if="item.description" class="text-sm text-gray-600 dark:text-gray-300 mt-1 line-clamp-2">
+                {{ item.description }}
+              </p>
+              <div class="flex flex-wrap gap-1 mt-2">
+                <span v-if="item.has_soul" class="inline-flex items-center gap-1 rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-xs">
+                  <IconBookOpen class="w-3.5 h-3.5" /> Soul
+                </span>
+                <span v-if="item.has_tools" class="inline-flex items-center gap-1 rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-xs">
+                  <IconCode class="w-3.5 h-3.5" /> Tools
+                </span>
+                <span v-if="item.has_rag" class="inline-flex items-center gap-1 rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-xs">
+                  <IconDataZone class="w-3.5 h-3.5" /> RAG
+                </span>
+                <span v-if="item.has_docs" class="inline-flex items-center gap-1 rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-xs">
+                  <IconDocumentText class="w-3.5 h-3.5" /> Docs
+                </span>
+                <span v-if="item.has_skills" class="inline-flex items-center gap-1 rounded bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 text-xs">
+                  <IconMagic class="w-3.5 h-3.5" /> Skills
+                </span>
+              </div>
+            </div>
 
-                <!-- Public & System Personalities Section -->
-                <div>
-                    <div class="flex items-center gap-2 mb-4">
-                        <span class="text-xl">🌍</span>
-                        <h3 class="text-lg font-bold text-gray-900 dark:text-white">Public & System Personalities</h3>
-                        <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-xs font-medium">
-                            {{ filteredPublicPersonalities.length }}
-                        </span>
-                    </div>
-                    
-                    <div v-if="filteredPublicPersonalities.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                        <PersonalityCard
-                            v-for="p in filteredPublicPersonalities"
-                            :key="p.id"
-                            :personality="p"
-                            :is-user-personality="user && user.is_admin"
-                            :is-active="p.id === activePersonalityId"
-                            :is-saving="p.id === savingPersonalityId"
-                            :is-starred="starredPersonalityIds.has(p.id)"
-                            :is-shared="isShared(p)"
-                            :shared-by="getSharedByUsername(p)"
-                            :category-style="getCategoryStyle(p.category)"
-                            @select="handleSelectPersonality($event)"
-                            @toggle-star="handleToggleStar($event)"
-                            @clone="openEditor($event)"
-                            @edit="openEditor($event)"
-                            @delete="handleDeletePersonality($event)"
-                            @share="handleShare($event)"
-                        />
-                    </div>
-                    <div v-else class="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                        <span class="text-4xl mb-3 block">🌍</span>
-                        <p class="text-gray-500 dark:text-gray-400 font-medium">
-                            {{ searchQuery || selectedCategory !== 'All' ? 'No matches found in public personalities.' : 'No public personalities available' }}
-                        </p>
-                    </div>
-                </div>
-            </template>
-        </div>
-    </section>
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                class="px-3 py-1 text-xs rounded"
+                :class="isActive(item)
+                  ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300 cursor-default'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'"
+                :disabled="isActive(item)"
+                @click="selectHandbag(item)"
+              >
+                {{ isActive(item) ? 'Selected' : 'Select' }}
+              </button>
+              <button
+                class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="View details"
+                @click="openEditor(item)"
+              >
+                <IconPencil class="w-4 h-4" />
+              </button>
+              <button
+                v-if="item.scope === 'personal'"
+                class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                title="Share"
+                @click="openShare(item)"
+              >
+                <IconShare class="w-4 h-4" />
+              </button>
+              <button
+                v-if="canEdit(item)"
+                class="p-1.5 rounded text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
+                title="Delete"
+                @click="deleteHandbag(item)"
+              >
+                <IconTrash class="w-4 h-4" />
+              </button>
+            </div>
+          </li>
+        </ul>
+        <p v-else class="text-sm text-gray-400 italic">No personalities in this scope.</p>
+      </section>
+
+      <section v-if="receivedShares.length" class="space-y-2">
+        <h4 class="text-base font-medium text-gray-700 dark:text-gray-200">Share Links</h4>
+        <ul class="divide-y divide-gray-200 dark:divide-gray-700 rounded border border-gray-200 dark:border-gray-700">
+          <li
+            v-for="link in receivedShares"
+            :key="link.id"
+            class="flex items-center justify-between p-3 text-sm"
+          >
+            <span>
+              <strong>{{ link.handbag_name }}</strong>
+              <span class="text-gray-500">
+                shared with {{ link.shared_with_user_id != null ? `user #${link.shared_with_user_id}` : `group #${link.group_id}` }}
+              </span>
+            </span>
+            <button
+              class="p-1.5 rounded text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
+              title="Revoke share"
+              @click="revokeShare(link)"
+            >
+              <IconTrash class="w-4 h-4" />
+            </button>
+          </li>
+        </ul>
+      </section>
+    </template>
+
+    <PersonalityEditorModal
+      v-if="showEditor"
+      :handbag="editorHandbag"
+      @close="showEditor = false"
+    />
+    <SharePersonalityModal
+      v-if="showShareModal"
+      :handbag-name="shareHandbagName"
+      :owner="shareOwner"
+      @close="showShareModal = false"
+      @shared="fetchCatalog"
+    />
+  </div>
 </template>

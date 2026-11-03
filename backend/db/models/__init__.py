@@ -1,6 +1,12 @@
+# NOTE: Personalities are NO LONGER stored in the database.
+# Source of truth: filesystem handbags under data/personalities/{global,users/}.
+# Only metadata-only reference tables remain:
+#   - PersonalityShareLink       (sharing ACL, read-only discovery)
+#   - UserPersonalityPreference  (user -> selected (scope, handbag_name, owner_id))
+# See backend/db/models/personality_share.py and backend/personalities.py.
 from .user import User
 from .group import Group
-from .personality import Personality
+from .personality_share import PersonalityShareLink, UserPersonalityPreference
 from .config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, STTBinding, DatabaseVersion, RAGBinding
 from .service import App, MCP, AppZooRepository, MCPZooRepository, PromptZooRepository, PersonalityZooRepository
 from .social import Post, Comment

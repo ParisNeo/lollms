@@ -45,7 +45,32 @@ from backend.generation.stt import build_stt_router
 from backend.routers.discussion.sharing import build_discussion_sharing_router
 from backend.routers.discussion.utils import build_utils_router
 from backend.db.models.discussion import SharedDiscussionLink
+from backend.personalities import get_active_personality, resolve_handbag_path, load_personality_from_handbag
 from .helpers import get_discussion_and_owner_for_request
+
+
+def build_discussion_personality(db: Session, db_user: DBUser, payload_ref=None):
+    """Resolve the active personality for a discussion session.
+
+    Priority: explicit request payload (scope, handbag_name, owner_id) ->
+    stored user preference -> first personal handbag -> first global handbag.
+    Falls back to None (chat loop treats it as the NullPersonality contract);
+    never raises, never crashes the chat loop.
+    """
+    if payload_ref:
+        scope = getattr(payload_ref, "scope", None) or payload_ref.get("scope")
+        name = getattr(payload_ref, "handbag_name", None) or payload_ref.get("handbag_name")
+        owner_id = getattr(payload_ref, "owner_id", None) or payload_ref.get("owner_id")
+        if scope and name:
+            path = resolve_handbag_path(scope, name, db_user, owner_id=owner_id, db=db)
+            if path is not None:
+                personality = load_personality_from_handbag(path)
+                if personality is not None:
+                    return personality
+            trace_exception(RuntimeError(
+                f"Invalid personality reference {scope}/{name} (owner={owner_id}); "
+                "falling back to default."))
+    return get_active_personality(db_user, db)
 
 _EPOCH_SENTINEL = datetime(1970, 1, 1)
 
