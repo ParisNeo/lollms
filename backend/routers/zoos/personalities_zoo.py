@@ -2,7 +2,7 @@ import shutil
 import yaml
 import base64
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from packaging import version as packaging_version
 import datetime
 
@@ -39,6 +39,19 @@ personalities_zoo_router = APIRouter(
     dependencies=[Depends(get_current_admin_user)]
 )
 
+def _handbag_manifest_version(handbag_dir: Path) -> Optional[str]:
+    """Return the declared version from a handbag's handbag.yaml, or None."""
+    manifest = handbag_dir / "handbag.yaml"
+    if not manifest.exists():
+        return None
+    try:
+        with open(manifest, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        v = data.get("version")
+        return str(v) if v is not None else None
+    except Exception:
+        return None
+
 def _refresh_zoo_cache_task(task: Task):
     """Wrapper function to run the zoo cache build as a background task."""
     task.log("Starting Zoo cache refresh.")
@@ -48,29 +61,72 @@ def _refresh_zoo_cache_task(task: Task):
     task.log("Zoo cache refresh completed.")
     return {"message": "Zoo cache refreshed successfully."}
 
+def _read_personality_manifest(source_path: Path) -> Tuple[str, dict]:
+    """Resolve the manifest for a zoo pack and return (kind, raw_dict).
+
+    Modern LOLLMS handbags ship ``handbag.yaml``. Legacy personality packs
+    ship ``description.yaml``; the oldest ship ``config.yaml``. Attempting
+    only the legacy pair made every modern handbag install raise
+    ``FileNotFoundError`` BEFORE the handbag folder was written to disk —
+    that was the reported "install shows but nothing appears" symptom.
+    """
+    for filename, kind in (
+        ("handbag.yaml", "handbag"),
+        ("description.yaml", "description"),
+        ("config.yaml", "config"),
+    ):
+        candidate = source_path / filename
+        if candidate.exists():
+            with open(candidate, "r", encoding="utf-8") as f:
+                return kind, (yaml.safe_load(f) or {})
+    raise FileNotFoundError(
+        f"No recognised manifest (handbag.yaml, description.yaml or "
+        f"config.yaml) found in {source_path}"
+    )
+
+
+def _normalize_personality_config(kind: str, raw: dict) -> dict:
+    """Normalize a zoo manifest dict into the common field shape."""
+    if kind == "config":
+        return {
+            "name": raw.get("name"),
+            "version": str(raw.get("version", "N/A")),
+            "author": raw.get("author"),
+            "category": raw.get("category"),
+            "description": raw.get("personality_description"),
+            "prompt_text": raw.get("personality_conditioning"),
+            "disclaimer": raw.get("disclaimer"),
+            "tools": raw.get("dependencies", []),
+        }
+    # handbag.yaml and description.yaml already share the common shape.
+    return raw
+
+
+def _write_handbag_manifest_from_legacy(installed_path: Path, config: dict) -> None:
+    """Synthesize handbag.yaml for legacy installs (no-op if present)."""
+    manifest_path = installed_path / "handbag.yaml"
+    if manifest_path.exists():
+        return
+    manifest = {k: v for k, v in (
+        ("name", config.get("name")),
+        ("description", config.get("description")),
+        ("author", config.get("author")),
+        ("category", config.get("category")),
+        ("version", config.get("version")),
+    ) if v}
+    if not manifest:
+        return
+    try:
+        manifest_path.write_text(yaml.safe_dump(manifest, allow_unicode=True), encoding="utf-8")
+    except Exception as exc:
+        print(f"WARNING: could not synthesize handbag.yaml at {manifest_path}: {exc}")
+
+
 def _install_personality_task(task, repo_name: str, folder_name: str):
     source_path = PERSONALITIES_ZOO_ROOT_PATH / repo_name / folder_name
-    
-    desc_path = source_path / "description.yaml"
-    conf_path = source_path / "config.yaml"
-    
-    if not desc_path.exists() and not conf_path.exists():
-        raise FileNotFoundError(f"Neither description.yaml nor config.yaml found in {source_path}")
 
-    config = {}
-    if desc_path.exists():
-        with open(desc_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f) or {}
-    else:
-        with open(conf_path, 'r', encoding='utf-8') as f:
-            legacy_data = yaml.safe_load(f) or {}
-        config = {
-            'name': legacy_data.get('name'), 'version': str(legacy_data.get('version', 'N/A')),
-            'author': legacy_data.get('author'), 'category': legacy_data.get('category'),
-            'description': legacy_data.get('personality_description'),
-            'prompt_text': legacy_data.get('personality_conditioning'),
-            'disclaimer': legacy_data.get('disclaimer'), 'tools': legacy_data.get('dependencies', [])
-        }
+    manifest_kind, raw_config = _read_personality_manifest(source_path)
+    config = _normalize_personality_config(manifest_kind, raw_config)
 
     ensure_personality_roots()
     final_path = install_handbag_from_folder(
@@ -78,7 +134,11 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
         global_personalities_root(),
         handbag_name=folder_name,
     )
-    task.log(f"Personality '{config['name']}' installed to {final_path}.", "INFO")
+    _write_handbag_manifest_from_legacy(final_path, config)
+    task.log(
+        f"Personality '{config.get('name') or folder_name}' installed to {final_path}.",
+        "INFO",
+    )
     return {"message": "Personality installed.", "path": str(final_path)}
 
 @personalities_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
@@ -105,11 +165,23 @@ def add_repository(repo: PromptZooRepositoryCreate, db: Session = Depends(get_db
     if db.query(DBPersonalityZooRepository).filter(DBPersonalityZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
     
-    repo_type = "local" if repo.path else "git"
-    url_or_path = repo.path if repo.path else repo.url
-    if repo_type == "local" and not Path(url_or_path).is_dir():
-        raise HTTPException(status_code=400, detail="Local path is not a valid directory.")
-    
+    repo_path = getattr(repo, "path", None)
+    repo_url = getattr(repo, "url", None)
+
+    if repo_path:
+        repo_type = "local"
+        url_or_path = repo_path
+        if not Path(url_or_path).is_dir():
+            raise HTTPException(status_code=400, detail="Local path is not a valid directory.")
+    elif repo_url:
+        repo_type = "git"
+        url_or_path = repo_url
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Either 'path' (for a local repository) or 'url' (for a Git repository) must be provided.",
+        )
+
     new_repo = DBPersonalityZooRepository(name=repo.name, url=url_or_path, type=repo_type)
     db.add(new_repo); db.commit(); db.refresh(new_repo)
     task_manager.submit_task(
@@ -159,21 +231,39 @@ def get_available(
     starred_names: Optional[List[str]] = Query(None, alias="starred_names[]")
 ):
     all_items_raw = get_all_items('personality')
-    installed_recs = db.query(DBPersonality).filter(DBPersonality.owner_user_id.is_(None)).all()
-    installed_map = {p.name: p for p in installed_recs}
+
+    # Installed personas are filesystem handbags under the GLOBAL scope root
+    # (see backend.personalities.install_handbag_from_folder). The legacy
+    # DBPersonality table is only a migration source and must NOT be used to
+    # determine installation state — doing so made every installed handbag
+    # appear "not installed" (the reported bug).
+    global_root = global_personalities_root()
+    installed_handbags = {}
+    try:
+        if global_root.is_dir():
+            for entry in global_root.iterdir():
+                if entry.is_dir():
+                    installed_handbags[entry.name] = entry
+    except OSError as e:
+        print(f"WARNING: could not enumerate global handbags at {global_root}: {e}")
 
     all_items = []
     for info in all_items_raw:
         try:
-            is_installed = info.get('name') in installed_map
-            
+            folder_name = info.get('folder_name')
+            is_installed = bool(folder_name) and folder_name in installed_handbags
             update_available = False
             if is_installed:
-                installed_p = installed_map[info.get('name')]
+                # Best-effort version comparison against the installed handbag
+                # manifest (handbag.yaml). Any read/parse failure degrades to
+                # "no update available" rather than erroring the whole listing.
                 try:
-                    if installed_p.version and info.get('version') and packaging_version.parse(str(info.get('version'))) > packaging_version.parse(str(installed_p.version)):
+                    installed_version = _handbag_manifest_version(installed_handbags[folder_name])
+                    zoo_version = info.get('version')
+                    if installed_version and zoo_version and \
+                       packaging_version.parse(str(zoo_version)) > packaging_version.parse(str(installed_version)):
                         update_available = True
-                except (packaging_version.InvalidVersion, TypeError):
+                except (packaging_version.InvalidVersion, TypeError, OSError):
                     pass
 
             model_data = { 

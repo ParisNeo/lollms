@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-03 01:54]
+
+- Fix: [`personalities_zoo.py`] - Refactor dynamic configuration validation and add comprehensive error handling
+
 ## [2026-11-03 01:11]
 
 - fix security vulnerabilities in backend and improve frontend UX for managing personality data
