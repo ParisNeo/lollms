@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-03 02:16]
+
+- `fix: update light-weight manifest scan functionality and improve zoo personality resolution logic`
+
 ## [2026-11-03 01:54]
 
 - Fix: [`personalities_zoo.py`] - Refactor dynamic configuration validation and add comprehensive error handling

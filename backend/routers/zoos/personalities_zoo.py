@@ -39,6 +39,54 @@ personalities_zoo_router = APIRouter(
     dependencies=[Depends(get_current_admin_user)]
 )
 
+def _build_installed_handbag_index(global_root: Path) -> dict:
+    """Build a lookup map of installed handbags, keyed by every plausible identity.
+
+    The map stores a ``Path`` for each of the following keys per handbag:
+
+    * the raw on-disk folder name,
+    * the folder name **without** a trailing archive/handbag extension,
+    * the manifest-declared ``name`` field (``handbag.yaml`` → ``description.yaml``
+      → ``config.yaml``).
+
+    This makes "is installed?" detection resilient to installers that slugify,
+    rename, or extension-strip the destination folder — the root cause of the
+    "installed personas still show an Install button" report.
+    """
+    index: dict = {}
+    if not global_root.is_dir():
+        return index
+    try:
+        entries = list(global_root.iterdir())
+    except OSError as exc:
+        print(f"WARNING: could not enumerate global handbags at {global_root}: {exc}")
+        return index
+
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        index.setdefault(entry.name, entry)
+        for ext in (".handbag", ".personality", ".zip"):
+            if entry.name.endswith(ext):
+                index.setdefault(entry.name[:-len(ext)], entry)
+                break
+        for manifest_file in ("handbag.yaml", "description.yaml", "config.yaml"):
+            manifest_path = entry / manifest_file
+            if not manifest_path.exists():
+                continue
+            try:
+                with open(manifest_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+            except Exception as exc:
+                print(f"WARNING: could not read manifest {manifest_path}: {exc}")
+                continue
+            manifest_name = data.get("name")
+            if manifest_name:
+                index.setdefault(str(manifest_name), entry)
+            break
+    return index
+
+
 def _handbag_manifest_version(handbag_dir: Path) -> Optional[str]:
     """Return the declared version from a handbag's handbag.yaml, or None."""
     manifest = handbag_dir / "handbag.yaml"
@@ -135,6 +183,66 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
         handbag_name=folder_name,
     )
     _write_handbag_manifest_from_legacy(final_path, config)
+
+    # Finalize installed manifest with `version` so `get_available`
+    # (`_handbag_manifest_version` vs zoo version) can flag update_available.
+    try:
+        installed_manifest_path = final_path / "handbag.yaml"
+        installed_manifest = {}
+        if installed_manifest_path.is_file():
+            installed_manifest = yaml.safe_load(
+                installed_manifest_path.read_text(encoding="utf-8")) or {}
+        changed = False
+        if config.get("version") and not installed_manifest.get("version"):
+            installed_manifest["version"] = str(config["version"])
+            changed = True
+        if changed:
+            installed_manifest_path.write_text(
+                yaml.safe_dump(installed_manifest, allow_unicode=True),
+                encoding="utf-8")
+    except Exception as exc:
+        print(f"WARNING: could not finalize handbag manifest at {final_path}: {exc}")
+
+    # Icon fallback: `install_handbag_from_folder` copies any in-folder
+    # `icon.*` automatically. If the pack shipped only manifest metadata,
+    # materialize `icon.png` from that base64 so the studio shows the icon.
+    try:
+        has_icon_file = any(
+            (final_path / n).is_file()
+            for n in ("icon.png", "icon.jpg", "icon.jpeg", "icon.svg", "icon.webp")
+        )
+        if not has_icon_file and (final_path / "assets").is_dir():
+            has_icon_file = any(
+                (final_path / "assets" / n).is_file()
+                for n in ("icon.png", "icon.jpg", "icon.jpeg", "icon.svg", "icon.webp")
+            )
+        if not has_icon_file:
+            # `_normalize_personality_config` drops unknown fields for legacy
+            # `config.yaml` packs, so icon metadata declared there is invisible
+            # via `config`. Fall back to `raw_config` (the un-normalized source
+            # manifest) so legacy packs get their embedded icon materialized.
+            declared_icon = (
+                config.get("icon") or config.get("icon_base64")
+                or (isinstance(raw_config, dict)
+                    and (raw_config.get("icon") or raw_config.get("icon_base64")))
+                or None
+            )
+            if isinstance(declared_icon, str) and declared_icon.strip():
+                payload = declared_icon.split(",", 1)[-1] \
+                    if declared_icon.startswith("data:") else declared_icon
+                try:
+                    (final_path / "icon.png").write_bytes(
+                        base64.b64decode(payload, validate=True))
+                except Exception as decode_err:
+                    # Not raw base64 (maybe a relative path or URL): leave the
+                    # installed folder icon-less; `_read_handbag_icon` will try
+                    # to resolve a relative-path manifest field on read.
+                    print(
+                        f"WARNING: icon field for '{folder_name}' is not valid "
+                        f"base64 ({decode_err}); skipping materialization.")
+    except Exception as exc:
+        print(f"WARNING: could not materialize handbag icon at {final_path}: {exc}")
+
     task.log(
         f"Personality '{config.get('name') or folder_name}' installed to {final_path}.",
         "INFO",
@@ -237,28 +345,39 @@ def get_available(
     # DBPersonality table is only a migration source and must NOT be used to
     # determine installation state — doing so made every installed handbag
     # appear "not installed" (the reported bug).
-    global_root = global_personalities_root()
-    installed_handbags = {}
-    try:
-        if global_root.is_dir():
-            for entry in global_root.iterdir():
-                if entry.is_dir():
-                    installed_handbags[entry.name] = entry
-    except OSError as e:
-        print(f"WARNING: could not enumerate global handbags at {global_root}: {e}")
+    installed_index = _build_installed_handbag_index(global_personalities_root())
+    print(
+        f"INFO: personality zoo detected {len(installed_index)} installed-handbag identifiers "
+        f"under {global_personalities_root()}."
+    )
 
     all_items = []
     for info in all_items_raw:
         try:
             folder_name = info.get('folder_name')
-            is_installed = bool(folder_name) and folder_name in installed_handbags
+            name = info.get('name')
+            installed_path: Optional[Path] = None
+            if folder_name and folder_name in installed_index:
+                installed_path = installed_index[folder_name]
+            elif name and name in installed_index:
+                installed_path = installed_index[name]
+                # Diagnostic: the on-disk folder differs from the zoo's
+                # folder_name. The handbag is installed under a different
+                # identity (slugified, extension-suffixed, or named after the
+                # manifest). Report the true state and log the drift so it
+                # fails loudly if it ever gets worse.
+                print(
+                    f"INFO: Personality '{name}' matched installed handbag by manifest name "
+                    f"(zoo folder '{folder_name}', on-disk folder '{installed_path.name}')."
+                )
+            is_installed = installed_path is not None
             update_available = False
             if is_installed:
                 # Best-effort version comparison against the installed handbag
                 # manifest (handbag.yaml). Any read/parse failure degrades to
                 # "no update available" rather than erroring the whole listing.
                 try:
-                    installed_version = _handbag_manifest_version(installed_handbags[folder_name])
+                    installed_version = _handbag_manifest_version(installed_path)
                     zoo_version = info.get('version')
                     if installed_version and zoo_version and \
                        packaging_version.parse(str(zoo_version)) > packaging_version.parse(str(installed_version)):

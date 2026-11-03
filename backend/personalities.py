@@ -198,6 +198,82 @@ def _safe_resolve(root: Path, name: str) -> Path:
 # Discovery (lightweight manifest scan — no Handbag() instantiation)
 # ---------------------------------------------------------------------------
 
+def _read_handbag_icon(path: Path) -> Optional[str]:
+    """Return a data-URI icon for a handbag, or ``None``.
+
+    Resolution order (files first — a real file always beats the manifest):
+
+    1. ``icon.{png,jpg,jpeg,svg,webp}`` in the handbag root.
+    2. ``icon.*`` directly under ``assets/``.
+    3. ``handbag.yaml`` ``icon`` / ``icon_base64`` field, tolerant of:
+       - a ``data:<mime>;base64,<...>`` URI (returned verbatim),
+       - an ``http(s)://`` URL (returned verbatim; frontend fetches),
+       - a relative file path inside the handbag (resolved and read),
+       - a raw base64 string (wrapped as a PNG data URI).
+
+    Returns a URI string consumable directly by ``<img :src="...">``.
+    Never raises: any IO/parse failure degrades to ``None`` so one bad icon
+    cannot blank the whole catalog response.
+    """
+    import base64 as _b64
+    import mimetypes as _mime
+
+    def _encode_file(candidate: Path) -> Optional[str]:
+        try:
+            mime = _mime.guess_type(candidate.name)[0] or "image/png"
+            return (f"data:{mime};base64,"
+                    + _b64.b64encode(candidate.read_bytes()).decode("ascii"))
+        except OSError:
+            return None
+
+    # 1. Icon file at handbag root (authoritative: an actual file is always
+    #    valid, unlike a possibly-bogus manifest field declaring a path).
+    for fname in ("icon.png", "icon.jpg", "icon.jpeg", "icon.svg", "icon.webp"):
+        candidate = path / fname
+        if candidate.is_file():
+            encoded = _encode_file(candidate)
+            if encoded:
+                return encoded
+
+    # 2. Icon file under assets/
+    assets = path / "assets"
+    if assets.is_dir():
+        for candidate in sorted(assets.glob("icon.*")):
+            if candidate.is_file():
+                encoded = _encode_file(candidate)
+                if encoded:
+                    return encoded
+
+    # 3. Manifest-declared icon (data URI / URL / relative path / raw base64)
+    manifest = _load_manifest(path)
+    for key in ("icon", "icon_base64"):
+        declared = manifest.get(key)
+        if not isinstance(declared, str) or not declared.strip():
+            continue
+        declared = declared.strip()
+        if declared.startswith("data:"):
+            return declared
+        if declared.startswith(("http://", "https://")):
+            return declared
+        try:
+            handbag_root = path.resolve()
+            candidate = (handbag_root / declared).resolve()
+            if handbag_root in candidate.parents and candidate.is_file():
+                encoded = _encode_file(candidate)
+                if encoded:
+                    return encoded
+        except (OSError, ValueError):
+            pass
+        try:
+            raw = _b64.b64decode(declared, validate=True)
+            if raw:
+                return (f"data:image/png;base64,"
+                        + _b64.b64encode(raw).decode("ascii"))
+        except Exception:
+            pass
+    return None
+
+
 def _scan_handbag(path: Path, scope: str, owner: Optional[str]) -> Optional[Dict[str, Any]]:
     if not path.is_dir():
         return None
@@ -210,6 +286,7 @@ def _scan_handbag(path: Path, scope: str, owner: Optional[str]) -> Optional[Dict
                 manifest = {}
         except Exception:
             manifest = {}
+    icon_data = _read_handbag_icon(path)
     dto = {
         "name": manifest.get("name") or path.name,
         "handbag_name": path.name,
@@ -218,6 +295,9 @@ def _scan_handbag(path: Path, scope: str, owner: Optional[str]) -> Optional[Dict
         "description": manifest.get("description", ""),
         "author": manifest.get("author", ""),
         "category": manifest.get("category", ""),
+        "version": str(manifest.get("version")) if manifest.get("version") is not None else None,
+        "icon": icon_data,
+        "icon_base64": icon_data,  # alias: consumers still binding this legacy field get the icon too
         "has_soul": (path / "SOUL.md").is_file(),
         "has_tools": any((path / "tools").glob("*.py")) if (path / "tools").is_dir() else False,
         "has_rag": (path / "rag").is_dir() and any((path / "rag").iterdir()),
@@ -359,11 +439,15 @@ def read_handbag_detail(path: Path) -> Dict[str, Any]:
         raise ValueError(f"Not a handbag folder: {path}")
     manifest = _load_manifest(path)
     soul_file = path / "SOUL.md"
+    icon_data = _read_handbag_icon(path)
     return {
         "name": manifest.get("name") or path.name,
         "description": manifest.get("description", ""),
         "author": manifest.get("author", ""),
         "category": manifest.get("category", ""),
+        "version": str(manifest.get("version")) if manifest.get("version") is not None else None,
+        "icon": icon_data,
+        "icon_base64": icon_data,  # alias for legacy consumers (studio modal, list view)
         "prompt_text": soul_file.read_text(encoding="utf-8") if soul_file.is_file() else "",
     }
 
@@ -371,8 +455,15 @@ def read_handbag_detail(path: Path) -> Dict[str, Any]:
 def write_handbag_files(path: Path, *, display_name: Optional[str] = None,
                         description: Optional[str] = None, author: Optional[str] = None,
                         category: Optional[str] = None,
-                        prompt_text: Optional[str] = None) -> None:
-    """Update handbag metadata (handbag.yaml) and/or the SOUL.md prompt in place."""
+                        prompt_text: Optional[str] = None,
+                        icon_base64: Optional[str] = None) -> None:
+    """Update handbag metadata (handbag.yaml), SOUL.md, and/or icon in place.
+
+    ``icon_base64`` accepts either a data URI (``data:image/png;base64,...``)
+    or a raw base64 payload; the decoded bytes are written to ``icon.png`` so
+    the icon travels with the handbag folder and is picked up by
+    ``_read_handbag_icon`` on the next catalog scan.
+    """
     if not path.is_dir():
         raise ValueError(f"Not a handbag folder: {path}")
     manifest = _load_manifest(path)
@@ -386,6 +477,14 @@ def write_handbag_files(path: Path, *, display_name: Optional[str] = None,
     if prompt_text is not None:
         (path / "SOUL.md").write_text(prompt_text or f"# {manifest.get('name', path.name)}\n",
                                       encoding="utf-8")
+    if icon_base64:
+        try:
+            import base64 as _b64
+            payload = icon_base64.split(",", 1)[-1] \
+                if icon_base64.startswith("data:") else icon_base64
+            (path / "icon.png").write_bytes(_b64.b64decode(payload))
+        except Exception as exc:
+            ASCIIColors.warning(f"[personalities] cannot write icon for {path}: {exc}")
 
 
 def delete_handbag(root: Path, name: str) -> None:
