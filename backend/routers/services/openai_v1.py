@@ -1170,8 +1170,13 @@ async def chat_completions(
 
     openai_messages, images = preprocess_openai_messages(messages)
 
-    if request.tools:
-        openai_messages = handle_tools_injection(openai_messages, request.tools, request.tool_choice)
+    # Tools are forwarded verbatim to the binding (native OpenAI tool-calling).
+    # handle_tools_injection() is a LEGACY fallback used only when the binding
+    # rejects `tools=` as an unexpected keyword — see the generation calls below.
+    tools_for_binding: Optional[List[Dict[str, Any]]] = request.tools or None
+    tool_choice_for_binding: Optional[Union[str, Dict[str, Any]]] = (
+        request.tool_choice if tools_for_binding else None
+    )
 
     if request.response_format:
         openai_messages = handle_response_format_injection(openai_messages, request.response_format)
@@ -1316,40 +1321,265 @@ async def chat_completions(
 
                     # ── TOOLS PATH ────────────────────────────────────────────────────────
                     if request.tools:
-                        # Offload to thread pool to avoid blocking the event loop
-                        result_content = await asyncio.wait_for(
-                            loop.run_in_executor(
-                                executor,
-                                lambda: lc.generate_from_messages(
-                                    openai_messages,
-                                    temperature=request.temperature,
-                                    n_predict=effective_max_tokens,
-                                    **generation_kwargs
+                        # Some bindings reject unsupported reasoning kwargs. Build a safe
+                        # kwargs set: only pass temperature + n_predict by default, and
+                        # attempt to forward reasoning kwargs optimistically with fallback.
+                        safe_kwargs = {"temperature": request.temperature, "n_predict": effective_max_tokens}
+
+                        # Buffer accumulated text so we can parse tool_calls at the end while
+                        # still streaming progressive content to the client.
+                        buffered_text_parts: List[str] = []
+
+                        def tools_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
+                            if client_aborted or (lc and lc.cancel_generation):
+                                return False
+                            if lc and hasattr(lc, 'llm') and lc.llm:
+                                if getattr(lc.llm, 'cancelled', False):
+                                    return False
+                                if hasattr(lc.llm, 'is_cancelled') and lc.llm.is_cancelled():
+                                    return False
+
+                            if msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK and chunk_text:
+                                main_loop.call_soon_threadsafe(
+                                    stream_queue.put_nowait,
+                                    make_chunk(DeltaMessage(reasoning_content=chunk_text))
                                 )
-                            ),
-                            timeout=TTFT_TIMEOUT,   # tools path: single blocking call
-                        )
-                        if lc.llm and lc.llm.is_cancelled():
-                            yield "data: [DONE]\n\n"
-                            return
-                        if isinstance(result_content, dict) and (
-                            "error" in result_content or result_content.get("status") is False
-                        ):
-                            yield make_error_chunk(result_content.get("error", "LLM error"))
-                            yield "data: [DONE]\n\n"
-                            return
-                        content, tool_calls = parse_tool_calls_from_text(result_content)
+                                return True
+
+                            if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
+                                buffered_text_parts.append(chunk_text)
+                                main_loop.call_soon_threadsafe(
+                                    stream_queue.put_nowait,
+                                    make_chunk(DeltaMessage(content=chunk_text))
+                                )
+                            return True
+
+                        def _is_unsupported_kwarg(ex: Exception) -> bool:
+                            """Detects bindings that reject reasoning kwargs (TypeError, ValueError, or kwarg-related Exception)."""
+                            if isinstance(ex, (TypeError, ValueError)):
+                                return True
+                            msg = str(ex).lower()
+                            return (
+                                "unexpected keyword" in msg
+                                or "got an unexpected" in msg
+                                or "invalid keyword" in msg
+                                or "unexpected argument" in msg
+                            )
+
+                        # Capture native tool_calls emitted directly by the binding (dict /
+                        # object / list shape depending on binding implementation).
+                        native_tool_calls: List[ToolCall] = []
+                        native_result_container: Dict[str, Any] = {}
+
+                        def _collect_native_tool_calls(result: Any) -> None:
+                            """Extracts native OpenAI wire-format tool_calls from a binding return value."""
+                            candidates: List[Any] = []
+                            if result is None:
+                                return
+                            if isinstance(result, dict):
+                                if result.get("tool_calls"):
+                                    candidates = result["tool_calls"]
+                                elif isinstance(result.get("message"), dict) and result["message"].get("tool_calls"):
+                                    candidates = result["message"]["tool_calls"]
+                                else:
+                                    native_result_container["raw"] = result
+                                    return
+                            elif isinstance(result, list):
+                                candidates = result
+                            elif hasattr(result, "tool_calls") and getattr(result, "tool_calls"):
+                                candidates = list(result.tool_calls)
+                            else:
+                                native_result_container["raw"] = result
+                                return
+
+                            for tc in candidates:
+                                try:
+                                    if isinstance(tc, ToolCall):
+                                        native_tool_calls.append(tc)
+                                    elif isinstance(tc, dict):
+                                        fn = tc.get("function", {}) or {}
+                                        args = fn.get("arguments")
+                                        if isinstance(args, dict):
+                                            args = json.dumps(args)
+                                        native_tool_calls.append(
+                                            ToolCall(
+                                                id=tc.get("id") or generate_mistral_compatible_id(),
+                                                type=tc.get("type", "function"),
+                                                function=FunctionCall(
+                                                    name=fn.get("name"),
+                                                    arguments=args if args is not None else "{}",
+                                                ),
+                                            )
+                                        )
+                                    elif hasattr(tc, "function"):
+                                        fn = tc.function
+                                        args = getattr(fn, "arguments", None)
+                                        if isinstance(args, dict):
+                                            args = json.dumps(args)
+                                        native_tool_calls.append(
+                                            ToolCall(
+                                                id=getattr(tc, "id", None) or generate_mistral_compatible_id(),
+                                                type=getattr(tc, "type", "function"),
+                                                function=FunctionCall(
+                                                    name=getattr(fn, "name", None),
+                                                    arguments=args if args is not None else "{}",
+                                                ),
+                                            )
+                                        )
+                                except Exception as _tc_ex:
+                                    ASCIIColors.warning(
+                                        f"[tools_blocking_gen] Skipping malformed native tool_call: {_tc_ex}"
+                                    )
+
+                        # Track whether we fell back to prompt-injection so that the final
+                        # buffer-parse step is only used for the legacy path (native
+                        # responses are trusted as authoritative).
+                        used_injection_fallback = False
+
+                        def _call_binding_with_tools() -> Any:
+                            """Call the binding forwarding native tools/tool_choice. Falls
+                            back to prompt-injection if the binding rejects `tools=`."""
+                            nonlocal used_injection_fallback
+                            try:
+                                return lc.generate_from_messages(
+                                    openai_messages,
+                                    streaming_callback=tools_callback,
+                                    stream=True,
+                                    tools=tools_for_binding,
+                                    tool_choice=tool_choice_for_binding,
+                                    **safe_kwargs,
+                                    **generation_kwargs,
+                                )
+                            except Exception as native_ex:
+                                if not _is_unsupported_kwarg(native_ex):
+                                    raise
+                                ASCIIColors.warning(
+                                    f"[tools_blocking_gen] tools kwarg rejected ({native_ex}); "
+                                    f"falling back to prompt-injection."
+                                )
+                            except TypeError:
+                                pass  # fall through to injection fallback
+
+                            # ── Legacy prompt-injection fallback ─────────────────────
+                            used_injection_fallback = True
+                            injected_messages = handle_tools_injection(
+                                [dict(m) for m in openai_messages],
+                                tools_for_binding or [],
+                                tool_choice_for_binding,
+                            )
+                            try:
+                                return lc.generate_from_messages(
+                                    injected_messages,
+                                    streaming_callback=tools_callback,
+                                    stream=True,
+                                    **safe_kwargs,
+                                    **generation_kwargs,
+                                )
+                            except Exception as second_ex:
+                                if not _is_unsupported_kwarg(second_ex):
+                                    raise
+                                ASCIIColors.warning(
+                                    f"[tools_blocking_gen] kwarg rejected again ({second_ex}); "
+                                    f"retrying without reasoning kwargs."
+                                )
+                                return lc.generate_from_messages(
+                                    injected_messages,
+                                    streaming_callback=tools_callback,
+                                    stream=True,
+                                    **safe_kwargs,
+                                )
+
+                        def tools_blocking_gen() -> None:
+                            nonlocal generation_error
+                            try:
+                                result = _call_binding_with_tools()
+                                _collect_native_tool_calls(result)
+                            except Exception as ex:
+                                generation_error = True
+                                err_str = str(ex).lower()
+                                ASCIIColors.error(f"[tools_blocking_gen] {ex}")
+                                if "connection" in err_str or "disconnected" in err_str or "broken pipe" in err_str:
+                                    evict_client_from_registry(lc, user.username)
+                                main_loop.call_soon_threadsafe(
+                                    stream_queue.put_nowait,
+                                    make_error_chunk(str(ex))
+                                )
+                            finally:
+                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+
+                        gen_task_tools = loop.run_in_executor(executor, tools_blocking_gen)
                         yield make_chunk(DeltaMessage(role="assistant"))
-                        if content:
-                            yield make_chunk(DeltaMessage(content=content))
+
+                        # Drain the stream until sentinel
+                        first_token_received_tools = False
+                        tools_timed_out = False
+                        while True:
+                            timeout = CHUNK_TIMEOUT if first_token_received_tools else TTFT_TIMEOUT
+                            try:
+                                item = await asyncio.wait_for(stream_queue.get(), timeout=timeout)
+                            except asyncio.TimeoutError:
+                                tools_timed_out = True
+                                if not first_token_received_tools:
+                                    ASCIIColors.warning(
+                                        f"[stream][tools] TTFT timeout ({TTFT_TIMEOUT}s) for user '{user.username}'. Cancelling."
+                                    )
+                                    await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                                    yield make_error_chunk(
+                                        f"Generation timed out waiting for first token ({TTFT_TIMEOUT:.0f}s)."
+                                    )
+                                else:
+                                    ASCIIColors.warning(
+                                        f"[stream][tools] Inter-chunk timeout ({CHUNK_TIMEOUT}s) for user '{user.username}'. Cancelling."
+                                    )
+                                    await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                                    yield make_error_chunk(
+                                        f"Generation stalled mid-stream ({CHUNK_TIMEOUT:.0f}s between tokens)."
+                                    )
+                                break
+                            if item is None:
+                                break
+                            if not first_token_received_tools:
+                                first_token_received_tools = True
+                            yield item
+
+                        # Parse buffered text for tool calls and emit final delta.
+                        # Native tool_calls are authoritative; text parsing is a fallback
+                        # used only when the binding used the prompt-injection path or a
+                        # text-emitting model produced fake tool calls in markdown/XML.
+                        full_text = "".join(buffered_text_parts)
+                        parsed_tool_calls: Optional[List[ToolCall]] = None
+                        if not native_tool_calls and used_injection_fallback:
+                            _parsed_content, parsed_tool_calls = parse_tool_calls_from_text(full_text)
+
+                        tool_calls: List[ToolCall] = native_tool_calls or parsed_tool_calls or []
+
+                        # If no text at all AND no tool calls AND no generation error -> empty output
+                        if (
+                            not generation_error
+                            and not tool_calls
+                            and not full_text.strip()
+                            and not tools_timed_out
+                        ):
+                            ASCIIColors.warning(
+                                f"[stream][tools] Empty generation result for user '{user.username}' "
+                                f"(no content, no tool_calls)."
+                            )
+                            yield make_error_chunk(
+                                "Model returned an empty response with tools enabled. "
+                                "Check that the selected model supports tool/function calling."
+                            )
+
+                        # If tool calls were present, emit them as final deltas
                         if tool_calls:
                             for i, tc in enumerate(tool_calls):
                                 tc.index = i
                                 yield make_chunk(DeltaMessage(tool_calls=[tc]))
-                        yield make_chunk(
-                            DeltaMessage(),
-                            finish_reason="tool_calls" if tool_calls else "stop"
-                        )
+
+                        if lc.llm and not lc.llm.is_cancelled():
+                            yield make_chunk(
+                                DeltaMessage(),
+                                finish_reason="tool_calls" if tool_calls else "stop"
+                            )
                         yield "data: [DONE]\n\n"
                         return
 
@@ -1533,15 +1763,64 @@ async def chat_completions(
 
         _prepare_generation(lc)
 
-        gen_future = loop.run_in_executor(
-            executor,
-            lambda: lc.generate_from_messages(
+        def _non_stream_generate() -> Any:
+            """Forward native tools when possible; fall back to prompt-injection otherwise."""
+            if tools_for_binding:
+                try:
+                    return lc.generate_from_messages(
+                        openai_messages,
+                        temperature=request.temperature,
+                        n_predict=effective_max_tokens,
+                        tools=tools_for_binding,
+                        tool_choice=tool_choice_for_binding,
+                        **generation_kwargs,
+                    )
+                except Exception as native_ex:
+                    msg = str(native_ex).lower()
+                    is_kwarg_reject = isinstance(native_ex, TypeError) or any(
+                        tok in msg for tok in (
+                            "unexpected keyword", "got an unexpected",
+                            "invalid keyword", "unexpected argument",
+                        )
+                    )
+                    if not is_kwarg_reject:
+                        raise
+                    ASCIIColors.warning(
+                        f"[non_stream] tools kwarg rejected ({native_ex}); "
+                        f"falling back to prompt-injection."
+                    )
+                    injected = handle_tools_injection(
+                        [dict(m) for m in openai_messages],
+                        tools_for_binding,
+                        tool_choice_for_binding,
+                    )
+                    try:
+                        return lc.generate_from_messages(
+                            injected,
+                            temperature=request.temperature,
+                            n_predict=effective_max_tokens,
+                            **generation_kwargs,
+                        )
+                    except Exception as second_ex:
+                        if not (
+                            isinstance(second_ex, TypeError)
+                            or "unexpected keyword" in str(second_ex).lower()
+                        ):
+                            raise
+                        return lc.generate_from_messages(
+                            injected,
+                            temperature=request.temperature,
+                            n_predict=effective_max_tokens,
+                        )
+
+            return lc.generate_from_messages(
                 openai_messages,
                 temperature=request.temperature,
                 n_predict=effective_max_tokens,
-                **generation_kwargs
+                **generation_kwargs,
             )
-        )
+
+        gen_future = loop.run_in_executor(executor, _non_stream_generate)
         disconnect_task = asyncio.ensure_future(wait_for_disconnect())
         gen_task = asyncio.ensure_future(gen_future)
 
@@ -1594,18 +1873,112 @@ async def chat_completions(
                     detail=error_detail
                 )
 
-            raw_text = str(result_content) if result_content is not None else ""
-            clean_content, reasoning_content = parse_reasoning_and_content(raw_text)
-
+            clean_content = ""
+            reasoning_content: Optional[str] = None
             finish_reason = "stop"
-            tool_calls = None
+            tool_calls: Optional[List[ToolCall]] = None
 
-            if request.tools:
-                parsed_content, tool_calls = parse_tool_calls_from_text(clean_content)
-                if tool_calls:
-                    finish_reason = "tool_calls"
-                if parsed_content is not None:
-                    clean_content = parsed_content
+            # Native tool_calls detection — the OpenAI-compatible transport contract.
+            # lollms bindings can return tool_calls as either a dict key or attribute.
+            native_tool_calls_ns: List[ToolCall] = []
+
+            def _collect_from_result(result: Any) -> None:
+                candidates: List[Any] = []
+                if not result:
+                    return
+                if isinstance(result, dict):
+                    if result.get("tool_calls"):
+                        candidates = result["tool_calls"]
+                    elif isinstance(result.get("message"), dict) and result["message"].get("tool_calls"):
+                        candidates = result["message"]["tool_calls"]
+                elif hasattr(result, "tool_calls") and getattr(result, "tool_calls"):
+                    candidates = list(result.tool_calls)
+
+                for tc in candidates:
+                    try:
+                        if isinstance(tc, ToolCall):
+                            native_tool_calls_ns.append(tc)
+                            continue
+                        if isinstance(tc, dict):
+                            fn = tc.get("function", {}) or {}
+                            args = fn.get("arguments")
+                            if isinstance(args, dict):
+                                args = json.dumps(args)
+                            native_tool_calls_ns.append(ToolCall(
+                                id=tc.get("id") or generate_mistral_compatible_id(),
+                                type=tc.get("type", "function"),
+                                function=FunctionCall(
+                                    name=fn.get("name"),
+                                    arguments=args if args is not None else "{}",
+                                ),
+                            ))
+                            continue
+                        if hasattr(tc, "function"):
+                            fn = tc.function
+                            args = getattr(fn, "arguments", None)
+                            if isinstance(args, dict):
+                                args = json.dumps(args)
+                            native_tool_calls_ns.append(ToolCall(
+                                id=getattr(tc, "id", None) or generate_mistral_compatible_id(),
+                                type=getattr(tc, "type", "function"),
+                                function=FunctionCall(
+                                    name=getattr(fn, "name", None),
+                                    arguments=args if args is not None else "{}",
+                                ),
+                            ))
+                    except Exception as _tc_ex:
+                        ASCIIColors.warning(
+                            f"[non_stream] Skipping malformed native tool_call: {_tc_ex}"
+                        )
+
+            _collect_from_result(result_content)
+
+            if native_tool_calls_ns:
+                # Native path: content is whatever text accompanied the calls (usually "").
+                raw_assistant_text = ""
+                if isinstance(result_content, dict):
+                    raw_assistant_text = (
+                        result_content.get("content")
+                        or (result_content.get("message") or {}).get("content")
+                        or ""
+                    )
+                elif hasattr(result_content, "content"):
+                    raw_assistant_text = getattr(result_content, "content") or ""
+                else:
+                    raw_assistant_text = str(result_content or "")
+                clean_content, reasoning_content = parse_reasoning_and_content(raw_assistant_text)
+                tool_calls = native_tool_calls_ns
+                finish_reason = "tool_calls"
+                raw_text_for_tokens = raw_assistant_text
+            else:
+                # Text path: no native tool_calls came back. Parse for the legacy
+                # injection-format output only when tools were requested.
+                raw_text = str(result_content) if result_content is not None else ""
+                raw_text_for_tokens = raw_text
+                clean_content, reasoning_content = parse_reasoning_and_content(raw_text)
+
+                if request.tools:
+                    parsed_content, parsed_tool_calls = parse_tool_calls_from_text(clean_content)
+                    if parsed_tool_calls:
+                        tool_calls = parsed_tool_calls
+                        finish_reason = "tool_calls"
+                    if parsed_content is not None:
+                        clean_content = parsed_content
+
+                # Surface unsupported tool-calling models instead of silently returning empty.
+                if request.tools and not tool_calls and not (clean_content or "").strip():
+                    ASCIIColors.warning(
+                        f"[non_stream][tools] Empty response for user '{user.username}' — model likely "
+                        f"does not support tool/function calling."
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail=(
+                            "Model returned an empty response with tools enabled. "
+                            "Verify the upstream model supports tool/function calling, "
+                            "or disable `tools` for this request."
+                        ),
+                    )
 
             msg_obj = ChatMessage(
                 role="assistant",
@@ -1616,7 +1989,7 @@ async def chat_completions(
             choice = ChatCompletionResponseChoice(index=0, message=msg_obj, finish_reason=finish_reason)
 
             prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(openai_messages)))
-            completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(raw_text))
+            completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(raw_text_for_tokens))
             reasoning_tokens = 0
             if reasoning_content:
                 reasoning_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(reasoning_content))
