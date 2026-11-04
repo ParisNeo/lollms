@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-04 22:36]
+
+- feat(backend): add OpenAI V1 API support
+
 ## [2026-11-04 22:26]
 
 - fix: prevent unbound local variable error in chat completions

@@ -767,6 +767,69 @@ def extract_json_candidates(text: str) -> List[str]:
     return candidates
 
 
+# ── Lollms modern tool-call XML contract: <tool>{"name":..,"parameters":..}</tool>
+# The lollms_client (>= new) emits tool calls to the streaming callback as
+# MSG_TYPE_CHUNK payloads of the form ``<tool>{"name":..., "parameters":{...}}</tool>``
+# and appends the same XML to the final text when non-streaming. This is a
+# distinct wire format from the older ``<tool_call><function=...>`` blocks.
+_LOLLMS_TOOL_XML_PATTERN = re.compile(
+    r"<tool>\s*(\{.*?\})\s*</tool>",
+    re.DOTALL,
+)
+
+
+def _parse_lollms_tool_xml(content: str) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
+    """
+    Extracts modern lollms_client ``<tool>{"name":...,"parameters":{...}}</tool>``
+    blocks. Returns (text_without_blocks_or_None, tool_calls_or_None).
+    """
+    if not content:
+        return None, None
+
+    matches = list(_LOLLMS_TOOL_XML_PATTERN.finditer(content))
+    if not matches:
+        return None, None
+
+    tool_calls: List[ToolCall] = []
+    for m in matches:
+        raw = m.group(1).strip()
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            ASCIIColors.warning(
+                f"[lollms tool xml] Dropped malformed JSON block: {raw[:120]}..."
+            )
+            continue
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("name")
+        if not name:
+            continue
+        params = payload.get("parameters")
+        if isinstance(params, dict):
+            args_str = json.dumps(params)
+        elif params is None:
+            args_str = "{}"
+        else:
+            args_str = str(params)
+        tool_calls.append(
+            ToolCall(
+                id=generate_mistral_compatible_id(),
+                type="function",
+                function=FunctionCall(name=name, arguments=args_str),
+            )
+        )
+
+    if not tool_calls:
+        return None, None
+
+    cleaned = _LOLLMS_TOOL_XML_PATTERN.sub("", content).strip()
+    ASCIIColors.success(
+        f"Parsed {len(tool_calls)} lollms-spec tool call(s) from <tool> XML."
+    )
+    return (cleaned if cleaned else None), tool_calls
+
+
 def _parse_xml_tool_calls(content: str) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
     """
     Parses XML-style tool calls emitted by opencode / Qwen / DeepSeek native formats:
@@ -833,9 +896,10 @@ def _parse_xml_tool_calls(content: str) -> Tuple[Optional[str], Optional[List[To
 def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
     """
     Parses the LLM output to find tool calls.
-    Strategy 0: XML <tool_call> blocks (opencode / Qwen / DeepSeek native).
-    Strategy 1: JSON inside ```json code blocks.
-    Strategy 2: Raw JSON scanning fallback.
+    Strategy -1: Modern lollms_client <tool>{"name":..,"parameters":..}</tool> XML.
+    Strategy 0:  XML <tool_call><function=..>..</function></tool_call> blocks.
+    Strategy 1:  JSON inside ```json code blocks.
+    Strategy 2:  Raw JSON scanning fallback.
     """
     ASCIIColors.yellow("--- TOOL PARSING START ---")
     
@@ -848,7 +912,13 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
 
     ASCIIColors.cyan(f"Raw LLM Output (First 500 chars):\n{content[:500]}...")
 
-    # Strategy 0: XML-style tool calls (highest priority — unambiguous when present)
+    # Strategy -1: modern lollms_client <tool>JSON</tool> wrapper (highest priority).
+    lollms_content, lollms_tool_calls = _parse_lollms_tool_xml(content)
+    if lollms_tool_calls:
+        ASCIIColors.yellow("--- TOOL PARSING END (Success - lollms <tool>) ---")
+        return lollms_content, lollms_tool_calls
+
+    # Strategy 0: XML-style tool calls (opencode / Qwen / DeepSeek native).
     xml_content, xml_tool_calls = _parse_xml_tool_calls(content)
     if xml_tool_calls:
         ASCIIColors.yellow("--- TOOL PARSING END (Success - XML) ---")
@@ -1330,6 +1400,64 @@ async def chat_completions(
                         # still streaming progressive content to the client.
                         buffered_text_parts: List[str] = []
 
+                        # Modern lollms_client emits tool calls via the streaming
+                        # callback as ``<tool>{"name":..,"parameters":..}</tool>``
+                        # CHUNKs. We strip those from the delivered content stream
+                        # and accumulate structured ToolCall objects to emit as
+                        # native OpenAI tool_call deltas at stream end. We disable
+                        # buffering when the client clearly can't consume them.
+                        lollms_stream_tool_calls: List[ToolCall] = []
+                        lollms_stream_pending = ""  # cross-chunk buffer for split <tool> blocks
+
+                        def _flush_pending_as_content() -> None:
+                            nonlocal lollms_stream_pending
+                            if not lollms_stream_pending:
+                                return
+                            chunk = lollms_stream_pending
+                            lollms_stream_pending = ""
+                            buffered_text_parts.append(chunk)
+                            main_loop.call_soon_threadsafe(
+                                stream_queue.put_nowait,
+                                make_chunk(DeltaMessage(content=chunk))
+                            )
+
+                        def _extract_stream_tools(chunk_text: str) -> str:
+                            """
+                            Extracts complete <tool>..</tool> blocks from the
+                            incoming CHUNK. Incomplete trailing block is kept in
+                            ``lollms_stream_pending`` for the next call. Returns
+                            the visible content fragment to forward downstream.
+                            """
+                            nonlocal lollms_stream_pending
+                            text = lollms_stream_pending + chunk_text
+                            lollms_stream_pending = ""
+
+                            visible_pieces: List[str] = []
+                            cursor = 0
+                            while True:
+                                open_idx = text.find("<tool>", cursor)
+                                if open_idx < 0:
+                                    visible_pieces.append(text[cursor:])
+                                    break
+                                # Emit whatever text precedes the <tool> block
+                                if open_idx > cursor:
+                                    visible_pieces.append(text[cursor:open_idx])
+                                close_idx = text.find("</tool>", open_idx)
+                                if close_idx < 0:
+                                    # Incomplete block; keep for next chunk.
+                                    lollms_stream_pending = text[open_idx:]
+                                    break
+                                block = text[open_idx:close_idx + len("</tool>")]
+                                _content, parsed = _parse_lollms_tool_xml(block)
+                                if parsed:
+                                    lollms_stream_tool_calls.extend(parsed)
+                                else:
+                                    # Unparseable — forward verbatim, never swallow.
+                                    visible_pieces.append(block)
+                                cursor = close_idx + len("</tool>")
+
+                            return "".join(visible_pieces)
+
                         def tools_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
                             if client_aborted or (lc and lc.cancel_generation):
                                 return False
@@ -1346,12 +1474,53 @@ async def chat_completions(
                                 )
                                 return True
 
-                            if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
-                                buffered_text_parts.append(chunk_text)
-                                main_loop.call_soon_threadsafe(
-                                    stream_queue.put_nowait,
-                                    make_chunk(DeltaMessage(content=chunk_text))
+                            # Native MSG_TYPE_TOOL_CALL — lollms bindings may
+                            # invoke the callback with this type. Coerce to
+                            # tool_calls; the payload is typically a dict.
+                            if msg_type == MSG_TYPE.MSG_TYPE_TOOL_CALL and chunk_text:
+                                payload = chunk_text
+                                if isinstance(payload, str):
+                                    try:
+                                        payload = json.loads(payload)
+                                    except (json.JSONDecodeError, ValueError):
+                                        payload = None
+                                if isinstance(payload, dict):
+                                    name = payload.get("name") or payload.get("tool_name")
+                                    raw_params = payload.get("parameters")
+                                    if raw_params is None:
+                                        raw_params = payload.get("arguments")
+                                    if name:
+                                        args_str = (
+                                            json.dumps(raw_params)
+                                            if isinstance(raw_params, (dict, list))
+                                            else (raw_params if isinstance(raw_params, str) else "{}")
+                                        )
+                                        tc_id = (
+                                            payload.get("id")
+                                            or payload.get("tool_call_id")
+                                            or generate_mistral_compatible_id()
+                                        )
+                                        lollms_stream_tool_calls.append(
+                                            ToolCall(
+                                                id=tc_id,
+                                                type="function",
+                                                function=FunctionCall(name=name, arguments=args_str),
+                                            )
+                                        )
+                                        return True
+                                ASCIIColors.warning(
+                                    f"[tools_callback] Unhandled MSG_TYPE_TOOL_CALL payload: {str(payload)[:200]}"
                                 )
+                                return True
+
+                            if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
+                                visible = _extract_stream_tools(chunk_text)
+                                if visible:
+                                    buffered_text_parts.append(visible)
+                                    main_loop.call_soon_threadsafe(
+                                        stream_queue.put_nowait,
+                                        make_chunk(DeltaMessage(content=visible))
+                                    )
                             return True
 
                         def _is_unsupported_kwarg(ex: Exception) -> bool:
@@ -1542,16 +1711,32 @@ async def chat_completions(
                                 first_token_received_tools = True
                             yield item
 
+                        # Flush any pending partial <tool> block before parsing so
+                        # that no in-flight block is silently dropped.
+                        if lollms_stream_pending:
+                            _flush_pending_as_content()
+
                         # Parse buffered text for tool calls and emit final delta.
-                        # Native tool_calls are authoritative; text parsing is a fallback
-                        # used only when the binding used the prompt-injection path or a
-                        # text-emitting model produced fake tool calls in markdown/XML.
+                        # Precedence: (1) native tool_calls from binding return,
+                        # (2) lollms_stream_tool_calls accumulated from the
+                        # streaming callback (modern lollms_client contract),
+                        # (3) text-parsed fake tool calls (injection fallback).
                         full_text = "".join(buffered_text_parts)
                         parsed_tool_calls: Optional[List[ToolCall]] = None
-                        if not native_tool_calls and used_injection_fallback:
-                            _parsed_content, parsed_tool_calls = parse_tool_calls_from_text(full_text)
+                        if not native_tool_calls and not lollms_stream_tool_calls:
+                            # Always run the text parser when tools were requested
+                            # — modern lollms_client may emit <tool> blocks in
+                            # the final text even when the streaming callback is
+                            # not used (e.g. non-stream-internal fallbacks).
+                            if used_injection_fallback or lollms_stream_tool_calls == []:
+                                _parsed_content, parsed_tool_calls = parse_tool_calls_from_text(full_text)
 
-                        tool_calls: List[ToolCall] = native_tool_calls or parsed_tool_calls or []
+                        tool_calls: List[ToolCall] = (
+                            native_tool_calls
+                            or lollms_stream_tool_calls
+                            or parsed_tool_calls
+                            or []
+                        )
 
                         # If no text at all AND no tool calls AND no generation error -> empty output
                         if (
@@ -1951,13 +2136,29 @@ async def chat_completions(
                 finish_reason = "tool_calls"
                 raw_text_for_tokens = raw_assistant_text
             else:
-                # Text path: no native tool_calls came back. Parse for the legacy
-                # injection-format output only when tools were requested.
+                # Text path: no native tool_calls came back. Parse for the
+                # modern lollms_client ``<tool>JSON</tool>`` blocks and the
+                # legacy injection-format output — but only when tools were
+                # requested.
                 raw_text = str(result_content) if result_content is not None else ""
                 raw_text_for_tokens = raw_text
-                clean_content, reasoning_content = parse_reasoning_and_content(raw_text)
-
+                # Extract modern lollms tool XML from raw_text FIRST so the
+                # reasoning/content splitter doesn't scramble braces inside
+                # the JSON payload.
                 if request.tools:
+                    _lollms_cleaned, _lollms_tcs = _parse_lollms_tool_xml(raw_text)
+                    if _lollms_tcs:
+                        tool_calls = _lollms_tcs
+                        finish_reason = "tool_calls"
+                        raw_text_for_parsing = _lollms_cleaned or ""
+                    else:
+                        raw_text_for_parsing = raw_text
+                else:
+                    raw_text_for_parsing = raw_text
+
+                clean_content, reasoning_content = parse_reasoning_and_content(raw_text_for_parsing)
+
+                if request.tools and not tool_calls:
                     parsed_content, parsed_tool_calls = parse_tool_calls_from_text(clean_content)
                     if parsed_tool_calls:
                         tool_calls = parsed_tool_calls
