@@ -15,7 +15,7 @@ from typing import List, Optional, Dict, Tuple, Union, Any
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import File, Form, UploadFile
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
