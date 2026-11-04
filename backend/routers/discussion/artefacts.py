@@ -94,6 +94,148 @@ def _is_office_filename(title: str) -> bool:
 def _office_media_type(title: str) -> str:
     return OFFICE_MIME_TYPES.get(Path(title or "").suffix.lower(), "application/octet-stream")
 
+# ─── Data-grid / SQL-Sandbox helpers ──────────────────────────────────────────
+# Max rows returned by grid-data and query endpoints to bound memory & payload.
+MAX_GRID_ROWS = 10000
+
+# Filename extensions treated as tabular data sources by the grid endpoints.
+CSV_LIKE_EXTENSIONS = {".csv", ".tsv"}
+EXCEL_EXTENSIONS = {".xlsx", ".xls", ".xlsm"}
+
+def _parse_csv_like_to_table(text: str, delimiter: str) -> tuple:
+    """Parse a CSV/TSV string into (columns, rows-of-dicts).
+
+    First row = header. Short rows are padded with empty strings so that every
+    row dict has every column key. Values cast to str for JSON safety.
+    """
+    import csv as _csv
+    if not text:
+        return [], []
+    # Sniff-lite: strip BOM, normalise newlines; csv.reader handles quoting.
+    if text.startswith("\ufeff"):
+        text = text[1:]
+    reader = _csv.reader(io.StringIO(text), delimiter=delimiter)
+    try:
+        header = next(reader)
+    except StopIteration:
+        return [], []
+    header = [str(c or "").strip() or f"col_{i+1}" for i, c in enumerate(header)]
+    # De-duplicate header names to keep dict keys unique.
+    seen = {}
+    for i, h in enumerate(header):
+        base = h
+        n = 1
+        while h in seen.values():
+            n += 1
+            h = f"{base}_{n}"
+        seen[i] = h
+    header = [seen[i] for i in range(len(header))]
+    rows = []
+    for idx, raw in enumerate(reader):
+        if idx >= MAX_GRID_ROWS:
+            break
+        padded = list(raw) + [""] * (len(header) - len(raw))
+        rows.append({header[i]: str(padded[i]) for i in range(len(header))})
+    return header, rows
+
+def _parse_json_like_to_table(text: str) -> tuple:
+    """Coerce a JSON list-of-objects / object-of-lists into (columns, rows)."""
+    import json as _json
+    try:
+        data = _json.loads(text)
+    except Exception:
+        return [], []
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        keys = []
+        for item in data:
+            for k in item.keys():
+                if k not in keys:
+                    keys.append(k)
+        rows = [{k: ("" if item.get(k) is None else str(item.get(k))) for k in keys} for item in data[:MAX_GRID_ROWS]]
+        return keys, rows
+    if isinstance(data, dict):
+        # dict of lists → transpose
+        keys = list(data.keys())
+        if all(isinstance(v, list) for v in data.values()):
+            length = max((len(v) for v in data.values()), default=0)
+            rows = []
+            for i in range(min(length, MAX_GRID_ROWS)):
+                rows.append({k: ("" if i >= len(data[k]) else str(data[k][i])) for k in keys})
+            return keys, rows
+        # single object → one row
+        return keys, [{k: ("" if data.get(k) is None else str(data.get(k))) for k in keys}]
+    return [], []
+
+def _parse_excel_to_sheets(raw_bytes: bytes) -> dict:
+    """Parse an XLSX/XLS byte stream into {sheetName: {columns, rows}}. Requires openpyxl."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError as e:
+        raise HTTPException(status_code=400, detail=f"Excel grid rendering requires openpyxl: {e}")
+    wb = load_workbook(io.BytesIO(raw_bytes), data_only=True, read_only=True)
+    payload = {}
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        columns = []
+        rows = []
+        try:
+            it = ws.iter_rows(values_only=True)
+            header = next(it, None)
+            if header is None:
+                payload[sheet_name] = {"columns": [], "rows": []}
+                continue
+            columns = [str(c) if c is not None else f"col_{i+1}" for i, c in enumerate(header)]
+            for idx, raw in enumerate(it):
+                if idx >= MAX_GRID_ROWS:
+                    break
+                padded = list(raw) + [None] * (len(columns) - len(raw))
+                rows.append({columns[i]: ("" if padded[i] is None else str(padded[i])) for i in range(len(columns))})
+        finally:
+            pass
+        payload[sheet_name] = {"columns": columns, "rows": rows}
+    wb.close()
+    return payload
+
+def _sanitize_sqlite_identifier(name: str, index: int) -> str:
+    """Produce a valid, unambiguous SQLite column identifier from a raw header."""
+    import re as _re
+    base = _re.sub(r"[^A-Za-z0-9_]", "_", (name or "").strip())
+    if not base:
+        base = f"c_{index + 1}"
+    if base[0].isdigit():
+        base = f"c_{base}"
+    return base
+
+def _build_sqlite_from_table(columns: list, rows: list) -> tuple:
+    """Build an in-memory SQLite DB with a single table `data`.
+
+    Returns (connection, sanitized_columns, mapping sanitized→original).
+    """
+    import sqlite3 as _sqlite3
+    sanitized = []
+    mapping = {}
+    used = set()
+    for i, col in enumerate(columns):
+        base = _sanitize_sqlite_identifier(col, i)
+        candidate = base
+        n = 1
+        while candidate in used:
+            n += 1
+            candidate = f"{base}_{n}"
+        used.add(candidate)
+        sanitized.append(candidate)
+        mapping[candidate] = col
+    conn = _sqlite3.connect(":memory:")
+    col_defs = ", ".join(f'"{c}" TEXT' for c in sanitized)
+    conn.execute(f"CREATE TABLE data ({col_defs})")
+    if rows and sanitized:
+        placeholders = ", ".join("?" * len(sanitized))
+        insert_sql = f"INSERT INTO data VALUES ({placeholders})"
+        values = [tuple(str(r.get(orig, "")) for orig in columns) for r in rows]
+        conn.executemany(insert_sql, values)
+    conn.commit()
+    return conn, sanitized, mapping
+
 def _stream_audio_with_range(file_path: Path, request_range: Optional[str], filename: str, media_type: str):
     from fastapi import Request
     from starlette.responses import StreamingResponse
@@ -1351,6 +1493,256 @@ def build_artefacts_router(router: APIRouter):
             content=html,
             headers={"Cache-Control": "no-cache, must-revalidate"},
         )
+
+    # ─── Data Grid / SQL Sandbox endpoints ────────────────────────────────
+    # Resolves an artefact's raw text content, honouring the same permission
+    # semantics as get_discussion_artefact_content (saved library + owner check).
+    async def _resolve_artefact_payload(artefact_title: str, version: Optional[int], discussion_id: str, current_user, db):
+        decoded_title = unquote(artefact_title)
+        try:
+            if "%" in decoded_title:
+                decoded_title = unquote(decoded_title)
+        except Exception:
+            pass
+        if discussion_id == "saved":
+            owner_id = current_user.id
+            owner_exists = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first() is not None
+            if not owner_exists:
+                shared_link = db.query(SharedArtefactLink).filter(
+                    SharedArtefactLink.shared_with_user_id == current_user.id,
+                    SharedArtefactLink.artefact_title == decoded_title
+                ).first()
+                if not shared_link:
+                    raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found.")
+                owner_id = shared_link.owner_user_id
+            q = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == owner_id,
+                SavedArtefact.title == decoded_title
+            )
+            rec = q.filter(SavedArtefact.version == version).first() if version is not None else q.order_by(SavedArtefact.version.desc()).first()
+            if not rec:
+                raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found.")
+            return decoded_title, rec.content, None
+
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        artefact = None
+        try:
+            for art in discussion.list_artefacts():
+                if art.get('title') == decoded_title:
+                    art_version = art.get('version')
+                    if version is None:
+                        if artefact is None or (art_version is not None and int(art_version) > int(artefact.get('version', 1))):
+                            artefact = art
+                    elif art_version is not None and int(art_version) == int(version):
+                        artefact = art
+                        break
+        except Exception:
+            pass
+        if not artefact:
+            artefact = discussion.get_artefact(title=decoded_title, version=version)
+        if not artefact:
+            raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found.")
+        # Binary file: physical bytes needed (Excel). Try disk first.
+        raw_bytes = None
+        ext = Path(decoded_title).suffix.lower()
+        if ext in EXCEL_EXTENSIONS:
+            for attr in ("workspace_data_path", "workspace_path"):
+                root = getattr(discussion, attr, None)
+                if not root:
+                    continue
+                try:
+                    root_p = Path(root).resolve()
+                    cand = (root_p / decoded_title).resolve()
+                    if cand.is_file() and cand.is_relative_to(root_p):
+                        raw_bytes = cand.read_bytes()
+                        break
+                except Exception:
+                    continue
+        return decoded_title, artefact.get('content', ''), raw_bytes
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/grid-data")
+    async def get_artefact_grid_data(
+        discussion_id: str,
+        artefact_title: str,
+        version: Optional[int] = Query(None),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Returns structured grid data for a data artefact (CSV/TSV/XLSX/JSON)."""
+        decoded_title, text, raw_bytes = await _resolve_artefact_payload(artefact_title, version, discussion_id, current_user, db)
+        ext = Path(decoded_title).suffix.lower()
+        try:
+            if ext in CSV_LIKE_EXTENSIONS:
+                delimiter = "\t" if ext == ".tsv" else ","
+                columns, rows = _parse_csv_like_to_table(text or "", delimiter)
+                return {"type": "csv", "columns": columns, "rows": rows}
+            if ext in EXCEL_EXTENSIONS:
+                if not raw_bytes:
+                    raise HTTPException(status_code=400, detail="Excel file bytes unavailable on disk.")
+                sheets = _parse_excel_to_sheets(raw_bytes)
+                return {"type": "sheet", "sheets": sheets}
+            if ext == ".json":
+                columns, rows = _parse_json_like_to_table(text or "")
+                return {"type": "csv", "columns": columns, "rows": rows}
+            # Unknown: treat as CSV best-effort so a mislabelled file still renders.
+            columns, rows = _parse_csv_like_to_table(text or "", ",")
+            return {"type": "csv", "columns": columns, "rows": rows}
+        except HTTPException:
+            raise
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=400, detail=f"Failed to parse '{decoded_title}' as tabular data: {e}")
+
+    class ArtefactRawQueryRequest(BaseModel):
+        sql_query: str
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/raw-query")
+    async def run_artefact_raw_query(
+        discussion_id: str,
+        artefact_title: str,
+        payload: ArtefactRawQueryRequest,
+        version: Optional[int] = Query(None),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Executes a read-only SQL query against the artefact loaded as table `data`."""
+        decoded_title, text, raw_bytes = await _resolve_artefact_payload(artefact_title, version, discussion_id, current_user, db)
+        sql = (payload.sql_query or "").strip()
+        if not sql:
+            return {"success": False, "error": "Empty SQL query."}
+        first = sql.split(None, 1)[0].upper() if sql else ""
+        if first not in ("SELECT", "WITH"):
+            return {"success": False, "error": "Only SELECT (or WITH ... SELECT) statements are permitted in the sandbox."}
+        ext = Path(decoded_title).suffix.lower()
+        try:
+            if ext in CSV_LIKE_EXTENSIONS:
+                delimiter = "\t" if ext == ".tsv" else ","
+                columns, rows = _parse_csv_like_to_table(text or "", delimiter)
+            elif ext in EXCEL_EXTENSIONS:
+                if not raw_bytes:
+                    return {"success": False, "error": "Excel file bytes unavailable on disk."}
+                sheets = _parse_excel_to_sheets(raw_bytes)
+                first_sheet = next(iter(sheets.values()), {"columns": [], "rows": []})
+                columns, rows = first_sheet.get("columns", []), first_sheet.get("rows", [])
+            elif ext == ".json":
+                columns, rows = _parse_json_like_to_table(text or "")
+            else:
+                columns, rows = _parse_csv_like_to_table(text or "", ",")
+
+            if not columns:
+                return {"success": False, "error": "Artefact has no tabular columns to query."}
+
+            conn, sanitized, mapping = _build_sqlite_from_table(columns, rows)
+            try:
+                cur = conn.execute(sql)
+                desc = cur.description or []
+                out_cols = [d[0] for d in desc]
+                fetched = cur.fetchmany(MAX_GRID_ROWS)
+                # Map sanitized back to original when possible.
+                display_cols = [mapping.get(c, c) for c in out_cols]
+                out_rows = [{display_cols[i]: ("" if v is None else str(v)) for i, v in enumerate(row)} for row in fetched]
+            finally:
+                conn.close()
+            return {"success": True, "columns": display_cols, "rows": out_rows, "sql_query": sql}
+        except HTTPException:
+            raise
+        except Exception as e:
+            trace_exception(e)
+            return {"success": False, "error": f"SQL error: {e}"}
+
+    class ArtefactAiQueryRequest(BaseModel):
+        question: str
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/ai-query")
+    async def run_artefact_ai_query(
+        discussion_id: str,
+        artefact_title: str,
+        payload: ArtefactAiQueryRequest,
+        version: Optional[int] = Query(None),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Best-effort NL→SQL. Falls back to a clean error if no LLM is available."""
+        question = (payload.question or "").strip()
+        if not question:
+            return {"success": False, "error": "Empty question."}
+        decoded_title, text, raw_bytes = await _resolve_artefact_payload(artefact_title, version, discussion_id, current_user, db)
+        ext = Path(decoded_title).suffix.lower()
+        try:
+            if ext in CSV_LIKE_EXTENSIONS:
+                delimiter = "\t" if ext == ".tsv" else ","
+                columns, rows = _parse_csv_like_to_table(text or "", delimiter)
+            elif ext in EXCEL_EXTENSIONS:
+                if not raw_bytes:
+                    return {"success": False, "error": "Excel file bytes unavailable on disk."}
+                sheets = _parse_excel_to_sheets(raw_bytes)
+                first_sheet = next(iter(sheets.values()), {"columns": [], "rows": []})
+                columns, rows = first_sheet.get("columns", []), first_sheet.get("rows", [])
+            elif ext == ".json":
+                columns, rows = _parse_json_like_to_table(text or "")
+            else:
+                columns, rows = _parse_csv_like_to_table(text or "", ",")
+
+            if not columns:
+                return {"success": False, "error": "Artefact has no tabular columns to query."}
+
+            # Attempt LLM-based NL→SQL
+            try:
+                lc = get_user_lollms_client(current_user.username)
+                if lc is None:
+                    raise RuntimeError("No LLM client available")
+                schema_preview = ", ".join(f'"{c}"' for c in columns)
+                sample_rows = rows[:3]
+                prompt = (
+                    f"You are a SQLite expert. Return ONLY a single read-only SQL SELECT statement.\n"
+                    f"Table name: data\nColumns: {schema_preview}\n"
+                    f"Sample rows (JSON): {sample_rows}\n"
+                    f"Question: {question}\n"
+                    f"SQL:"
+                )
+                generated = lc.generate_text(prompt, temperature=0.0) if hasattr(lc, "generate_text") else None
+                if not generated:
+                    raise RuntimeError("LLM returned no text")
+                # Extract the first SELECT/WITH statement
+                import re as _re
+                m = _re.search(r"(?is)(SELECT|WITH)\b.*", generated)
+                sql = (m.group(0) if m else generated).strip()
+                sql = sql.split(";")[0].strip()
+                first = sql.split(None, 1)[0].upper() if sql else ""
+                if first not in ("SELECT", "WITH"):
+                    return {"success": False, "error": "Model did not produce a SELECT statement.", "explanation": generated}
+
+                conn, sanitized, mapping = _build_sqlite_from_table(columns, rows)
+                try:
+                    cur = conn.execute(sql)
+                    desc = cur.description or []
+                    out_cols = [d[0] for d in desc]
+                    fetched = cur.fetchmany(MAX_GRID_ROWS)
+                    display_cols = [mapping.get(c, c) for c in out_cols]
+                    out_rows = [{display_cols[i]: ("" if v is None else str(v)) for i, v in enumerate(row)} for row in fetched]
+                finally:
+                    conn.close()
+                return {
+                    "success": True,
+                    "columns": display_cols,
+                    "rows": out_rows,
+                    "sql_query": sql,
+                    "explanation": f"Interpreted as: {sql}"
+                }
+            except Exception as inner:
+                return {
+                    "success": False,
+                    "error": "AI assistant unavailable — use the Raw SQL Sandbox.",
+                    "explanation": str(inner)
+                }
+        except HTTPException:
+            raise
+        except Exception as e:
+            trace_exception(e)
+            return {"success": False, "error": f"AI query failed: {e}"}
 
     @router.get("/{discussion_id}/artefacts/{artefact_title:path}/content")
     async def get_discussion_artefact_content(

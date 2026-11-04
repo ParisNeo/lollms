@@ -166,14 +166,16 @@ onMounted(fetchGridData);
         <div class="flex gap-2 shrink-0">
           <button
             @click="toggleMode('sql')"
-            class="px-3 py-1.5 text-xs font-bold rounded-lg border dark:border-gray-700 transition-colors"
+            :disabled="!currentSheetData || isLoading"
+            class="px-3 py-1.5 text-xs font-bold rounded-lg border dark:border-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :class="activeMode === 'sql' ? 'bg-blue-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'"
           >
             Raw SQL Sandbox
           </button>
           <button
             @click="toggleMode('ai')"
-            class="px-3 py-1.5 text-xs font-bold rounded-lg border dark:border-gray-700 transition-colors"
+            :disabled="!currentSheetData || isLoading"
+            class="px-3 py-1.5 text-xs font-bold rounded-lg border dark:border-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             :class="activeMode === 'ai' ? 'bg-indigo-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300'"
           >
             Ask AI Assistant
@@ -270,6 +272,19 @@ onMounted(fetchGridData);
             </tbody>
           </table>
         </div>
+      </div>
+
+      <!-- Empty / error fallback (rendered when gridData is null after load, or a fetch failed) -->
+      <div v-else class="absolute inset-0 flex flex-col items-center justify-center p-6 text-center gap-3">
+        <svg class="w-12 h-12 text-gray-300 dark:text-gray-700" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 10h18M3 6h18M3 14h18M3 18h18M6 3v18M10 3v18M14 3v18M18 3v18" />
+        </svg>
+        <p class="text-xs text-gray-500 dark:text-gray-400 italic">
+          No grid data available. This artefact may be empty or could not be parsed.
+        </p>
+        <button @click="fetchGridData" class="btn btn-secondary btn-sm">
+          Retry load
+        </button>
       </div>
     </div>
   </div>

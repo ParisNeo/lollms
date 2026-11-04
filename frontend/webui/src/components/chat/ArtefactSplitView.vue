@@ -339,6 +339,177 @@ async function handleExecute() {
         return ['markdown', 'html', 'svg', 'mermaid'].includes(type);
     });
 
+    // ── CSV / TSV inline viewer + editor state ──
+    // Two view modes: 'grid' (default table view w/ query + edit) and 'source' (raw text via CodeMirror)
+    const csvViewMode = ref('grid');
+    const csvRows = ref([]);            // string[][]
+    const csvHeaderRow = ref([]);       // string[]
+    const csvDelimiter = ref(',');
+    const csvQuery = ref('');           // filter text
+    const csvDirty = ref(false);        // has unsaved in-memory edits
+
+    const isCsvArtefact = computed(() => ['csv', 'tsv'].includes(detectedContentType.value));
+
+    function detectDelimiter(text) {
+        const t = text || '';
+        const firstLines = t.split(/\r?\n/).slice(0, 5).join('\n');
+        const candidates = [',', ';', '\t', '|'];
+        let best = ',';
+        let bestCount = 0;
+        for (const d of candidates) {
+            const count = (firstLines.match(new RegExp(d === '\t' ? '\\t' : `\\${d}`, 'g')) || []).length;
+            if (count > bestCount) {
+                bestCount = count;
+                best = d;
+            }
+        }
+        return best;
+    }
+
+    // RFC 4180-ish CSV parser: handles quoted fields, escaped quotes (""), embedded newlines
+    function parseCsv(text, delim = ',') {
+        const rows = [];
+        if (!text) return rows;
+        let row = [];
+        let field = '';
+        let inQuotes = false;
+        const src = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        for (let i = 0; i < src.length; i++) {
+            const ch = src[i];
+            if (inQuotes) {
+                if (ch === '"') {
+                    if (src[i + 1] === '"') { field += '"'; i++; }
+                    else { inQuotes = false; }
+                } else {
+                    field += ch;
+                }
+            } else {
+                if (ch === '"') { inQuotes = true; }
+                else if (ch === delim) { row.push(field); field = ''; }
+                else if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+                else { field += ch; }
+            }
+        }
+        if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+        return rows;
+    }
+
+    function serializeCsv(rows, delim = ',') {
+        const needsQuote = (v) => /[",\n\r\t]/.test(v) || v.includes(delim);
+        return rows.map(row =>
+            row.map(cell => {
+                const s = cell == null ? '' : String(cell);
+                return needsQuote(s) ? `"${s.replace(/"/g, '""')}"` : s;
+            }).join(delim)
+        ).join('\n');
+    }
+
+    function rebuildCsvFromRows() {
+        if (csvRows.value.length === 0) return '';
+        return serializeCsv(csvRows.value, csvDelimiter.value);
+    }
+
+    const csvFilteredRows = computed(() => {
+        // Rows excluding the header (first row) for display; header kept separately
+        const body = csvRows.value.slice(1);
+        const q = (csvQuery.value || '').trim().toLowerCase();
+        if (!q) return body.map((r, i) => ({ originalIndex: i + 1, cells: r }));
+        return body
+            .map((r, i) => ({ originalIndex: i + 1, cells: r }))
+            .filter(({ cells }) => cells.some(c => (c || '').toLowerCase().includes(q)));
+    });
+
+    const csvTotalRowCount = computed(() => Math.max(0, csvRows.value.length - 1));
+
+    function loadCsvState(text) {
+        const delim = detectDelimiter(text);
+        csvDelimiter.value = delim;
+        const parsed = parseCsv(text || '', delim);
+        if (parsed.length === 0) {
+            csvHeaderRow.value = [];
+            csvRows.value = [];
+        } else {
+            csvHeaderRow.value = parsed[0];
+            csvRows.value = parsed;
+        }
+        csvDirty.value = false;
+    }
+
+    function isColumnEmpty(rows, colIdx) {
+        return rows.every(r => !r[colIdx] || !String(r[colIdx]).trim());
+    }
+
+    function ensureColumnCount(rows) {
+        const maxCols = rows.reduce((m, r) => Math.max(m, r.length), 0);
+        return rows.map(r => {
+            const padded = r.slice();
+            while (padded.length < maxCols) padded.push('');
+            return padded;
+        });
+    }
+
+    function updateCsvCell(originalRowIndex, colIndex, value) {
+        // originalRowIndex is index within csvRows (including header at 0)
+        if (originalRowIndex < 0 || originalRowIndex >= csvRows.value.length) return;
+        const row = csvRows.value[originalRowIndex];
+        if (!row) return;
+        if (row[colIndex] === value) return;
+        row[colIndex] = value;
+        // Defensive: ensure router/array reactivity for nested mutation
+        csvRows.value = [...csvRows.value];
+        csvDirty.value = true;
+    }
+
+    function updateCsvHeader(colIndex, value) {
+        if (!csvHeaderRow.value) return;
+        if (csvHeaderRow.value[colIndex] === value) return;
+        csvHeaderRow.value[colIndex] = value;
+        if (csvRows.value[0]) {
+            csvRows.value[0] = [...csvHeaderRow.value];
+        }
+        csvRows.value = [...csvRows.value];
+        csvDirty.value = true;
+    }
+
+    function addCsvRow() {
+        const cols = csvRows.value.length > 0 ? csvRows.value[0].length : 1;
+        csvRows.value = [...csvRows.value, new Array(cols).fill('')];
+        csvDirty.value = true;
+    }
+
+    function deleteCsvRow(originalRowIndex) {
+        if (originalRowIndex <= 0 || originalRowIndex >= csvRows.value.length) return;
+        csvRows.value = csvRows.value.filter((_, i) => i !== originalRowIndex);
+        csvDirty.value = true;
+    }
+
+    function addCsvColumn() {
+        csvRows.value = csvRows.value.map(r => [...r, '']);
+        csvHeaderRow.value = csvHeaderRow.value.length ? [...csvHeaderRow.value, `Column ${csvHeaderRow.value.length + 1}`] : [];
+        if (csvRows.value[0]) csvRows.value[0] = [...csvHeaderRow.value];
+        csvDirty.value = true;
+    }
+
+    function deleteCsvColumn(colIndex) {
+        if (csvRows.value.length === 0) return;
+        csvRows.value = csvRows.value.map(r => r.filter((_, i) => i !== colIndex));
+        csvHeaderRow.value = csvHeaderRow.value.filter((_, i) => i !== colIndex);
+        csvDirty.value = true;
+    }
+
+    async function saveCsvChanges() {
+        if (!csvDirty.value) return;
+        // Pad any short rows to keep rectilinear output
+        csvRows.value = ensureColumnCount(csvRows.value);
+        dbContent.value = rebuildCsvFromRows();
+        csvDirty.value = false;
+        await handleSave();
+    }
+
+    function discardCsvChanges() {
+        loadCsvState(dbContent.value);
+    }
+
     async function loadVersion(version) {
         if (!version) { isFetching.value = false; return; }
         isFetching.value = true;
@@ -374,6 +545,12 @@ async function handleExecute() {
                     }
                 } else {
                     dbContent.value = typeof payload === 'string' ? payload : (payload?.content ?? '');
+                    // Parse CSV/TSV immediately (no watcher race). Mirrors Excel's
+                    // derive-from-content shape so render doesn't depend on watcher
+                    // ordering between dbContent text and detectedContentType.
+                    if (isCsvArtefact.value) {
+                        loadCsvState(dbContent.value);
+                    }
                     if (isImageArtefact.value && !asIsBlobUrl.value) {
                         await fetchAsIsBlobUrl(version);
                     } else if (isOfficeArtefact.value && !officePreviewHtml.value) {
@@ -804,6 +981,11 @@ async function buildOfficePreview(version) {
         if (isNewFileSelection) {
             dbContent.value = ''; // Clear previous text immediately to prevent flickering
             resetOfficePreview();
+            csvQuery.value = '';
+            csvRows.value = [];
+            csvHeaderRow.value = [];
+            csvDirty.value = false;
+            csvViewMode.value = 'grid';
         }
 
         const latestVersion = group.versions[0]?.version;
@@ -816,6 +998,46 @@ async function buildOfficePreview(version) {
         selectedVersion.value = latestVersion;
         await loadVersion(latestVersion);
     }, { immediate: true });
+
+    // ── CSV derivation watcher ──
+    // Excel's preview survives the initial-mount race because it derives from
+    // officePreviewHtml, which is NOT reset by the watcherKey watch. CSV must
+    // follow the same shape: derive csvRows from dbContent + detectedContentType
+    // via a dedicated watcher, so that whichever of the two resolves LAST
+    // (dbContent text, or the artefact_type → 'csv' content-type detection)
+    // still triggers a parse. Without this, `detectedContentType` is 'plaintext'
+    // on first mount (artefactGroup is null), the inline loadCsvState call is
+    // skipped, and the grid stays empty forever.
+    watch(
+        () => [detectedContentType.value, dbContent.value, selectedVersion.value],
+        ([type, content]) => {
+            if (type !== 'csv' && type !== 'tsv') return;
+            if (!content) return;
+            // Skip if csvRows is already in sync with this content (avoid clobbering live edits)
+            if (!csvDirty.value && csvRows.value.length > 0) return;
+            loadCsvState(content);
+        }
+    );
+
+    // Safety net: if content type flips to csv while content is already loaded
+    // (e.g. artefactGroup resolves after loadVersion), parse immediately.
+    watch(isCsvArtefact, (isCsv) => {
+        if (isCsv && dbContent.value && csvRows.value.length === 0) {
+            loadCsvState(dbContent.value);
+        }
+    });
+
+// Non-editable / binary types cannot be text-edited, so "Save as new version"
+// must not be offered for them (Office, images, PDF, audio, video).
+const isReadOnlyArtefact = computed(() => {
+    if (isOfficeArtefact.value) return true;
+    if (isImageArtefact.value) return true;
+    if (isAudioArtefact.value) return true;
+    if (isVideoArtefact.value) return true;
+    const t = (title.value || '').toLowerCase();
+    if (t.endsWith('.pdf')) return true;
+    return false;
+});
 
 async function handleSave(forceType = null) {
     if (isLiveUpdating.value) return;
@@ -1434,7 +1656,7 @@ function download() {
                 </DropdownMenu>
 
             <!-- Primary Action Button -->
-            <div v-if="!isAudioArtefact" class="flex gap-1">
+            <div v-if="!isReadOnlyArtefact" class="flex gap-1">
                 <button @click="handleSave()" class="btn btn-primary btn-sm h-8 flex items-center gap-2 shadow-lg shadow-blue-500/10" :disabled="isSaving || isLiveUpdating" :title="`Save new version v${(artefactGroup?.versions[0]?.version || 0) + 1} to discussion workspace`">
                     <IconRefresh v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
                     <IconPencil v-else class="w-3.5 h-3.5" />
@@ -1681,12 +1903,169 @@ function download() {
                 </div>
 
                 <InteractiveDataGrid 
-                    v-else-if="isDataArtifact"
+                    v-else-if="isDataArtifact && !isCsvArtefact"
                     :discussionId="discussionsStore.currentDiscussionId"
                     :title="title"
                     :version="selectedVersion"
                     class="absolute inset-0 h-full"
                 />
+
+                <!-- ═══ CSV / TSV inline viewer + query + edit ═══ -->
+                <div v-else-if="isCsvArtefact" class="absolute inset-0 h-full flex flex-col bg-white dark:bg-gray-950">
+                    <!-- Toolbar -->
+                    <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-wrap items-center gap-2 shrink-0">
+                        <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                            <button
+                                @click="csvViewMode = 'grid'"
+                                class="px-3 py-1 text-[11px] font-bold rounded-md transition-colors"
+                                :class="csvViewMode === 'grid' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                title="Grid view with query & inline editing"
+                            >Grid</button>
+                            <button
+                                @click="csvViewMode = 'source'"
+                                class="px-3 py-1 text-[11px] font-bold rounded-md transition-colors"
+                                :class="csvViewMode === 'source' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                title="Raw CSV source (CodeMirror)"
+                            >Source</button>
+                        </div>
+
+                        <div v-if="csvViewMode === 'grid'" class="relative grow min-w-[180px] max-w-sm">
+                            <input
+                                v-model="csvQuery"
+                                type="text"
+                                placeholder="Filter rows (case-insensitive, all columns)..."
+                                class="input-field w-full text-xs py-1.5 pl-7"
+                            />
+                            <svg class="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+                            </svg>
+                            <button v-if="csvQuery" @click="csvQuery = ''" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" title="Clear filter">
+                                <svg class="w-3 h-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        <span class="text-[10px] font-mono font-bold text-gray-500 dark:text-gray-400 bg-gray-200 dark:bg-gray-800 px-2 py-1 rounded">
+                            {{ csvQuery ? `${csvFilteredRows.length} / ${csvTotalRowCount}` : csvTotalRowCount }} rows · {{ csvHeaderRow.length }} cols
+                        </span>
+
+                        <div class="grow"></div>
+
+                        <template v-if="csvViewMode === 'grid'">
+                            <button v-if="csvDirty" @click="discardCsvChanges" class="btn btn-secondary btn-xs" title="Discard in-memory changes">
+                                Discard
+                            </button>
+                            <button v-if="csvDirty" @click="saveCsvChanges" class="btn btn-primary btn-xs" :disabled="isSaving" title="Save changes as new version">
+                                <svg v-if="isSaving" class="w-3.5 h-3.5 animate-spin mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                <svg v-else class="w-3.5 h-3.5 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                Save Changes
+                            </button>
+                            <span v-if="csvDirty" class="text-[10px] font-bold text-amber-500 uppercase tracking-wider">● Unsaved edits</span>
+                        </template>
+                    </div>
+
+                    <!-- Grid view -->
+                    <div v-if="csvViewMode === 'grid' && csvHeaderRow.length === 0" class="grow flex items-center justify-center text-gray-400">
+                        <div class="flex flex-col items-center gap-2">
+                            <svg v-if="isFetching" class="w-6 h-6 text-blue-500 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                            </svg>
+                            <svg v-else class="w-10 h-10 opacity-30" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <p class="text-xs italic">{{ isFetching ? 'Loading CSV…' : 'This CSV file is empty or has not been parsed yet.' }}</p>
+                        </div>
+                    </div>
+                    <div v-else-if="csvViewMode === 'grid'" class="grow overflow-auto custom-scrollbar">
+                        <table class="border-collapse text-xs w-full">
+                            <thead class="sticky top-0 z-10">
+                                <tr class="bg-gray-100 dark:bg-gray-800">
+                                    <th class="border border-gray-200 dark:border-gray-700 px-2 py-1.5 text-[10px] font-mono text-gray-400 w-10 text-center select-none">#</th>
+                                    <th
+                                        v-for="(h, ci) in csvHeaderRow"
+                                        :key="`h-${ci}`"
+                                        class="border border-gray-200 dark:border-gray-700 px-1 py-1 text-left font-bold text-gray-700 dark:text-gray-200 min-w-[80px] group/h"
+                                    >
+                                        <input
+                                            :value="h"
+                                            @change="updateCsvHeader(ci, $event.target.value)"
+                                            class="w-full bg-transparent border-none outline-none focus:bg-blue-50 dark:focus:bg-blue-900/30 px-1 py-0.5 rounded text-xs font-bold"
+                                        />
+                                        <button
+                                            @click="deleteCsvColumn(ci)"
+                                            class="opacity-0 group-hover/h:opacity-100 text-red-400 hover:text-red-600 text-[9px] ml-1"
+                                            title="Delete column"
+                                        >✕</button>
+                                    </th>
+                                    <th class="border border-gray-200 dark:border-gray-700 w-8 text-center bg-gray-50 dark:bg-gray-900 sticky right-0">
+                                        <button @click="addCsvColumn" class="text-blue-500 hover:text-blue-700 text-base font-bold" title="Add column">+</button>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr
+                                    v-for="rowObj in csvFilteredRows"
+                                    :key="`r-${rowObj.originalIndex}`"
+                                    class="hover:bg-blue-50/40 dark:hover:bg-blue-900/10 group/r"
+                                >
+                                    <td class="border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 text-gray-400 px-2 py-1 text-[10px] font-mono text-center sticky left-0 select-none">
+                                        {{ rowObj.originalIndex }}
+                                    </td>
+                                    <td
+                                        v-for="(cell, ci) in rowObj.cells"
+                                        :key="`c-${rowObj.originalIndex}-${ci}`"
+                                        class="border border-gray-200 dark:border-gray-700 px-0 py-0"
+                                    >
+                                        <input
+                                            :value="cell"
+                                            @change="updateCsvCell(rowObj.originalIndex, ci, $event.target.value)"
+                                            class="w-full bg-transparent border-none outline-none focus:bg-blue-50 dark:focus:bg-blue-900/30 px-2 py-1 text-xs font-mono"
+                                        />
+                                    </td>
+                                    <td class="border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-center sticky right-0 w-8">
+                                        <button
+                                            @click="deleteCsvRow(rowObj.originalIndex)"
+                                            class="opacity-0 group-hover/r:opacity-100 text-red-400 hover:text-red-600 text-[10px]"
+                                            title="Delete row"
+                                        >✕</button>
+                                    </td>
+                                </tr>
+                                <tr v-if="csvFilteredRows.length === 0">
+                                    <td :colspan="csvHeaderRow.length + 2" class="p-6 text-center text-xs italic text-gray-400">
+                                        {{ csvQuery ? `No rows match "${csvQuery}"` : 'This CSV file has no data rows.' }}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="p-2 border-t border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
+                            <button @click="addCsvRow" class="text-[11px] font-bold text-blue-500 hover:text-blue-700 px-3 py-1 rounded border border-dashed border-blue-300 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20">
+                                + Add Row
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Source view (raw text via CodeMirror) -->
+                    <div v-else class="grow relative">
+                        <CodeMirrorEditor
+                            v-model="dbContent"
+                            class="absolute inset-0 h-full"
+                            initial-mode="edit"
+                            :renderable="false"
+                            :extensions="editorExtensions"
+                            :content-type="'plaintext'"
+                            :language="'markdown'"
+                            placeholder="CSV source content..."
+                            @update:modelValue="() => { csvDirty = true; }"
+                        />
+                    </div>
+                </div>
+
                 <CodeMirrorEditor 
                     v-else
                     v-model="dbContent" 

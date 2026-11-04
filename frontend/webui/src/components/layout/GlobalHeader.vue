@@ -192,6 +192,19 @@ const activeSttModelName = computed({ get: () => user.value?.stt_binding_model_n
 const activeTtvModelName = computed({ get: () => user.value?.ttv_binding_model_name, set: (name) => authStore.updateUserPreferences({ ttv_binding_model_name: name }) });
 const activeTtmModelName = computed({ get: () => user.value?.ttm_binding_model_name, set: (name) => authStore.updateUserPreferences({ ttm_binding_model_name: name }) });
 
+// Wraps preference updates so a failed backend save doesn't leave the UI
+// showing a stale "selected" state that silently reverts on refresh.
+async function persistBindingPreference(payload, label) {
+    try {
+        await authStore.updateUserPreferences(payload);
+        return true;
+    } catch (e) {
+        const detail = e?.response?.data?.detail || e?.message || 'Unknown error';
+        uiStore.addNotification(`Could not save ${label} selection: ${detail}`, 'error');
+        return false;
+    }
+}
+
 // Hydrate the active handbag persona from UserPersonalityPreference.
 // 404 = no preference set — a legitimate default (chat falls back server-side);
 // the header must NOT pretend that fallback is the user's choice.
@@ -328,10 +341,6 @@ function selectModel(id) {
     activeModelName.value = id; 
     isMenuOpen.value = false; 
 }
-function selectPersonality(id) { 
-    activePersonalityId.value = id; 
-    isMenuOpen.value = false; 
-}
 function selectTtiModel(id) { 
     activeTtiModelName.value = id; 
     isMenuOpen.value = false; 
@@ -344,9 +353,12 @@ function selectSttModel(id) {
     activeSttModelName.value = id; 
     isMenuOpen.value = false; 
 }
-function selectTtvModel(id) { 
-    activeTtvModelName.value = id; 
-    isMenuOpen.value = false; 
+async function selectTtvModel(id) { 
+    isMenuOpen.value = false;
+    const saved = await persistBindingPreference({ ttv_binding_model_name: id }, 'TTV');
+    if (saved) {
+        activeTtvModelName.value = id;
+    }
 }
 function selectTtmModel(id) { 
     activeTtmModelName.value = id; 
@@ -366,6 +378,11 @@ onMounted(() => {
         isSubmenuActive.value = false;
     });
     loadActivePersona();
+    // Re-hydrate the user object so binding model selections reflect the
+    // latest persisted values after a hard refresh.
+    if (authStore.fetchUser) {
+        Promise.resolve().then(() => authStore.fetchUser()).catch(() => {});
+    }
 });
 onUnmounted(() => {
     eventBusOff('close-all-dropdowns');
