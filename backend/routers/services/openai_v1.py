@@ -304,6 +304,25 @@ def _cancel_generation(lc) -> None:
     """Signals cancellation to client and closes connection to free backend server slots."""
     cancel_client_generation(lc)
 
+
+def _is_tool_choice_rejection(ex: Exception) -> bool:
+    """
+    Detects upstream bindings that reject tool_choice='auto'/'required' because
+    required server-side flags are missing (e.g. vLLM without
+    --enable-auto-tool-choice / --tool-call-parser).
+
+    We surface these as HTTP 400 rather than silently falling back to prompt
+    injection, because dropping tool_choice changes request semantics and hides
+    a real server configuration issue that the client must be able to see.
+    """
+    msg = str(ex).lower()
+    return (
+        "enable-auto-tool-choice" in msg
+        or "auto-tool-choice" in msg
+        or "tool-call-parser" in msg
+        or ("tool_choice" in msg and "requires" in msg)
+    )
+
 def generate_mistral_compatible_id() -> str:
     """Generates a 9-character alphanumeric ID required by Mistral/LiteLLM."""
     import random
@@ -1350,9 +1369,12 @@ async def chat_completions(
                     )
                     return f"data: {chunk.model_dump_json()}\n\n"
 
-                def make_error_chunk(message: str) -> str:
+                def make_error_chunk(message: str, code: Optional[str] = None) -> str:
                     """Emit an OpenAI-compatible error event before [DONE]."""
-                    payload = json.dumps({"error": {"message": message, "type": "server_error"}})
+                    err_obj: Dict[str, Any] = {"message": message, "type": "server_error"}
+                    if code:
+                        err_obj["code"] = code
+                    payload = json.dumps({"error": err_obj})
                     return f"data: {payload}\n\n"
 
                 async def watch_disconnect() -> None:
@@ -1539,6 +1561,12 @@ async def chat_completions(
                         # object / list shape depending on binding implementation).
                         native_tool_calls: List[ToolCall] = []
                         native_result_container: Dict[str, Any] = {}
+                        # Captures exceptions that occur before any content chunk
+                        # is produced. When populated, the drain loop raises the
+                        # first one so the real cause is surfaced to the client
+                        # (or at least logged loudly) instead of being silently
+                        # swallowed into an SSE frame the OpenAI SDK ignores.
+                        pre_stream_exception: List[Exception] = []
 
                         def _collect_native_tool_calls(result: Any) -> None:
                             """Extracts native OpenAI wire-format tool_calls from a binding return value."""
@@ -1667,12 +1695,24 @@ async def chat_completions(
                                 generation_error = True
                                 err_str = str(ex).lower()
                                 ASCIIColors.error(f"[tools_blocking_gen] {ex}")
-                                if "connection" in err_str or "disconnected" in err_str or "broken pipe" in err_str:
-                                    evict_client_from_registry(lc, user.username)
-                                main_loop.call_soon_threadsafe(
-                                    stream_queue.put_nowait,
-                                    make_error_chunk(str(ex))
-                                )
+                                if _is_tool_choice_rejection(ex):
+                                    # Record so the drain loop can raise it. We
+                                    # also tag the SSE frame with a code so raw
+                                    # SSE clients can detect the cause.
+                                    pre_stream_exception.append(
+                                        HTTPException(status_code=400, detail=str(ex))
+                                    )
+                                    main_loop.call_soon_threadsafe(
+                                        stream_queue.put_nowait,
+                                        make_error_chunk(str(ex), code="tool_choice_rejected")
+                                    )
+                                else:
+                                    if "connection" in err_str or "disconnected" in err_str or "broken pipe" in err_str:
+                                        evict_client_from_registry(lc, user.username)
+                                    main_loop.call_soon_threadsafe(
+                                        stream_queue.put_nowait,
+                                        make_error_chunk(str(ex))
+                                    )
                             finally:
                                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
@@ -1706,6 +1746,14 @@ async def chat_completions(
                                     )
                                 break
                             if item is None:
+                                if pre_stream_exception and not first_token_received_tools:
+                                    # No content was produced. StreamingResponse
+                                    # headers are already sent, so we cannot change
+                                    # the status code here — but raising closes the
+                                    # connection cleanly and logs the real cause.
+                                    # The SSE error frame (if any) was already
+                                    # yielded above.
+                                    raise pre_stream_exception[0]
                                 break
                             if not first_token_received_tools:
                                 first_token_received_tools = True
@@ -1961,6 +2009,13 @@ async def chat_completions(
                         **generation_kwargs,
                     )
                 except Exception as native_ex:
+                    if _is_tool_choice_rejection(native_ex):
+                        # Surface the upstream cause verbatim so the OpenAI SDK
+                        # raises BadRequestError with the actionable message.
+                        raise HTTPException(
+                            status_code=400,
+                            detail=str(native_ex),
+                        ) from native_ex
                     msg = str(native_ex).lower()
                     is_kwarg_reject = isinstance(native_ex, TypeError) or any(
                         tok in msg for tok in (
