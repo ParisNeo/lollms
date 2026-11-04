@@ -171,83 +171,115 @@ def _write_handbag_manifest_from_legacy(installed_path: Path, config: dict) -> N
 
 
 def _install_personality_task(task, repo_name: str, folder_name: str):
-    source_path = PERSONALITIES_ZOO_ROOT_PATH / repo_name / folder_name
-
-    manifest_kind, raw_config = _read_personality_manifest(source_path)
-    config = _normalize_personality_config(manifest_kind, raw_config)
-
-    ensure_personality_roots()
-    final_path = install_handbag_from_folder(
-        Path(source_path),
-        global_personalities_root(),
-        handbag_name=folder_name,
-    )
-    _write_handbag_manifest_from_legacy(final_path, config)
-
-    # Finalize installed manifest with `version` so `get_available`
-    # (`_handbag_manifest_version` vs zoo version) can flag update_available.
     try:
-        installed_manifest_path = final_path / "handbag.yaml"
-        installed_manifest = {}
-        if installed_manifest_path.is_file():
-            installed_manifest = yaml.safe_load(
-                installed_manifest_path.read_text(encoding="utf-8")) or {}
-        changed = False
-        if config.get("version") and not installed_manifest.get("version"):
-            installed_manifest["version"] = str(config["version"])
-            changed = True
-        if changed:
-            installed_manifest_path.write_text(
-                yaml.safe_dump(installed_manifest, allow_unicode=True),
-                encoding="utf-8")
-    except Exception as exc:
-        print(f"WARNING: could not finalize handbag manifest at {final_path}: {exc}")
-
-    # Icon fallback: `install_handbag_from_folder` copies any in-folder
-    # `icon.*` automatically. If the pack shipped only manifest metadata,
-    # materialize `icon.png` from that base64 so the studio shows the icon.
-    try:
-        has_icon_file = any(
-            (final_path / n).is_file()
-            for n in ("icon.png", "icon.jpg", "icon.jpeg", "icon.svg", "icon.webp")
+        task.log(
+            f"Starting install of '{folder_name}' from repo '{repo_name}'...",
+            "INFO",
         )
-        if not has_icon_file and (final_path / "assets").is_dir():
-            has_icon_file = any(
-                (final_path / "assets" / n).is_file()
-                for n in ("icon.png", "icon.jpg", "icon.jpeg", "icon.svg", "icon.webp")
+        source_path = PERSONALITIES_ZOO_ROOT_PATH / repo_name / folder_name
+        if not source_path.is_dir():
+            raise FileNotFoundError(
+                f"Source personality folder does not exist: {source_path}. "
+                f"The zoo cache may be stale — try 'Rescan' from the admin panel."
             )
-        if not has_icon_file:
-            # `_normalize_personality_config` drops unknown fields for legacy
-            # `config.yaml` packs, so icon metadata declared there is invisible
-            # via `config`. Fall back to `raw_config` (the un-normalized source
-            # manifest) so legacy packs get their embedded icon materialized.
-            declared_icon = (
-                config.get("icon") or config.get("icon_base64")
-                or (isinstance(raw_config, dict)
-                    and (raw_config.get("icon") or raw_config.get("icon_base64")))
-                or None
-            )
-            if isinstance(declared_icon, str) and declared_icon.strip():
-                payload = declared_icon.split(",", 1)[-1] \
-                    if declared_icon.startswith("data:") else declared_icon
-                try:
-                    (final_path / "icon.png").write_bytes(
-                        base64.b64decode(payload, validate=True))
-                except Exception as decode_err:
-                    # Not raw base64 (maybe a relative path or URL): leave the
-                    # installed folder icon-less; `_read_handbag_icon` will try
-                    # to resolve a relative-path manifest field on read.
-                    print(
-                        f"WARNING: icon field for '{folder_name}' is not valid "
-                        f"base64 ({decode_err}); skipping materialization.")
-    except Exception as exc:
-        print(f"WARNING: could not materialize handbag icon at {final_path}: {exc}")
 
-    task.log(
-        f"Personality '{config.get('name') or folder_name}' installed to {final_path}.",
-        "INFO",
-    )
-    return {"message": "Personality installed.", "path": str(final_path)}
+        try:
+            manifest_kind, raw_config = _read_personality_manifest(source_path)
+            config = _normalize_personality_config(manifest_kind, raw_config)
+            task.log(f"Resolved manifest kind='{manifest_kind}'.", "INFO")
+        except FileNotFoundError as manifest_err:
+            # A pack with an unrecognised manifest (e.g. `meta.yaml`) must
+            # not abort BEFORE the folder is copied; degrade gracefully.
+            task.log(
+                f"No recognised manifest in source: {manifest_err}. "
+                f"Continuing install with folder-name-derived metadata.",
+                "WARNING",
+            )
+            config = {"name": Path(folder_name).name or folder_name}
+            raw_config = config
+
+        ensure_personality_roots()
+        final_path = install_handbag_from_folder(
+            Path(source_path),
+            global_personalities_root(),
+            handbag_name=folder_name,
+        )
+        task.log(f"Handbag files copied to {final_path}.", "INFO")
+
+        # --- Best-effort: finalize handbag.yaml (version normalization) ----
+        try:
+            _write_handbag_manifest_from_legacy(final_path, config)
+            installed_manifest_path = final_path / "handbag.yaml"
+            installed_manifest: dict = {}
+            if installed_manifest_path.is_file():
+                installed_manifest = yaml.safe_load(
+                    installed_manifest_path.read_text(encoding="utf-8")
+                ) or {}
+            if config.get("version") and not installed_manifest.get("version"):
+                installed_manifest["version"] = str(config["version"])
+                installed_manifest_path.write_text(
+                    yaml.safe_dump(installed_manifest, allow_unicode=True),
+                    encoding="utf-8",
+                )
+        except Exception as manifest_io_err:
+            task.log(
+                f"Warning: could not finalize handbag manifest at "
+                f"{final_path}: {manifest_io_err}",
+                "WARNING",
+            )
+
+        # --- Best-effort: materialize icon.png from manifest base64 --------
+        try:
+            icon_names = ("icon.png", "icon.jpg", "icon.jpeg", "icon.svg", "icon.webp")
+            has_icon_file = any((final_path / n).is_file() for n in icon_names)
+            if not has_icon_file and (final_path / "assets").is_dir():
+                has_icon_file = any(
+                    (final_path / "assets" / n).is_file() for n in icon_names
+                )
+            if not has_icon_file:
+                # Legacy `config.yaml` packs lose `icon` when normalized, so
+                # fall back to the raw manifest dict.
+                declared_icon = (
+                    config.get("icon")
+                    or config.get("icon_base64")
+                    or (isinstance(raw_config, dict) and (
+                        raw_config.get("icon") or raw_config.get("icon_base64")))
+                    or None
+                )
+                if isinstance(declared_icon, str) and declared_icon.strip():
+                    payload = (
+                        declared_icon.split(",", 1)[-1]
+                        if declared_icon.startswith("data:")
+                        else declared_icon
+                    )
+                    try:
+                        (final_path / "icon.png").write_bytes(
+                            base64.b64decode(payload, validate=True)
+                        )
+                    except Exception as decode_err:
+                        task.log(
+                            f"Warning: icon field for '{folder_name}' is not "
+                            f"valid base64 ({decode_err}); skipping materialization.",
+                            "WARNING",
+                        )
+        except Exception as icon_err:
+            task.log(
+                f"Warning: could not materialize handbag icon at "
+                f"{final_path}: {icon_err}",
+                "WARNING",
+            )
+
+        display_name = config.get("name") or Path(folder_name).name or folder_name
+        task.log(
+            f"Personality '{display_name}' installed to {final_path}.",
+            "INFO",
+        )
+        return {"message": "Personality installed.", "path": str(final_path)}
+
+    except Exception as exc:
+        # Surface the real failure to the user AND to the Tasks panel.
+        task.log(f"Installation failed: {type(exc).__name__}: {exc}", "ERROR")
+        raise
 
 @personalities_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
 def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_user)):
