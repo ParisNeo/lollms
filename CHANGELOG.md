@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-04 22:06]
+
+- refactor: update tools section in openai_v1.py
+
 ## [2026-11-04 15:03]
 
 - feat(artefacts): implement office file handling and refine UI components

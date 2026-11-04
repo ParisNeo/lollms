@@ -1316,40 +1316,226 @@ async def chat_completions(
 
                     # ── TOOLS PATH ────────────────────────────────────────────────────────
                     if request.tools:
-                        # Offload to thread pool to avoid blocking the event loop
-                        result_content = await asyncio.wait_for(
-                            loop.run_in_executor(
-                                executor,
-                                lambda: lc.generate_from_messages(
-                                    openai_messages,
-                                    temperature=request.temperature,
-                                    n_predict=effective_max_tokens,
-                                    **generation_kwargs
+                        # Some bindings reject unsupported reasoning kwargs. Build a safe
+                        # kwargs set: only pass temperature + n_predict by default, and
+                        # attempt to forward reasoning kwargs optimistically with fallback.
+                        safe_kwargs = {"temperature": request.temperature, "n_predict": effective_max_tokens}
+
+                        # Buffer accumulated text so we can parse tool_calls at the end while
+                        # still streaming progressive content to the client.
+                        buffered_text_parts: List[str] = []
+
+                        def tools_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
+                            if client_aborted or (lc and lc.cancel_generation):
+                                return False
+                            if lc and hasattr(lc, 'llm') and lc.llm:
+                                if getattr(lc.llm, 'cancelled', False):
+                                    return False
+                                if hasattr(lc.llm, 'is_cancelled') and lc.llm.is_cancelled():
+                                    return False
+
+                            if msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK and chunk_text:
+                                main_loop.call_soon_threadsafe(
+                                    stream_queue.put_nowait,
+                                    make_chunk(DeltaMessage(reasoning_content=chunk_text))
                                 )
-                            ),
-                            timeout=TTFT_TIMEOUT,   # tools path: single blocking call
-                        )
-                        if lc.llm and lc.llm.is_cancelled():
-                            yield "data: [DONE]\n\n"
-                            return
-                        if isinstance(result_content, dict) and (
-                            "error" in result_content or result_content.get("status") is False
-                        ):
-                            yield make_error_chunk(result_content.get("error", "LLM error"))
-                            yield "data: [DONE]\n\n"
-                            return
-                        content, tool_calls = parse_tool_calls_from_text(result_content)
+                                return True
+
+                            if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
+                                buffered_text_parts.append(chunk_text)
+                                main_loop.call_soon_threadsafe(
+                                    stream_queue.put_nowait,
+                                    make_chunk(DeltaMessage(content=chunk_text))
+                                )
+                            return True
+
+                        def _is_unsupported_kwarg(ex: Exception) -> bool:
+                            """Detects bindings that reject reasoning kwargs (TypeError, ValueError, or kwarg-related Exception)."""
+                            if isinstance(ex, (TypeError, ValueError)):
+                                return True
+                            msg = str(ex).lower()
+                            return (
+                                "unexpected keyword" in msg
+                                or "got an unexpected" in msg
+                                or "invalid keyword" in msg
+                                or "unexpected argument" in msg
+                            )
+
+                        # Capture native tool_calls emitted directly by the binding (dict /
+                        # object / list shape depending on binding implementation).
+                        native_tool_calls: List[ToolCall] = []
+                        native_result_container: Dict[str, Any] = {}
+
+                        def _collect_native_tool_calls(result: Any) -> None:
+                            """Extracts native OpenAI wire-format tool_calls from a binding return value."""
+                            candidates: List[Any] = []
+                            if result is None:
+                                return
+                            if isinstance(result, dict):
+                                if result.get("tool_calls"):
+                                    candidates = result["tool_calls"]
+                                elif isinstance(result.get("message"), dict) and result["message"].get("tool_calls"):
+                                    candidates = result["message"]["tool_calls"]
+                                else:
+                                    native_result_container["raw"] = result
+                                    return
+                            elif isinstance(result, list):
+                                candidates = result
+                            elif hasattr(result, "tool_calls") and getattr(result, "tool_calls"):
+                                candidates = list(result.tool_calls)
+                            else:
+                                native_result_container["raw"] = result
+                                return
+
+                            for tc in candidates:
+                                try:
+                                    if isinstance(tc, ToolCall):
+                                        native_tool_calls.append(tc)
+                                    elif isinstance(tc, dict):
+                                        fn = tc.get("function", {}) or {}
+                                        args = fn.get("arguments")
+                                        if isinstance(args, dict):
+                                            args = json.dumps(args)
+                                        native_tool_calls.append(
+                                            ToolCall(
+                                                id=tc.get("id") or generate_mistral_compatible_id(),
+                                                type=tc.get("type", "function"),
+                                                function=FunctionCall(
+                                                    name=fn.get("name"),
+                                                    arguments=args if args is not None else "{}",
+                                                ),
+                                            )
+                                        )
+                                    elif hasattr(tc, "function"):
+                                        fn = tc.function
+                                        args = getattr(fn, "arguments", None)
+                                        if isinstance(args, dict):
+                                            args = json.dumps(args)
+                                        native_tool_calls.append(
+                                            ToolCall(
+                                                id=getattr(tc, "id", None) or generate_mistral_compatible_id(),
+                                                type=getattr(tc, "type", "function"),
+                                                function=FunctionCall(
+                                                    name=getattr(fn, "name", None),
+                                                    arguments=args if args is not None else "{}",
+                                                ),
+                                            )
+                                        )
+                                except Exception as _tc_ex:
+                                    ASCIIColors.warning(
+                                        f"[tools_blocking_gen] Skipping malformed native tool_call: {_tc_ex}"
+                                    )
+
+                        def tools_blocking_gen() -> None:
+                            nonlocal generation_error
+                            try:
+                                try:
+                                    result = lc.generate_from_messages(
+                                        openai_messages,
+                                        streaming_callback=tools_callback,
+                                        stream=True,
+                                        **safe_kwargs,
+                                        **generation_kwargs,
+                                    )
+                                    _collect_native_tool_calls(result)
+                                except Exception as first_ex:
+                                    if not _is_unsupported_kwarg(first_ex):
+                                        raise
+                                    # Binding rejected one of the reasoning kwargs. Retry without them.
+                                    ASCIIColors.warning(
+                                        f"[tools_blocking_gen] kwarg rejected ({first_ex}); retrying without reasoning kwargs."
+                                    )
+                                    result = lc.generate_from_messages(
+                                        openai_messages,
+                                        streaming_callback=tools_callback,
+                                        stream=True,
+                                        **safe_kwargs,
+                                    )
+                                    _collect_native_tool_calls(result)
+                            except Exception as ex:
+                                generation_error = True
+                                err_str = str(ex).lower()
+                                ASCIIColors.error(f"[tools_blocking_gen] {ex}")
+                                if "connection" in err_str or "disconnected" in err_str or "broken pipe" in err_str:
+                                    evict_client_from_registry(lc, user.username)
+                                main_loop.call_soon_threadsafe(
+                                    stream_queue.put_nowait,
+                                    make_error_chunk(str(ex))
+                                )
+                            finally:
+                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+
+                        gen_task_tools = loop.run_in_executor(executor, tools_blocking_gen)
                         yield make_chunk(DeltaMessage(role="assistant"))
-                        if content:
-                            yield make_chunk(DeltaMessage(content=content))
+
+                        # Drain the stream until sentinel
+                        first_token_received_tools = False
+                        tools_timed_out = False
+                        while True:
+                            timeout = CHUNK_TIMEOUT if first_token_received_tools else TTFT_TIMEOUT
+                            try:
+                                item = await asyncio.wait_for(stream_queue.get(), timeout=timeout)
+                            except asyncio.TimeoutError:
+                                tools_timed_out = True
+                                if not first_token_received_tools:
+                                    ASCIIColors.warning(
+                                        f"[stream][tools] TTFT timeout ({TTFT_TIMEOUT}s) for user '{user.username}'. Cancelling."
+                                    )
+                                    await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                                    yield make_error_chunk(
+                                        f"Generation timed out waiting for first token ({TTFT_TIMEOUT:.0f}s)."
+                                    )
+                                else:
+                                    ASCIIColors.warning(
+                                        f"[stream][tools] Inter-chunk timeout ({CHUNK_TIMEOUT}s) for user '{user.username}'. Cancelling."
+                                    )
+                                    await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                                    yield make_error_chunk(
+                                        f"Generation stalled mid-stream ({CHUNK_TIMEOUT:.0f}s between tokens)."
+                                    )
+                                break
+                            if item is None:
+                                break
+                            if not first_token_received_tools:
+                                first_token_received_tools = True
+                            yield item
+
+                        # Parse buffered text for tool calls and emit final delta.
+                        # Prefer native tool_calls from the binding when present — this is the
+                        # OpenAI-compatible transport contract and avoids ambiguity when the
+                        # underlying model emits native tool_calls rather than text.
+                        full_text = "".join(buffered_text_parts)
+                        content_tail, parsed_tool_calls = parse_tool_calls_from_text(full_text)
+
+                        tool_calls: List[ToolCall] = native_tool_calls or parsed_tool_calls or []
+
+                        # If no text at all AND no tool calls AND no generation error -> empty output
+                        if (
+                            not generation_error
+                            and not tool_calls
+                            and not full_text.strip()
+                            and not tools_timed_out
+                        ):
+                            ASCIIColors.warning(
+                                f"[stream][tools] Empty generation result for user '{user.username}' "
+                                f"(no content, no tool_calls)."
+                            )
+                            yield make_error_chunk(
+                                "Model returned an empty response with tools enabled. "
+                                "Check that the selected model supports tool/function calling."
+                            )
+
+                        # If tool calls were present, emit them as final deltas
                         if tool_calls:
                             for i, tc in enumerate(tool_calls):
                                 tc.index = i
                                 yield make_chunk(DeltaMessage(tool_calls=[tc]))
-                        yield make_chunk(
-                            DeltaMessage(),
-                            finish_reason="tool_calls" if tool_calls else "stop"
-                        )
+
+                        if lc.llm and not lc.llm.is_cancelled():
+                            yield make_chunk(
+                                DeltaMessage(),
+                                finish_reason="tool_calls" if tool_calls else "stop"
+                            )
                         yield "data: [DONE]\n\n"
                         return
 
