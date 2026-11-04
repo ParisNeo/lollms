@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-04 22:07]
+
+- Refactored frontend assets migration: Remove 195+ legacy components from dist/assets (including AboutView-DWaJZ4TW.js, AccountSettings-AQok65Jw.js) and replace with Vite-compatible ES modules.
+
 ## [2026-11-04 15:03]
 
 - feat(artefacts): implement office file handling and refine UI components

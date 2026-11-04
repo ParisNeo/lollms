@@ -687,6 +687,33 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    // --- PERSONALITY ZOO GETTERS (strictly additive) ---
+    // Union of server-declared categories and categories actually present in
+    // the loaded page. Guards against a stale server ``categories`` list and
+    // lets the panel derive chips from what truly exists on the current page.
+    const personalityCategories = computed(() => {
+        const serverCats = Array.isArray(zooPersonalities.value.categories)
+            ? zooPersonalities.value.categories
+            : [];
+        const itemCats = (zooPersonalities.value.items || [])
+            .map(item => item?.category)
+            .filter(cat => typeof cat === 'string' && cat.length > 0);
+        return Array.from(new Set([...serverCats, ...itemCats]))
+            .sort((a, b) => a.localeCompare(b));
+    });
+
+    // Aggregate counters over the currently loaded page. Surfaced as header
+    // badges so admins see at a glance how many are installed and how many
+    // have pending updates, without leaving the panel.
+    const personalityZooStats = computed(() => {
+        const items = zooPersonalities.value.items || [];
+        return {
+            total: zooPersonalities.value.total || 0,
+            installed: items.filter(item => item?.is_installed).length,
+            updates: items.filter(item => item?.is_installed && item?.update_available).length,
+        };
+    });
+
     // --- COMPUTEDS (Declared AFTER functions) ---
     const modelDisplayMode = computed({
       get() {
@@ -773,6 +800,7 @@ export const useAdminStore = defineStore('admin', () => {
         appFilters, mcpFilters, promptFilters, personalityFilters, systemLogs, isLoadingSystemLogs,
         systemRequirements, isLoadingRequirements,
         modelDisplayMode,
+        personalityCategories, personalityZooStats,
 
         // Actions
         forceAllUsersConfig, 

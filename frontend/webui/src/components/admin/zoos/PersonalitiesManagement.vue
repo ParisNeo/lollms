@@ -22,7 +22,8 @@ const dataStore = useDataStore();
 const { personalityFilters } = adminStore;
 const { 
     personalityZooRepositories, isLoadingPersonalityZooRepositories, 
-    zooPersonalities, isLoadingZooPersonalities 
+    zooPersonalities, isLoadingZooPersonalities,
+    personalityCategories, personalityZooStats,
 } = storeToRefs(adminStore);
 const { tasks } = storeToRefs(tasksStore);
 
@@ -161,7 +162,27 @@ onMounted(() => {
 });
 
 const sortedRepositories = computed(() => [...(personalityZooRepositories.value || [])].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
-const categories = computed(() => ['All', 'Starred', ...(zooPersonalities.value.categories || [])]);
+const categories = computed(() => ['All', 'Starred', ...personalityCategories.value]);
+
+// Whether any filter is currently narrowing the page. Drives the "Clear
+// filters" affordance and the empty-state messaging below.
+const hasActiveFilters = computed(() =>
+    String(searchQuery.value || '').trim().length > 0 ||
+    selectedCategory.value !== 'All' ||
+    installationStatusFilter.value !== 'All' ||
+    selectedRepository.value !== 'All'
+);
+
+// Reset every filter in one shot. Vue batches synchronous writes, so the
+// existing watch handlers fire exactly once and perform the single refetch —
+// no redundant fetchZooItems() call here.
+function resetAllFilters() {
+    currentPage.value = 1;
+    searchQuery.value = '';
+    selectedCategory.value = 'All';
+    installationStatusFilter.value = 'All';
+    selectedRepository.value = 'All';
+}
 
 function formatDateTime(isoString) { 
     if (!isoString) return 'Never'; 
@@ -287,12 +308,18 @@ async function handleRefreshCache() {
             <!-- Action & Header -->
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/60 dark:bg-gray-850/50 p-4 rounded-2xl border border-gray-200/80 dark:border-gray-700/60 backdrop-blur-md">
                 <div>
-                    <h3 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <span>Personalities Zoo</span>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-white">Personalities Zoo</h3>
                         <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">
                             {{ totalItems }} Available
                         </span>
-                    </h3>
+                        <span v-if="personalityZooStats.installed > 0" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                            {{ personalityZooStats.installed }} Installed
+                        </span>
+                        <span v-if="personalityZooStats.updates > 0" class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
+                            {{ personalityZooStats.updates }} Update{{ personalityZooStats.updates === 1 ? '' : 's' }}
+                        </span>
+                    </div>
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Explore tailored AI personas with specialized conditionings, scripts, and capabilities.</p>
                 </div>
 
@@ -371,6 +398,14 @@ async function handleRefreshCache() {
                     >
                         {{ cat === 'Starred' ? '★ Starred' : cat }}
                     </button>
+                    <button 
+                        v-if="hasActiveFilters"
+                        @click="resetAllFilters"
+                        class="ml-auto px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap bg-rose-100 hover:bg-rose-200 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 transition-all duration-200 shrink-0"
+                        title="Clear all active filters"
+                    >
+                        ✕ Clear filters
+                    </button>
                 </div>
             </div>
 
@@ -385,11 +420,17 @@ async function handleRefreshCache() {
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>
                 </div>
-                <h4 class="font-bold text-sm text-gray-800 dark:text-gray-200">No Personalities Found</h4>
-                <p class="text-xs text-gray-500 mt-1 max-w-sm mx-auto">No AI personalities match your active filters. Try searching for a different keyword or category.</p>
+                <h4 class="font-bold text-sm text-gray-800 dark:text-gray-200">
+                    {{ hasActiveFilters ? 'No Personalities Found' : 'Personality Zoo is Empty' }}
+                </h4>
+                <p class="text-xs text-gray-500 mt-1 max-w-sm mx-auto">
+                    {{ hasActiveFilters
+                        ? 'No AI personalities match your active filters. Try searching for a different keyword or category.'
+                        : 'No personalities have been indexed yet. Add a repository or click "Rescan Cache" to populate the zoo.' }}
+                </p>
                 <button 
-                    v-if="searchQuery || selectedCategory !== 'All' || installationStatusFilter !== 'All'"
-                    @click="searchQuery = ''; selectedCategory = 'All'; installationStatusFilter = 'All'; fetchZooItems();"
+                    v-if="hasActiveFilters"
+                    @click="resetAllFilters"
                     class="btn btn-secondary btn-sm mt-4"
                 >
                     Reset Filters
