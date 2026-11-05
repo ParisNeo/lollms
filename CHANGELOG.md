@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-05 00:29]
+
+- feat: add Helpe to OpenAI V1 service
+
 ## [2026-11-04 23:12]
 
 - fix(backend): surface tool_choice rejection errors as HTTP 400 instead of silently failing

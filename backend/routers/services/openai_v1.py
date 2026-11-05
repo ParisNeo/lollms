@@ -469,11 +469,146 @@ async def get_user_from_api_key(
     return user
 
 # --- Helper to Extract Images and Convert Messages ---
+
+# Magic-byte signatures for the image formats vLLM / OpenAI-compatible
+# backends accept. Used to reject corrupt payloads before they reach the
+# upstream binding (which otherwise fails with an opaque PIL error).
+_IMAGE_MAGIC_BYTES = {
+    b"\x89PNG\r\n\x1a\n": "png",
+    b"\xff\xd8\xff": "jpeg",
+    b"GIF87a": "gif",
+    b"GIF89a": "gif",
+    b"RIFF": "webp",  # RIFF....WEBP — checked further below
+}
+
+_DATA_URL_PATTERN = re.compile(
+    r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$",
+    re.DOTALL,
+)
+
+
+def _normalize_image_url(raw: Any, msg_index: int) -> str:
+    """
+    Normalizes an OpenAI image_url value into a valid ``data:image/...;base64,``
+    URL. Accepts:
+      - ``{"url": "data:image/png;base64,..."}`` (OpenAI native)
+      - ``{"url": "https://..."}`` (remote URL — passed through untouched)
+      - raw ``"data:image/...;base64,..."`` string
+      - raw base64 string (no prefix)
+
+    Raises HTTPException(400) with a precise message if the payload is
+    malformed (bad base64, unknown image format, empty body).
+    """
+    if raw is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message {msg_index}: image_url is null.",
+        )
+
+    if isinstance(raw, dict):
+        url = raw.get("url")
+        if not url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Message {msg_index}: image_url object missing 'url'.",
+            )
+        raw = url
+
+    if not isinstance(raw, str) or not raw.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message {msg_index}: image_url must be a non-empty string.",
+        )
+
+    raw = raw.strip()
+
+    # Remote HTTP(S) URLs are passed through — the binding fetches them.
+    if raw.startswith(("http://", "https://")):
+        return raw
+
+    # Extract base64 body + declared mime.
+    match = _DATA_URL_PATTERN.match(raw)
+    if match:
+        declared_mime = match.group(1).lower()
+        b64_body = match.group(2).strip()
+    else:
+        declared_mime = None
+        b64_body = raw
+
+    # Strip embedded whitespace/newlines that commonly break base64 decode.
+    b64_body = re.sub(r"\s+", "", b64_body)
+    if not b64_body:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message {msg_index}: image_url has empty base64 body.",
+        )
+
+    # Decode (with padding tolerance).
+    padded = b64_body + ("=" * (-len(b64_body) % 4))
+    try:
+        decoded = base64.b64decode(padded, validate=True)
+    except (base64.binascii.Error, ValueError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Message {msg_index}: image_url is not valid base64 ({e}). "
+                f"Ensure the client sends a data URL of the form "
+                f"'data:image/png;base64,<payload>'."
+            ),
+        )
+
+    if not decoded:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message {msg_index}: image_url decodes to 0 bytes.",
+        )
+
+    # Detect actual format from magic bytes — this is what PIL/vLLM does.
+    detected_mime = None
+    for magic, fmt in _IMAGE_MAGIC_BYTES.items():
+        if decoded.startswith(magic):
+            if fmt == "webp":
+                # RIFF....WEBP
+                if len(decoded) >= 12 and decoded[8:12] == b"WEBP":
+                    detected_mime = "image/webp"
+                else:
+                    continue
+            else:
+                detected_mime = f"image/{fmt}"
+            break
+
+    if detected_mime is None:
+        head = decoded[:8].hex()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Message {msg_index}: image payload is not a recognized "
+                f"image format (magic bytes: {head}). Supported: PNG, JPEG, "
+                f"WEBP, GIF. The upstream vision model will reject this — "
+                f"check that the client is not double-encoding or truncating "
+                f"the image."
+            ),
+        )
+
+    # If the client declared a mismatched mime, trust the magic bytes.
+    final_mime = detected_mime
+    if declared_mime and declared_mime.split("/", 1)[-1] not in (
+        final_mime.split("/", 1)[-1],
+        "jpg" if final_mime == "image/jpeg" else "",
+    ):
+        ASCIIColors.warning(
+            f"[image] Message {msg_index}: declared {declared_mime} but "
+            f"magic bytes indicate {final_mime}; using {final_mime}."
+        )
+
+    return f"data:{final_mime};base64,{base64.b64encode(decoded).decode('ascii')}"
+
+
 def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict], List[str]]:
     processed = []
     image_list = []
 
-    for msg in messages:
+    for msg_index, msg in enumerate(messages):
         msg_dict = {
             "role": msg.role,
             "content": msg.content
@@ -492,18 +627,28 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
             ]
 
         if isinstance(msg.content, list):
+            normalized_content: List[Any] = []
             for item in msg.content:
-                if item.get("type") == "input_image":
-                    base64_img = item["image_url"]
-                    if base64_img:
-                        image_list.append(base64_img)
-                elif item.get("type") == "image_url":
-                    base64_img = item["image_url"]
-                    if isinstance(base64_img, dict):
-                        if "url" in base64_img.keys():
-                            base64_img = base64_img["url"]
-                    if base64_img:
-                        image_list.append(base64_img)
+                if not isinstance(item, dict):
+                    normalized_content.append(item)
+                    continue
+
+                item_type = item.get("type")
+                if item_type in ("input_image", "image_url"):
+                    raw_url = item.get("image_url")
+                    normalized_url = _normalize_image_url(raw_url, msg_index)
+                    image_list.append(normalized_url)
+
+                    # Rebuild the item in the canonical OpenAI wire format so
+                    # the binding receives a clean, validated data URL.
+                    normalized_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": normalized_url},
+                    })
+                else:
+                    normalized_content.append(item)
+
+            msg_dict["content"] = normalized_content
 
         processed.append(msg_dict)
 
@@ -1258,6 +1403,38 @@ async def chat_completions(
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
     openai_messages, images = preprocess_openai_messages(messages)
+
+    # Best-effort guard: if the resolved model profile is known to be
+    # text-only (supports_vision is explicitly False) but the client sent
+    # images, reject with an actionable 400 instead of letting the upstream
+    # binding fail with an opaque "cannot identify image file" error.
+    if images:
+        try:
+            _, profile_key, profile_info = await loop.run_in_executor(
+                executor,
+                lambda: get_universal_model_profile(db, request.model, modality="llm"),
+            )
+            if profile_info is not None:
+                supports_vision = profile_info.get("supports_vision")
+                if supports_vision is False:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Model '{request.model}' is not configured as a "
+                            f"vision-capable model (supports_vision=False in its "
+                            f"profile), but the request contains {len(images)} "
+                            f"image(s). Either use a vision-capable model or "
+                            f"remove the images from the request."
+                        ),
+                    )
+        except HTTPException:
+            raise
+        except Exception as e:
+            # Profile lookup is best-effort — never block a valid request on it.
+            ASCIIColors.warning(
+                f"[image-guard] Could not resolve vision capability for "
+                f"'{request.model}': {e}"
+            )
 
     # Tools are forwarded verbatim to the binding (native OpenAI tool-calling).
     # handle_tools_injection() is a LEGACY fallback used only when the binding
