@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-05 03:39]
+
+- Fix: Update version of lollms-client in requirements.txt to 1.21.8.
+
 ## [2026-11-05 03:24]
 
 - Fixing infrastructure and frontend routing components:
