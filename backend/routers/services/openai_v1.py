@@ -481,6 +481,26 @@ _IMAGE_MAGIC_BYTES = {
     b"RIFF": "webp",  # RIFF....WEBP — checked further below
 }
 
+
+# Conservative name-based heuristic for well-known TEXT-ONLY model families.
+# Used ONLY when the model profile has no explicit vision flag. Vision-capable
+# variants (-VL, -Vision, Pixtral, LLaVA, etc.) are excluded by the negative
+# lookahead / explicit alternation so we never reject a valid vision request.
+_TEXT_ONLY_MODEL_PATTERNS: List[Tuple["re.Pattern[str]", str]] = [
+    # DeepSeek text-only families (V2/V3/V4, Coder, R1) — but NOT *-VL variants.
+    (re.compile(r"deepseek[-_]?(?:v\d|r\d|coder|math|chat)(?![-_]?vl)", re.IGNORECASE), "DeepSeek-text"),
+    # Llama 2/3/3.1/3.2 text-only — but NOT Llama-3.2-Vision / Llama-3.3-Vision.
+    (re.compile(r"llama[-_]?(?:2|3(?:\.\d)?)(?![-_]?vision)", re.IGNORECASE), "Llama-text"),
+    # Qwen 2/2.5/3 text-only — but NOT Qwen-VL / Qwen2-VL / Qwen2.5-VL.
+    (re.compile(r"qwen[-_]?(?:2(?:\.\d)?|3)?(?![-_]?vl)", re.IGNORECASE), "Qwen-text"),
+    # Mistral / Mixtral text-only — but NOT Pixtral / Mistral-Small-3.1 (vision).
+    (re.compile(r"(?<!pix)(?:mixtral|mistral)(?![-_]?(?:pixtral|small-3\.1|vision))", re.IGNORECASE), "Mistral-text"),
+    # Gemma 2 text-only — but NOT PaliGemma / Gemma-3 (vision).
+    (re.compile(r"gemma[-_]?2(?![-_]?(?:vision|paligemma))", re.IGNORECASE), "Gemma2-text"),
+    # Phi-3 / Phi-4 text-only — but NOT Phi-3-Vision / Phi-4-multimodal.
+    (re.compile(r"phi[-_]?[34](?![-_]?(?:vision|multimodal))", re.IGNORECASE), "Phi-text"),
+]
+
 _DATA_URL_PATTERN = re.compile(
     r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$",
     re.DOTALL,
@@ -1404,29 +1424,36 @@ async def chat_completions(
 
     openai_messages, images = preprocess_openai_messages(messages)
 
-    # Best-effort guard: if the resolved model profile is known to be
-    # text-only (supports_vision is explicitly False) but the client sent
-    # images, reject with an actionable 400 instead of letting the upstream
-    # binding fail with an opaque "cannot identify image file" error.
+    # ── Vision capability guard ──────────────────────────────────────────────
+    # The upstream vLLM binding decodes every image_url payload with PIL. When
+    # the selected model is text-only, PIL decoding still runs and fails with
+    # an opaque "cannot identify image file" error. We reject such requests
+    # here with an actionable 400 instead.
+    #
+    # Resolution order:
+    #   1. Explicit profile flag (vision_enabled / has_vision) → authoritative.
+    #   2. Name-based heuristic for well-known text-only families → best-effort.
+    #   3. Unknown → allow (never block a valid request on a guess).
     if images:
+        vision_flag: Optional[bool] = None
+        profile_title: Optional[str] = None
         try:
             _, profile_key, profile_info = await loop.run_in_executor(
                 executor,
                 lambda: get_universal_model_profile(db, request.model, modality="llm"),
             )
             if profile_info is not None:
-                supports_vision = profile_info.get("supports_vision")
-                if supports_vision is False:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"Model '{request.model}' is not configured as a "
-                            f"vision-capable model (supports_vision=False in its "
-                            f"profile), but the request contains {len(images)} "
-                            f"image(s). Either use a vision-capable model or "
-                            f"remove the images from the request."
-                        ),
-                    )
+                # The profile builder emits `vision_enabled` and `has_vision`
+                # (NOT `supports_vision`). Accept all three for forward-compat.
+                for key in ("vision_enabled", "has_vision", "supports_vision"):
+                    if key in profile_info and profile_info[key] is not None:
+                        vision_flag = bool(profile_info[key])
+                        break
+                profile_title = (
+                    profile_info.get("title")
+                    or profile_info.get("name")
+                    or profile_info.get("model_name")
+                )
         except HTTPException:
             raise
         except Exception as e:
@@ -1434,6 +1461,34 @@ async def chat_completions(
             ASCIIColors.warning(
                 f"[image-guard] Could not resolve vision capability for "
                 f"'{request.model}': {e}"
+            )
+
+        is_text_only = False
+        reason = ""
+        if vision_flag is False:
+            is_text_only = True
+            reason = "its profile sets vision_enabled=False"
+        elif vision_flag is None:
+            # No explicit flag — fall back to a conservative name heuristic.
+            candidate_name = (profile_title or "").strip().lower() or request.model.lower()
+            for pattern, family in _TEXT_ONLY_MODEL_PATTERNS:
+                if pattern.search(candidate_name):
+                    is_text_only = True
+                    reason = (
+                        f"'{candidate_name}' matches the text-only family '{family}' "
+                        f"and its profile does not declare vision support"
+                    )
+                    break
+
+        if is_text_only:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Model '{request.model}' is not vision-capable ({reason}), "
+                    f"but the request contains {len(images)} image(s). "
+                    f"Use a vision-capable model (e.g. a *-VL / *-Vision / "
+                    f"Pixtral / Qwen-VL variant) or remove the images."
+                ),
             )
 
     # Tools are forwarded verbatim to the binding (native OpenAI tool-calling).
