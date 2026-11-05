@@ -21,6 +21,7 @@ export const useDataStore = defineStore('data', () => {
     const sharedDataStores = ref([]);
     const userPersonalities = ref([]);
     const publicPersonalities = ref([]);
+    const sharedPersonalities = ref([]);
     const userMcps = ref([]);
     const systemMcps = ref([]);
     const mcpTools = ref([]);
@@ -505,37 +506,50 @@ export const useDataStore = defineStore('data', () => {
     async function fetchPersonalities() {
         // Personalities are filesystem-backed handbags now; the legacy DB
         // endpoints (``/api/personalities/my`` and ``/public``) are gone.
-        // The chat header dropdown groups ``userPersonalities`` under
-        // "PERSONAL" and ``publicPersonalities`` under "PUBLIC", so we
-        // map the catalog scopes onto those two lists while preserving
-        // every field consumers key off (``id``, ``handbag_name``,
-        // ``scope``, ``name``, ``author``, ``category``, capability flags).
+        // The sidebar personalities tab renders ``userPersonalities`` (scope
+        // "personal") and ``publicPersonalities`` (scope "global"), while the
+        // header dropdown also reads ``sharedPersonalities`` (scope "shared").
+        //
+        // ``icon`` from the catalog is a ``data:image/...;base64,...`` URI or
+        // ``null`` (see ``_read_handbag_icon`` in ``backend/personalities.py``).
+        // Mirror it onto ``icon_base64`` so existing template bindings such as
+        // ``<img v-if="p.icon_base64" :src="p.icon_base64">`` render real
+        // persona art instead of silently falling back to the placeholder
+        // silhouette — that missing mapping was the "icons never show" bug.
         try {
             const res = await apiClient.get('/api/personalities/catalog');
             const catalog = res.data ?? {};
-            const toPersonality = (hb, isGlobal) => ({
-                id: `${isGlobal ? 'global' : 'personal'}:${hb.handbag_name}`,
-                handbag_name: hb.handbag_name,
-                scope: isGlobal ? 'global' : 'personal',
-                owner: hb.owner ?? null,
-                name: hb.name,
-                author: hb.author || (isGlobal ? 'LoLLMs' : 'Unknown'),
-                category: hb.category || (isGlobal ? 'General' : 'Custom'),
-                description: hb.description || '',
-                is_public: isGlobal,
-                has_soul: hb.has_soul,
-                has_tools: hb.has_tools,
-                has_rag: hb.has_rag,
-                has_docs: hb.has_docs,
-                has_skills: hb.has_skills,
-            });
+            const toPersonality = (hb, scope) => {
+                const icon = hb.icon || hb.icon_base64 || null;
+                return {
+                    id: `${scope}:${hb.handbag_name}`,
+                    handbag_name: hb.handbag_name,
+                    scope,
+                    owner: hb.owner ?? null,
+                    name: hb.name,
+                    author: hb.author || (scope === 'global' ? 'LoLLMs' : 'Unknown'),
+                    category: hb.category || (scope === 'global' ? 'General' : 'Custom'),
+                    description: hb.description || '',
+                    is_public: scope === 'global',
+                    icon,
+                    icon_base64: icon,
+                    has_soul: hb.has_soul,
+                    has_tools: hb.has_tools,
+                    has_rag: hb.has_rag,
+                    has_docs: hb.has_docs,
+                    has_skills: hb.has_skills,
+                };
+            };
             userPersonalities.value = (Array.isArray(catalog.personal) ? catalog.personal : [])
-                .map(h => toPersonality(h, false));
+                .map(h => toPersonality(h, 'personal'));
             publicPersonalities.value = (Array.isArray(catalog.global) ? catalog.global : [])
-                .map(h => toPersonality(h, true));
+                .map(h => toPersonality(h, 'global'));
+            sharedPersonalities.value = (Array.isArray(catalog.shared) ? catalog.shared : [])
+                .map(h => toPersonality(h, 'shared'));
         } catch (error) {
             userPersonalities.value = [];
             publicPersonalities.value = [];
+            sharedPersonalities.value = [];
         }
     }
 
@@ -891,6 +905,7 @@ export const useDataStore = defineStore('data', () => {
         sharedDataStores.value = [];
         userPersonalities.value = [];
         publicPersonalities.value = [];
+        sharedPersonalities.value = [];
         userMcps.value = [];
         systemMcps.value = [];
         mcpTools.value = [];
@@ -974,7 +989,7 @@ export const useDataStore = defineStore('data', () => {
     return {
         languages, isLoadingLanguages, fetchLanguages,
         availableLollmsModels, ownedDataStores, sharedDataStores,
-        userPersonalities, publicPersonalities, userMcps, systemMcps, mcpTools,
+        userPersonalities, publicPersonalities, sharedPersonalities, userMcps, systemMcps, mcpTools,
         userApps, systemApps,
         isLoadingLollmsModels,
         availableRagStores, availableMcpToolsForSelector, availableLLMModelsGrouped,

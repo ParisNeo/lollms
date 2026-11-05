@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-05 03:24]
+
+- Fixing infrastructure and frontend routing components:
+
 ## [2026-11-05 00:34]
 
 - feat: enhance vision capability guard with model name heuristics

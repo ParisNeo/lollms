@@ -7,6 +7,7 @@ import hashlib
 import traceback
 import datetime
 import threading
+import asyncio
 from pathlib import Path
 from typing import Dict, Optional, Any, cast, Callable, Tuple
 from urllib.parse import urlparse
@@ -70,7 +71,7 @@ TOKEN_CACHE_TTL = 10 # seconds
 #   * Entries expire. Failed (degraded) clients expire quickly so a broken binding
 #     is retried after a cooldown rather than on every request.
 # --------------------------------------------------------------------------- #
-BUILD_WAIT_TIMEOUT = 120     # seconds a request waits for another thread's model load
+BUILD_WAIT_TIMEOUT = 2       # seconds a non-builder request waits before 503 fast-fail
 FAILURE_COOLDOWN = 60        # seconds a degraded client is reused before a retry
 REGISTRY_MAX_AGE = 1800      # seconds; keep below the MCP access token lifetime
 MCP_FAILURE_COOLDOWN = 120   # seconds to skip an MCP server whose handshake recently failed
@@ -252,7 +253,7 @@ def is_sentence_transformer_vectorizer(name: Optional[str], config: Optional[Dic
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
     return db.query(DBUser).filter(DBUser.username == username).first()
 
-async def get_current_db_user_from_token(
+def get_current_db_user_from_token(
     token: str = Depends(oauth2_scheme), 
     db: Session = Depends(get_db)
 ) -> DBUser:
@@ -744,6 +745,34 @@ def get_user_lollms_client(
         clients_cache[cache_key] = client
 
     return client
+
+async def async_get_user_lollms_client(
+    username: str,
+    binding_alias_override: Optional[str] = None,
+    model_name_override: Optional[str] = None,
+    load_mcp: bool = True,
+    servers_infos: Optional[Dict[str, Any]] = None,
+    llm_params: Optional[Dict[str, Any]] = None,
+) -> LollmsClient:
+    """Non-blocking variant of ``get_user_lollms_client``.
+
+    Offloads the entire client-build chain (DB reads, ``LollmsClient(...)``
+    construction, MCP probing, build-lock acquisition) to a worker thread
+    so the event loop stays free to serve unrelated UI requests.
+    """
+    return await asyncio.to_thread(
+        get_user_lollms_client,
+        username=username,
+        binding_alias_override=binding_alias_override,
+        model_name_override=model_name_override,
+        load_mcp=load_mcp,
+        servers_infos=servers_infos,
+        llm_params=llm_params,
+    )
+
+async def async_build_lollms_client_from_params(*args: Any, **kwargs: Any) -> LollmsClient:
+    """Non-blocking variant of ``build_lollms_client_from_params``."""
+    return await asyncio.to_thread(build_lollms_client_from_params, *args, **kwargs)
 
 def _build_universal_profiles_for_modality(
     db: Session,
@@ -1348,7 +1377,11 @@ def build_lollms_client_from_params(
             # Slow path: one builder per key; others wait with a timeout instead of freezing.
             build_lock = _registry_build_lock(registry_key)
             if not build_lock.acquire(timeout=BUILD_WAIT_TIMEOUT):
-                raise HTTPException(status_code=503, detail="Model engine is still loading. Retry shortly.")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Model engine is still loading. Retry shortly.",
+                    headers={"Retry-After": "5"},
+                )
             try:
                 # Another thread may have finished the build while we waited.
                 lc = _registry_get(registry_key)

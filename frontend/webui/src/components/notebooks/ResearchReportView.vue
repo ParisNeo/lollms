@@ -7,6 +7,7 @@ import { storeToRefs } from 'pinia';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
+import apiClient from '../../services/api';
 
 // Icons
 import IconPlus from '../../assets/icons/IconPlus.vue';
@@ -54,6 +55,21 @@ const sectionEditorContent = ref('');
 const reportSections = ref([]);
 const activeSection = ref(null);
 const showTableOfContents = ref(true);
+
+// --- LLM Edit Modes ---
+// 'full'  → rewrite the whole body
+// 'patch' → search/replace patches (default; cheapest, most deterministic)
+// 'soul'  → voice/style-only rewrite; facts preserved
+const editMode = ref('patch');
+const isEditing = ref(false);
+const editFailures = ref([]);       // [{ targetId, reason?, failedPatch? }]
+const soulEditApplied = ref(false);
+const undoStack = ref([]);          // [{ targetId, content }] pre-edit snapshots
+
+const SOUL_EDIT_INSTRUCTION =
+    'Rewrite the following document to change voice, tone, rhythm, and structure. ' +
+    'Do NOT alter facts, figures, names, citations, code blocks, or data tables. ' +
+    'Return the full rewritten document verbatim outside those stylistic changes.';
 
 // Standardized Active Task Lookup
 const activeTask = computed(() => {
@@ -240,8 +256,199 @@ const saveSectionEdit = () => {
     }
 };
 
+// --- LLM EDIT HELPERS ---
+
+// Resolve a target id back to the live tab or artefact object.
+function resolveTarget(targetId) {
+    if (!targetId) return null;
+    if (currentTab.value && currentTab.value.id === targetId) return currentTab.value;
+    if (typeof targetId === 'string' && targetId.startsWith('artefact:')) {
+        const filename = targetId.slice('artefact:'.length);
+        return props.notebook.artefacts?.find(a => a.filename === filename) || null;
+    }
+    return null;
+}
+
+// Build the structured edit payload. Originals are ALWAYS read from the
+// persisted body — never from a previous LLM output — so consecutive edits
+// always diff against ground truth.
+function buildEditPayload(mode) {
+    const targets = [];
+    if (currentTab.value) {
+        targets.push({
+            id: currentTab.value.id,
+            name: currentTab.value.title || 'Report',
+            originalContent: currentTab.value.content || ''
+        });
+    }
+    for (const name of selectedArtefactNames.value) {
+        const art = props.notebook.artefacts?.find(a => a.filename === name);
+        if (art) {
+            targets.push({
+                id: `artefact:${art.filename}`,
+                name: art.filename,
+                originalContent: art.content || ''
+            });
+        }
+    }
+    const payload = {
+        editMode: mode,
+        targets,
+        instruction: aiPrompt.value
+    };
+    if (mode === 'soul') {
+        payload.soulInstruction = SOUL_EDIT_INSTRUCTION;
+    }
+    return payload;
+}
+
+// Apply the structured LLM response. Atomic per-target: any patch that fails
+// to match EXACTLY once aborts the whole target rather than corrupting it.
+function applyEditResult(raw, mode) {
+    const results = Array.isArray(raw?.results) ? raw.results : (raw ? [raw] : []);
+    const appliedIds = [];
+    const failures = [];
+
+    for (const targetResult of results) {
+        const artefact = resolveTarget(targetResult.id);
+        if (!artefact) {
+            failures.push({ targetId: targetResult.id, reason: 'Target not found' });
+            continue;
+        }
+
+        if (mode === 'patch') {
+            let working = artefact.content || '';
+            const failed = [];
+            for (const patch of (targetResult.patches || [])) {
+                if (typeof patch.search !== 'string' || typeof patch.replace !== 'string') {
+                    failed.push({ search: String(patch.search ?? '?'), reason: 'Malformed patch entry' });
+                    break;
+                }
+                const parts = working.split(patch.search);
+                if (parts.length !== 2) {
+                    failed.push({
+                        search: patch.search,
+                        reason: `Search matched ${parts.length - 1} times (needs exactly 1)`
+                    });
+                    break;
+                }
+                working = parts[0] + patch.replace + parts[1];
+            }
+            if (failed.length) {
+                failures.push({ targetId: targetResult.id, failedPatch: failed });
+                continue;
+            }
+            if (working === (artefact.content || '')) {
+                failures.push({ targetId: targetResult.id, reason: 'Patch produced no change' });
+                continue;
+            }
+            artefact.content = working;
+            appliedIds.push(targetResult.id);
+        } else {
+            // 'full' or 'soul'
+            const newContent = targetResult.content;
+            if (typeof newContent !== 'string' || !newContent.trim()) {
+                failures.push({ targetId: targetResult.id, reason: 'Empty or non-string content' });
+                continue;
+            }
+            undoStack.value.push({ targetId: targetResult.id, content: artefact.content || '' });
+            artefact.content = newContent;
+            appliedIds.push(targetResult.id);
+        }
+    }
+
+    // Refresh section tree if the current tab was edited.
+    if (appliedIds.includes(currentTab.value?.id) && currentTab.value?.content) {
+        reportSections.value = parseReportSections(currentTab.value.content);
+        if (reportSections.value.length && !activeSection.value) {
+            activeSection.value = reportSections.value[0].id;
+        }
+    }
+
+    if (failures.length) {
+        editFailures.value = failures;
+        const lines = failures.map(f => {
+            if (f.failedPatch) {
+                const p = f.failedPatch[0];
+                return `Patch failed on "${f.targetId}": ${p.reason} → "${String(p.search).slice(0, 60)}…"`;
+            }
+            return `Edit failed on "${f.targetId}": ${f.reason}`;
+        });
+        uiStore.addNotification(lines.join('\n'), 'error');
+    }
+
+    return { appliedIds, failures };
+}
+
+async function dispatchAiEdit(mode) {
+    if (!aiPrompt.value.trim() && !selectedArtefactNames.value.length) {
+        uiStore.addNotification('Enter an edit instruction or select at least one source.', 'warning');
+        return;
+    }
+    if (!currentTab.value && !selectedArtefactNames.value.length) {
+        uiStore.addNotification('Nothing to edit — open a tab or select sources.', 'warning');
+        return;
+    }
+
+    isEditing.value = true;
+    editFailures.value = [];
+    try {
+        const payload = buildEditPayload(mode);
+        const response = await apiClient.post(
+            `/notebooks/${props.notebook.id}/ai_edit`,
+            payload
+        );
+        const { appliedIds } = applyEditResult(response.data, mode);
+        if (appliedIds.length) {
+            await notebookStore.saveActive?.();
+            aiPrompt.value = '';
+        }
+        // Set the soul chip AFTER clearing aiPrompt so the watcher guard (which
+        // only fires on non-empty values) doesn't immediately erase it.
+        if (mode === 'soul' && appliedIds.length) {
+            soulEditApplied.value = true;
+        }
+    } catch (e) {
+        if (e?.response?.status === 404) {
+            uiStore.addNotification(
+                'AI edit endpoint missing on the backend. Restart the server after applying the backend patches.',
+                'error'
+            );
+        } else {
+            const msg = e?.response?.data?.detail || e?.message || 'AI edit failed.';
+            uiStore.addNotification(msg, 'error');
+        }
+    } finally {
+        isEditing.value = false;
+    }
+}
+
+function undoLastEdit() {
+    const last = undoStack.value.pop();
+    if (!last) return;
+    const target = resolveTarget(last.targetId);
+    if (!target) return;
+    target.content = last.content;
+    if (last.targetId === currentTab.value?.id && currentTab.value?.content) {
+        reportSections.value = parseReportSections(currentTab.value.content);
+    }
+    soulEditApplied.value = false;
+    uiStore.addNotification('Undo applied.', 'info');
+}
+
+// Clear the "Soul edit applied" chip only when the user actually types a new
+// instruction (not on our own programmatic `aiPrompt.value = ''` reset).
+watch(aiPrompt, (val) => {
+    if (val && soulEditApplied.value) soulEditApplied.value = false;
+});
+
 // --- AI ACTIONS ---
 async function handleAction(actionType) {
+    if (actionType === 'edit') {
+        await dispatchAiEdit(editMode.value);
+        return;
+    }
+
     const target = modifyCurrentTab.value ? activeTabId.value : null;
     let prompt = aiPrompt.value;
 
@@ -433,6 +640,71 @@ const scrollToSection = (sectionId) => {
 
 <template>
     <div class="h-full flex overflow-hidden bg-gray-50 dark:bg-gray-950 relative">
+        <!-- AI EDIT MODE FLOATING TOOLBAR -->
+        <div
+            v-if="(modifyCurrentTab || selectedArtefactNames.length > 0) && currentTab && !activeTask"
+            class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-3 py-1.5 bg-white/95 dark:bg-gray-800/95 backdrop-blur rounded-full shadow-lg border border-gray-200 dark:border-gray-700"
+        >
+            <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500">Edit</span>
+            <div class="flex rounded-md overflow-hidden border border-gray-200 dark:border-gray-600">
+                <button
+                    v-for="mode in ['full', 'patch', 'soul']"
+                    :key="mode"
+                    type="button"
+                    @click="editMode = mode"
+                    class="px-2 py-1 text-[11px] font-semibold uppercase tracking-wide transition-colors"
+                    :class="editMode === mode
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
+                    :title="mode === 'full' ? 'Full document rewrite'
+                        : mode === 'patch' ? 'Search/replace patches'
+                        : 'Style-only rewrite (facts preserved)'"
+                >
+                    {{ mode === 'full' ? 'Full' : mode === 'patch' ? 'Patch' : 'Soul' }}
+                </button>
+            </div>
+            <input
+                v-model="aiPrompt"
+                type="text"
+                placeholder="Describe the edit…"
+                class="w-64 px-2 py-1 text-xs rounded border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+            <button
+                type="button"
+                @click="handleAction('edit')"
+                :disabled="isEditing || !aiPrompt.trim()"
+                class="px-3 py-1 text-xs font-semibold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+            >
+                <IconAnimateSpin v-if="isEditing" class="w-3.5 h-3.5 animate-spin inline-block mr-1" />
+                <IconCheckCircle v-else class="w-3.5 h-3.5 inline-block mr-1" />
+                {{ isEditing ? 'Editing…' : 'Apply' }}
+            </button>
+            <button
+                v-if="undoStack.length > 0 && !isEditing"
+                type="button"
+                @click="undoLastEdit"
+                class="px-2 py-1 text-[11px] font-semibold rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600"
+                title="Undo last edit"
+            >
+                Undo
+            </button>
+            <span
+                v-if="soulEditApplied"
+                class="inline-flex items-center gap-1 text-[11px] font-semibold text-purple-600 dark:text-purple-400"
+            >
+                <IconSparkles class="w-3 h-3" /> Soul edit applied
+            </span>
+            <button
+                v-if="editFailures.length > 0"
+                type="button"
+                @click="editFailures = []"
+                class="p-1 rounded text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40"
+                title="Dismiss patch failures"
+            >
+                <IconXMark class="w-3.5 h-3.5" />
+            </button>
+        </div>
+
         <!-- PRODUCTION CONSOLE OVERLAY -->
         <transition enter-active-class="transition ease-out duration-300" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition ease-in duration-200" leave-from-class="opacity-100" leave-to-class="opacity-0">
             <div v-if="activeTask" class="absolute inset-0 z-50 bg-white/95 dark:bg-gray-900/95 backdrop-blur-md flex flex-col p-10">

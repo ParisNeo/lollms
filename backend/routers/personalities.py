@@ -44,6 +44,8 @@ from backend.personalities import (
     _safe_resolve,
     ensure_personality_roots,
     ensure_default_lollms_handbag,
+    write_handbag_skill, write_handbag_tool, copy_skill_from_library, export_skill_to_library,
+    _data_root,
 )
 from backend.db.models.personality_share import PersonalityShareLink, UserPersonalityPreference
 from backend.models.personality import (
@@ -79,6 +81,7 @@ class HandbagCreate(BaseModel):
     author: Optional[str] = None
     category: Optional[str] = None
     prompt_text: Optional[str] = None
+    icon_base64: Optional[str] = None
     scope: str = "personal"  # 'personal' | 'global' (global requires admin)
 
 class HandbagUpdate(BaseModel):
@@ -87,6 +90,25 @@ class HandbagUpdate(BaseModel):
     author: Optional[str] = None
     category: Optional[str] = None
     prompt_text: Optional[str] = None
+    icon_base64: Optional[str] = None
+
+class SkillCreate(BaseModel):
+    name: str
+    content: str
+
+class SkillFromLibrary(BaseModel):
+    name: str
+
+class ToolUpdate(BaseModel):
+    content: str
+
+class GenerateSkillRequest(BaseModel):
+    prompt: str
+    existing_content: Optional[str] = None
+
+class GenerateToolRequest(BaseModel):
+    prompt: str
+    existing_content: Optional[str] = None
 
 def _generate_personality_task(task: Task, username: str, prompt_text: str):
     task.log("Starting personality generation...")
@@ -648,8 +670,12 @@ def create_handbag(payload: HandbagCreate,
     if path is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Invalid personality name")
-    if payload.display_name:
-        write_handbag_files(path, display_name=payload.display_name)
+    if payload.display_name or payload.icon_base64:
+        write_handbag_files(
+            path,
+            display_name=payload.display_name,
+            icon_base64=payload.icon_base64,
+        )
     return {"handbag_name": slug, "scope": payload.scope}
 
 
@@ -681,6 +707,7 @@ def update_handbag(scope: str, handbag_name: str, payload: HandbagUpdate,
         author=payload.author,
         category=payload.category,
         prompt_text=payload.prompt_text,
+        icon_base64=payload.icon_base64,
     )
     return {"handbag_name": handbag_name, "scope": scope, "updated": True}
 
@@ -698,6 +725,130 @@ def remove_handbag(scope: str, handbag_name: str,
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail="Handbag not found")
+
+
+@personalities_router.get("/studio/handbags/{scope}/{handbag_name}/tools/{filename}")
+def get_handbag_tool(
+    scope: str, handbag_name: str, filename: str,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
+):
+    path = resolve_handbag_path(scope, handbag_name, db_user, db=db)
+    if not path:
+        raise HTTPException(status_code=404, detail="Handbag not found")
+    tool_file = path / "tools" / filename
+    if not tool_file.is_file() or not tool_file.name.endswith(".py"):
+        raise HTTPException(status_code=404, detail="Tool not found")
+    return {"content": tool_file.read_text(encoding="utf-8")}
+
+
+@personalities_router.put("/studio/handbags/{scope}/{handbag_name}/tools/{filename}")
+def update_handbag_tool(
+    scope: str, handbag_name: str, filename: str, payload: ToolUpdate,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
+):
+    path = _studio_write_path(scope, handbag_name, db_user, db)
+    write_handbag_tool(path, filename, payload.content)
+    return {"status": "ok", "filename": filename}
+
+
+@personalities_router.get("/studio/handbags/{scope}/{handbag_name}/skills/{skill_name}")
+def get_handbag_skill(
+    scope: str, handbag_name: str, skill_name: str,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
+):
+    path = resolve_handbag_path(scope, handbag_name, db_user, db=db)
+    if not path:
+        raise HTTPException(status_code=404, detail="Handbag not found")
+    skill_file = path / "skills" / skill_name
+    if not skill_file.exists():
+        skill_file = path / "skills" / f"{skill_name}.md"
+    if not skill_file.is_file():
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return {"content": skill_file.read_text(encoding="utf-8")}
+
+
+@personalities_router.post("/studio/handbags/{scope}/{handbag_name}/skills")
+def create_handbag_skill(
+    scope: str, handbag_name: str, payload: SkillCreate,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
+):
+    path = _studio_write_path(scope, handbag_name, db_user, db)
+    write_handbag_skill(path, payload.name, payload.content)
+    return {"status": "ok", "name": payload.name}
+
+
+@personalities_router.post("/studio/handbags/{scope}/{handbag_name}/skills/from-library")
+def add_skill_from_library(
+    scope: str, handbag_name: str, payload: SkillFromLibrary,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
+):
+    path = _studio_write_path(scope, handbag_name, db_user, db)
+    lib_root = _data_root() / "skills"
+    try:
+        copy_skill_from_library(path, payload.name, lib_root)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "ok", "name": payload.name}
+
+
+@personalities_router.post("/studio/handbags/{scope}/{handbag_name}/skills/{skill_name}/to-library")
+def add_skill_to_library(
+    scope: str, handbag_name: str, skill_name: str,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
+):
+    path = _studio_write_path(scope, handbag_name, db_user, db)
+    lib_root = _data_root() / "skills"
+    try:
+        export_skill_to_library(path, skill_name, lib_root)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "ok", "name": skill_name}
+
+
+@personalities_router.post("/studio/generate_skill")
+def generate_skill_endpoint(
+    payload: GenerateSkillRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    try:
+        lc = build_lollms_client_from_params(username=current_user.username)
+        prompt = f"Create a skill definition based on this description:\n{payload.prompt}\n"
+        if payload.existing_content:
+            prompt = f"Modify and improve this existing skill based on instructions:\n{payload.prompt}\n\nOriginal Skill:\n{payload.existing_content}"
+        prompt += "\nOutput ONLY the raw markdown content of the skill without any conversational intro or markdown fences."
+        content = lc.generate_text(prompt, max_new_tokens=2048)
+        content = re.sub(r"^```[a-zA-Z]*\n", "", content)
+        content = re.sub(r"\n```$", "", content)
+        return {"content": content.strip()}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@personalities_router.post("/studio/generate_tool")
+def generate_tool_endpoint(
+    payload: GenerateToolRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    try:
+        lc = build_lollms_client_from_params(username=current_user.username)
+        prompt = f"Create a Python LCP tool based on this description:\n{payload.prompt}\n"
+        if payload.existing_content:
+            prompt = f"Modify and improve this existing LCP tool based on instructions:\n{payload.prompt}\n\nOriginal Tool:\n{payload.existing_content}"
+        prompt += "\n\nOutput ONLY the raw Python code without any conversational intro or markdown fences."
+        content = lc.generate_text(prompt, max_new_tokens=2048)
+        content = re.sub(r"^```[a-zA-Z]*\n", "", content)
+        content = re.sub(r"\n```$", "", content)
+        return {"content": content.strip()}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @personalities_router.post("/studio/upload", status_code=status.HTTP_201_CREATED)

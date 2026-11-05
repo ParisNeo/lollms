@@ -440,15 +440,44 @@ def read_handbag_detail(path: Path) -> Dict[str, Any]:
     manifest = _load_manifest(path)
     soul_file = path / "SOUL.md"
     icon_data = _read_handbag_icon(path)
+    
+    # Scan directories
+    skills = []
+    if (path / "skills").is_dir():
+        for s in sorted((path / "skills").iterdir()):
+            if s.name.startswith("."): continue
+            skills.append(s.name)
+            
+    tools = []
+    if (path / "tools").is_dir():
+        for t in sorted((path / "tools").glob("*.py")):
+            if t.is_file() and not t.name.startswith("."):
+                tools.append(t.name)
+                
+    databases = []
+    if (path / "rag").is_dir():
+        for r in sorted((path / "rag").iterdir()):
+            if not r.name.startswith("."):
+                databases.append(r.name)
+
     return {
         "name": manifest.get("name") or path.name,
+        "handbag_name": path.name,
         "description": manifest.get("description", ""),
         "author": manifest.get("author", ""),
         "category": manifest.get("category", ""),
         "version": str(manifest.get("version")) if manifest.get("version") is not None else None,
         "icon": icon_data,
-        "icon_base64": icon_data,  # alias for legacy consumers (studio modal, list view)
+        "icon_base64": icon_data,
         "prompt_text": soul_file.read_text(encoding="utf-8") if soul_file.is_file() else "",
+        "has_soul": soul_file.is_file(),
+        "has_tools": len(tools) > 0,
+        "has_rag": len(databases) > 0,
+        "has_docs": (path / "docs").is_dir() and any((path / "docs").iterdir()),
+        "has_skills": len(skills) > 0,
+        "skills": skills,
+        "tools": tools,
+        "databases": databases,
     }
 
 
@@ -485,6 +514,76 @@ def write_handbag_files(path: Path, *, display_name: Optional[str] = None,
             (path / "icon.png").write_bytes(_b64.b64decode(payload))
         except Exception as exc:
             ASCIIColors.warning(f"[personalities] cannot write icon for {path}: {exc}")
+
+
+def write_handbag_skill(path: Path, skill_name: str, content: str) -> Path:
+    """Write a skill to the handbag's skills/ directory."""
+    if not path.is_dir():
+        raise ValueError(f"Not a handbag folder: {path}")
+    skills_dir = path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", skill_name)
+    if not safe_name.endswith(".md"):
+        safe_name += ".md"
+    target = skills_dir / safe_name
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
+def write_handbag_tool(path: Path, filename: str, content: str) -> Path:
+    """Write an LCP tool to the handbag's tools/ directory."""
+    if not path.is_dir():
+        raise ValueError(f"Not a handbag folder: {path}")
+    tools_dir = path / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", filename)
+    if not safe_name.endswith(".py"):
+        safe_name += ".py"
+    target = tools_dir / safe_name
+    target.write_text(content, encoding="utf-8")
+    return target
+
+
+def copy_skill_from_library(path: Path, skill_name: str, library_root: Path) -> Path:
+    """Copy a skill from the global library to the handbag."""
+    if not path.is_dir():
+        raise ValueError(f"Not a handbag folder: {path}")
+    source = library_root / skill_name
+    if not source.exists():
+        source = library_root / f"{skill_name}.md"
+    if not source.exists():
+        raise ValueError(f"Skill not found in library: {skill_name}")
+    skills_dir = path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    target = skills_dir / source.name
+    if source.is_dir():
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target)
+    else:
+        shutil.copy2(source, target)
+    return target
+
+
+def export_skill_to_library(path: Path, skill_name: str, library_root: Path) -> Path:
+    """Export a skill from the handbag to the global library."""
+    if not path.is_dir():
+        raise ValueError(f"Not a handbag folder: {path}")
+    source_dir = path / "skills"
+    source = source_dir / skill_name
+    if not source.exists():
+        source = source_dir / f"{skill_name}.md"
+    if not source.exists():
+        raise ValueError(f"Skill not found in handbag: {skill_name}")
+    library_root.mkdir(parents=True, exist_ok=True)
+    target = library_root / source.name
+    if source.is_dir():
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target)
+    else:
+        shutil.copy2(source, target)
+    return target
 
 
 def delete_handbag(root: Path, name: str) -> None:

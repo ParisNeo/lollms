@@ -22,7 +22,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     username = "unknown"
     
     try:
-        user = await get_current_db_user_from_token(token=token, db=db)
+        user = get_current_db_user_from_token(token=token, db=db)
         if not user or not user.is_active:
             ASCIIColors.panel(f"[orange][WebSocket] Authentication failed or user inactive for token: ...{token[-6:]}[/orange]")
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

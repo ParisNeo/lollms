@@ -744,7 +744,10 @@ async function handleRefreshModels() {
                                             :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:!text-blue-300 font-bold': activePersona?.handbag_name === item.handbag_name && activePersona?.scope === item.scope}"
                                         >
                                             <div class="flex items-center gap-2 truncate">
-                                                <IconUserCircle class="h-5 w-5 text-gray-400" />
+                                                <div class="w-5 h-5 rounded overflow-hidden shrink-0 border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                                                    <img v-if="item.icon_base64 || item.icon" :src="item.icon_base64 || item.icon" class="w-full h-full object-cover" :alt="item.name" />
+                                                    <IconUserCircle v-else class="w-4 h-4 text-gray-400" />
+                                                </div>
                                                 <span class="truncate">{{ item.name }}</span>
                                             </div>
                                             <IconCheckCircle v-if="activePersona?.handbag_name === item.handbag_name && activePersona?.scope === item.scope" class="w-4 h-4 text-emerald-500 shrink-0" />

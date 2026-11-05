@@ -525,8 +525,10 @@ async def list_personalities(user: DBUser = Depends(get_user_for_lollms_service)
 
 @lollms_v1_router.post("/tokenize", response_model=TokenizeResponse)
 async def tokenize_text(request: TokenizeRequest, user: DBUser = Depends(get_user_for_lollms_service), db: Session = Depends(get_db)):
-    binding_alias, model_name = resolve_model_name(db, request.model)
     loop = asyncio.get_running_loop()
+    binding_alias, model_name = await loop.run_in_executor(
+        executor, lambda: resolve_model_name(db, request.model)
+    )
     
     def _tokenize():
         lc = build_lollms_client_from_params(user.username, binding_alias, model_name, load_mcp=False)
@@ -537,8 +539,10 @@ async def tokenize_text(request: TokenizeRequest, user: DBUser = Depends(get_use
 
 @lollms_v1_router.post("/detokenize", response_model=DetokenizeResponse)
 async def detokenize_tokens(request: DetokenizeRequest, user: DBUser = Depends(get_user_for_lollms_service), db: Session = Depends(get_db)):
-    binding_alias, model_name = resolve_model_name(db, request.model)
     loop = asyncio.get_running_loop()
+    binding_alias, model_name = await loop.run_in_executor(
+        executor, lambda: resolve_model_name(db, request.model)
+    )
     
     def _detokenize():
         lc = build_lollms_client_from_params(user.username, binding_alias, model_name, load_mcp=False)
@@ -592,11 +596,12 @@ async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(g
 
 @lollms_v1_router.post("/long_context_process")
 async def process_long_context(request: LongContextRequest, user: DBUser = Depends(get_user_for_lollms_service), db: Session = Depends(get_db)):
+    loop = asyncio.get_running_loop()
     binding_alias, model_name = None, None
     if request.model:
-        binding_alias, model_name = resolve_model_name(db, request.model)
-    
-    loop = asyncio.get_running_loop()
+        binding_alias, model_name = await loop.run_in_executor(
+            executor, lambda: resolve_model_name(db, request.model)
+        )
     
     def _process():
         lc = build_lollms_client_from_params(user.username, binding_alias, model_name, load_mcp=False)

@@ -1,4 +1,5 @@
 # Standard Library Imports
+import asyncio
 import uuid
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -36,7 +37,7 @@ def build_core_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         try:
-            lc = get_user_lollms_client(current_user.username)
+            lc = await asyncio.to_thread(get_user_lollms_client, current_user.username)
             if not lc:
                 raise HTTPException(status_code=503, detail="LLM service not available.")
 
@@ -278,14 +279,16 @@ def build_core_router(router: APIRouter):
             "COMPRESSED SUMMARY (as a message from the user):"
         )
 
-        lc = get_user_lollms_client(current_user.username)
+        lc = await asyncio.to_thread(get_user_lollms_client, current_user.username)
         if not lc:
             raise HTTPException(status_code=503, detail="LLM service not available for this user.")
 
-        summary_response: str = lc.generate_text(
-            compression_prompt,
-            max_new_tokens=2000,
-            temperature=0.3
+        summary_response: str = await asyncio.to_thread(
+            lambda: lc.generate_text(
+                compression_prompt,
+                max_new_tokens=2000,
+                temperature=0.3,
+            )
         )
 
         if not summary_response or not summary_response.strip():

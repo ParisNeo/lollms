@@ -73,6 +73,7 @@ from backend.session import (get_current_active_user,
                              get_safe_store_instance,
                              get_user_discussion_assets_path,
                              get_user_lollms_client,
+                             async_get_user_lollms_client,
                              get_user_temp_uploads_path, user_sessions,
                              build_lollms_client_from_params,
                              reset_client_state,
@@ -1312,7 +1313,7 @@ def build_llm_generation_router(router: APIRouter):
         else:
             mcp_servers_infos = {}
 
-        lc = get_user_lollms_client(
+        lc = await async_get_user_lollms_client(
             username=owner_username,
             binding_alias_override=binding_alias,
             model_name_override=target_model,
@@ -2790,10 +2791,17 @@ def build_llm_generation_router(router: APIRouter):
         if stop_event and isinstance(stop_event, threading.Event):
             stop_event.set()
 
+        # Fast-fail cancel: touch only already-cached clients so the Stop button
+        # never blocks behind a cold model build. The stop_event set above is
+        # the primary cancellation signal.
         try:
-            lc = get_user_lollms_client(username)
-            cancel_client_generation(lc)
+            clients_cache = (user_sessions.get(username) or {}).get("lollms_clients_cache", {})
+            for cached_lc in list(clients_cache.values()):
+                try:
+                    cancel_client_generation(cached_lc)
+                except Exception as inner:
+                    print(f"Warning: cancel_client_generation failed: {inner}")
         except Exception as e:
-            print(f"Warning: Failed to cancel generation on lollms_client: {e}")
+            print(f"Warning: Failed to enumerate cached clients for cancel: {e}")
 
         return {"message": "Stop signal sent."}

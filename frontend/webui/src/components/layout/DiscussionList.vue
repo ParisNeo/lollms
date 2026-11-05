@@ -353,8 +353,19 @@ const filteredPublicPersonalities = computed(() => {
 });
 
 async function handleSelectPersonality(personality) {
-    if (!personality) return;
-    await authStore.updateUserPreferences({ active_personality_id: personality.id });
+    if (!personality || !personality.handbag_name) return;
+    // Persist the active persona via the handbag preference endpoint (the
+    // legacy `users.active_personality_id` column is no longer read by the
+    // Studio or the GlobalHeader selector). Then navigate; the Studio's
+    // onMounted hydration picks the freshly-set preference up automatically.
+    const payload = { scope: personality.scope, handbag_name: personality.handbag_name };
+    if (personality.scope === 'shared') payload.owner_id = personality.owner_id ?? null;
+    try {
+        await apiClient.put('/api/personalities/preference', payload);
+    } catch (e) {
+        uiStore.addNotification('Failed to set active personality.', 'error');
+        return;
+    }
     if (!route.path.startsWith('/personality-studio')) {
         router.push('/personality-studio');
     }

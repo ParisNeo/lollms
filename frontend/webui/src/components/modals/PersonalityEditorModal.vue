@@ -1,417 +1,202 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
-import { storeToRefs } from 'pinia';
-import GenericModal from './GenericModal.vue';
-import apiClient from '../../services/api';
-import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
-import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
-import { useUiStore } from '../../stores/ui';
-import { useDataStore } from '../../stores/data';
-import { useAuthStore } from '../../stores/auth';
-import { useTasksStore } from '../../stores/tasks';
-import useEventBus from '../../services/eventBus';
-import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
+import { ref, computed, watch } from 'vue';
+import apiClient from '@/services/api';
+import { useUiStore } from '@/stores/ui';
+import { useAuthStore } from '@/stores/auth';
 
-const uiStore = useUiStore();
-const dataStore = useDataStore();
-const authStore = useAuthStore();
-const tasksStore = useTasksStore();
-const { on, off } = useEventBus();
-
-const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
-
-const props = defineProps({ personality: { type: Object, default: null } });
+const props = defineProps({
+  personality: { type: Object, default: null }
+});
 const emit = defineEmits(['close', 'saved']);
 
-const modalProps = computed(() => uiStore.modalData('personalityEditor'));
-const personality = computed(() => props.personality || modalProps.value?.personality);
+const uiStore = useUiStore();
+const authStore = useAuthStore();
 
-const getInitialFormState = () => ({
-    id: null, name: '', category: '', author: '', description: '',
-    prompt_text: '', disclaimer: '', script_code: '', icon_base64: null,
-    is_public: false, data_source_type: 'none', data_source: null, tools: [],
-    required_context_options: [], // NEW
-    owner_type: 'user'
+const isEditing = computed(() => Boolean(props.personality?.handbag_name));
+
+const form = ref({
+  name: '',
+  display_name: '',
+  description: '',
+  author: '',
+  category: '',
+  prompt_text: '',
+  icon_base64: null,
+  scope: 'personal',
 });
 
-const form = ref(getInitialFormState());
-// A handbag-backed row has no numeric `id` — only `handbag_name` + `scope`.
-// Both must count as "editing" so the header does not say "Create" while the
-// user is modifying an existing personality on disk.
-const isEditing = computed(() => Boolean(form.value.id || form.value.handbag_name));
-const fileInput = ref(null);
-const staticTextInputRef = ref(null);
+watch(() => props.personality, (p) => {
+  if (p) {
+    form.value = {
+      name: p.handbag_name || '',
+      display_name: p.name || p.display_name || '',
+      description: p.description || '',
+      author: p.author || '',
+      category: p.category || '',
+      prompt_text: p.prompt_text || '',
+      icon_base64: p.icon || null,
+      scope: p.scope || 'personal',
+    };
+  } else {
+    form.value = {
+      name: '', display_name: '', description: '', author: '',
+      category: '', prompt_text: '', icon_base64: null, scope: 'personal',
+    };
+  }
+}, { immediate: true });
+
 const isLoading = ref(false);
-const isLoadingIcon = ref(false);
-const formIconLoadFailed = ref(false);
-const activeIconTask = ref(null);
 
-const contextOptionChoices = [
-    { id: 'image_generation', name: 'Image Generation' },
-    { id: 'image_editing', name: 'Image Editing' },
-    { id: 'slide_maker', name: 'Office tools' },
-    { id: 'note_generation', name: 'Note Generation' },
-    { id: 'memory', name: 'Long-Term Memory' },
-    { id: 'inline_widgets', name: 'Widget Building' }
-];
+function describeError(e) {
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === 'string' && detail) return detail;
+  if (detail) return JSON.stringify(detail);
+  if (e?.message) return e.message;
+  return null;
+}
 
-// Helper for multi-select - passing flat array directly to fix rendering issue
-const formattedContextOptions = computed(() => {
-    return contextOptionChoices;
-});
+function onFileChange(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    uiStore.addNotification('Please select an image file.', 'warning');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => { form.value.icon_base64 = reader.result; };
+  reader.readAsDataURL(file);
+}
 
-watch(() => form.value.icon_base64, () => {
-    formIconLoadFailed.value = false;
-});
-
-watch(() => personality.value, (newVal) => {
-    if (newVal) {
-        form.value = { ...getInitialFormState(), ...newVal };
-        // Ensure array
-        if (!form.value.required_context_options) form.value.required_context_options = [];
+async function submit() {
+  if (!isEditing.value && !form.value.name.trim()) {
+    uiStore.addNotification('Name is required for a new personality.', 'warning');
+    return;
+  }
+  isLoading.value = true;
+  try {
+    if (isEditing.value) {
+      await apiClient.put(
+        `/api/personalities/studio/handbags/${form.value.scope}/${encodeURIComponent(form.value.name)}`,
+        {
+          display_name: form.value.display_name,
+          description: form.value.description,
+          author: form.value.author,
+          category: form.value.category,
+          prompt_text: form.value.prompt_text,
+          icon_base64: form.value.icon_base64,
+        }
+      );
     } else {
-        form.value = getInitialFormState();
-    }
-}, { immediate: true, deep: true });
-
-onMounted(() => {
-    if(dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
-    if(dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
-    on('task:completed', handleTaskCompleted);
-});
-
-onUnmounted(() => {
-    off('task:completed', handleTaskCompleted);
-});
-
-function handleTaskCompleted(task) {
-    if (activeIconTask.value && task.id === activeIconTask.value) {
-        let result = task.result;
-        // Safe parsing of result if it's a string
-        if (typeof result === 'string') {
-            try {
-                result = JSON.parse(result);
-            } catch (e) {
-                console.error("Failed to parse task result JSON", e);
-            }
-        }
-
-        if (task.status === 'completed' && result?.icon_base64) {
-            // FORCE reactivity update by creating a new object
-            form.value = { ...form.value, icon_base64: result.icon_base64 };
-            formIconLoadFailed.value = false;
-            uiStore.addNotification('Icon generated. Don\'t forget to save!', 'success');
-        } else if (task.status === 'failed') {
-             uiStore.addNotification('Icon generation failed.', 'error');
-        }
-        isLoadingIcon.value = false;
-        activeIconTask.value = null;
-    }
-}
-
-watch(() => form.value.data_source_type, (newType, oldType) => {
-    if (newType !== oldType) {
-        form.value.data_source = null;
-    }
-});
-
-
-function handleClose() {
-    // Visibility is controlled by the parent (v-if + @close). The previous
-    // `uiStore.closeModal('personalityEditor')` could never fire because the
-    // modal is never opened through uiStore.openModal — no state to close.
-    emit('close');
-}
-
-async function handleSubmit() {
-    isLoading.value = true;
-    try {
-        if (form.value.handbag_name && form.value.scope) {
-            // Handbag-backed personality: update manifest + SOUL.md on disk.
-            await apiClient.put(
-                `/api/personalities/studio/handbags/${form.value.scope}/${encodeURIComponent(form.value.handbag_name)}`,
-                {
-                    display_name: form.value.name,
-                    description: form.value.description,
-                    author: form.value.author,
-                    category: form.value.category,
-                    prompt_text: form.value.prompt_text,
-                });
-            uiStore.addNotification('Personality handbag updated.', 'success');
-            emit('saved');
-        } else if (form.value.id) {
-            // Legacy DB personality (will be bridged to a handbag on next catalog load).
-            await dataStore.updatePersonality(form.value);
-        } else {
-            await dataStore.addPersonality(form.value);
-        }
-        handleClose();
-    } catch (e) {
-        const detail = e?.response?.data?.detail;
-        const message = typeof detail === 'string' && detail
-            ? detail
-            : (detail ? JSON.stringify(detail) : (e?.message || 'Failed to save personality.'));
-        uiStore.addNotification(message, 'error');
-        // eslint-disable-next-line no-console
-        console.error('[PersonalityEditorModal] save failed', e);
-    } finally {
-        isLoading.value = false;
-    }
-}
-
-function handleEnhancePrompt() {
-    if (!form.value.prompt_text) {
-        uiStore.addNotification('Please provide a base prompt to enhance.', 'warning');
-        return;
-    }
-    uiStore.openModal('enhancePersonalityPrompt', {
+      await apiClient.post('/api/personalities/studio/handbags', {
+        name: form.value.name,
+        display_name: form.value.display_name || form.value.name,
+        description: form.value.description,
+        author: form.value.author,
+        category: form.value.category,
         prompt_text: form.value.prompt_text,
-        onApply: (enhancedPrompt) => {
-            form.value.prompt_text = enhancedPrompt;
-        }
-    });
-}
-
-async function handleGenerateIcon() {
-    isLoadingIcon.value = true;
-    try {
-        const name = form.value.name || 'AI Assistant';
-        const category = form.value.category || 'General';
-        // Take first 100 chars of description to avoid huge prompts, remove newlines
-        const desc = form.value.description ? form.value.description.replace(/\n/g, ' ').slice(0, 150) : 'helpful AI assistant';
-        
-        // Construct a richer prompt that provides context to the image generator
-        const prompt = `Profile icon/avatar of ${name}, ${category}. ${desc}. High quality digital art, centered, smooth, professional style.`;
-
-        const task = await dataStore.generatePersonalityIcon(prompt);
-        if (task) {
-            activeIconTask.value = task.id;
-        } else {
-            isLoadingIcon.value = false;
-        }
-    } catch (e) {
-        isLoadingIcon.value = false;
+        icon_base64: form.value.icon_base64,
+        scope: form.value.scope,
+      });
     }
-}
-
-function triggerFileInput() {
-    fileInput.value.click();
-}
-
-function handleFileSelect(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
-    if (!allowedTypes.includes(file.type)) {
-        uiStore.addNotification('Invalid file type. Please select an image.', 'error');
-        return;
-    }
-    
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-            const MAX_WIDTH = 128; const MAX_HEIGHT = 128;
-            let width = img.width, height = img.height;
-
-            if (width > height) {
-                if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-            } else {
-                if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
-            }
-
-            const canvas = document.createElement('canvas');
-            canvas.width = width; canvas.height = height;
-            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-            form.value.icon_base64 = canvas.toDataURL('image/png');
-        };
-        img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-    event.target.value = '';
-}
-
-function triggerStaticTextImport() {
-    staticTextInputRef.value?.click();
-}
-
-function handleStaticTextFileSelect(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        form.value.data_source = e.target.result;
-        uiStore.addNotification(`Imported text from ${file.name}`, 'success');
-    };
-    reader.onerror = (e) => {
-        uiStore.addNotification(`Error reading file: ${e.target.error.name}`, 'error');
-    };
-    reader.readAsText(file);
-    event.target.value = '';
-}
-
-async function handleExport() {
-    if (!form.value.id) return;
-    await dataStore.exportPersonality(form.value.id);
+    uiStore.addNotification(isEditing.value ? 'Personality updated.' : 'Personality created.', 'success');
+    emit('saved');
+    emit('close');
+  } catch (e) {
+    uiStore.addNotification(describeError(e) || 'Save failed.', 'error');
+  } finally {
+    isLoading.value = false;
+  }
 }
 </script>
 
 <template>
-  <GenericModal :title="isEditing ? 'Edit Personality' : 'Create Personality'" maxWidthClass="max-w-4xl">
-    <template #body>
-      <form v-if="personality" @submit.prevent="handleSubmit" class="space-y-6">
-        <!-- Icon and Basic Info -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div class="md:col-span-1 flex flex-col items-center">
-            <div class="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden mb-2 relative">
-              <img v-if="form.icon_base64 && !formIconLoadFailed" :src="form.icon_base64" @error="formIconLoadFailed = true" alt="Icon Preview" class="h-full w-full object-cover">
-              <svg v-else class="w-16 h-16 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
-               <!-- Spinner Overlay -->
-               <div v-if="isLoadingIcon" class="absolute inset-0 bg-black/50 flex items-center justify-center">
-                  <svg class="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-               </div>
-            </div>
-            <div class="flex gap-2">
-                <button @click="triggerFileInput" type="button" class="btn btn-secondary btn-sm">Upload</button>
-                <button @click="handleGenerateIcon" type="button" class="btn btn-secondary btn-sm" :disabled="isLoadingIcon">
-                    <span v-if="isLoadingIcon">Generating...</span>
-                    <span v-else>Generate</span>
-                </button>
-            </div>
-            <input type="file" ref="fileInput" @change="handleFileSelect" class="hidden" accept="image/png, image/jpeg, image/gif, image/webp, image/svg+xml">
+  <Teleport to="body">
+    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @click.self="emit('close')">
+      <div class="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-100">
+            {{ isEditing ? 'Edit Personality' : 'Create Personality' }}
+          </h3>
+          <button @click="emit('close')" class="p-1 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+
+        <!-- Body -->
+        <div class="flex-1 overflow-y-auto p-6 space-y-4">
+          <!-- Name (disabled on edit) -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Name (Slug)</label>
+            <input
+              v-model="form.name"
+              :disabled="isEditing"
+              type="text"
+              class="input-field mt-1 w-full disabled:opacity-60 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500"
+              placeholder="e.g. research_assistant"
+            >
+            <p v-if="isEditing" class="text-xs text-gray-500 mt-1">Handbag identifier cannot be changed once created.</p>
           </div>
 
-          <div class="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <!-- Display name -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Display Name</label>
+            <input v-model="form.display_name" type="text" class="input-field mt-1 w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500" placeholder="e.g. Research Assistant">
+          </div>
+
+          <!-- Category + Author -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label for="name" class="block text-sm font-medium">Name</label>
-              <input type="text" id="name" v-model="form.name" class="input-field mt-1" required>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Category</label>
+              <input v-model="form.category" type="text" class="input-field mt-1 w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500">
             </div>
             <div>
-              <label for="category" class="block text-sm font-medium">Category</label>
-              <input type="text" id="category" v-model="form.category" class="input-field mt-1">
-            </div>
-            <div class="sm:col-span-2">
-              <label for="author" class="block text-sm font-medium">Author</label>
-              <input type="text" id="author" v-model="form.author" class="input-field mt-1" :placeholder="authStore.user.username">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Author</label>
+              <input v-model="form.author" type="text" class="input-field mt-1 w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500">
             </div>
           </div>
-        </div>
-        
-        <!-- Owner Type (Admin only for new personalities) -->
-        <div v-if="authStore.user.is_admin && !form.id">
-            <label for="owner_type" class="block text-sm font-medium">Owner Type</label>
-            <select id="owner_type" v-model="form.owner_type" class="input-field mt-1">
-                <option value="user">Personal (for me only)</option>
-                <option value="system">System (available to all users if public)</option>
+
+          <!-- Scope (admin only, create only) -->
+          <div v-if="!isEditing && authStore.user?.is_admin">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Scope</label>
+            <select v-model="form.scope" class="input-field mt-1 w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500">
+              <option value="personal">Personal</option>
+              <option value="global">Global (all users)</option>
             </select>
+          </div>
+
+          <!-- Description -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Description</label>
+            <textarea v-model="form.description" rows="2" class="input-field mt-1 w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500"></textarea>
+          </div>
+
+          <!-- Prompt / SOUL -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">System Prompt (SOUL.md)</label>
+            <textarea v-model="form.prompt_text" rows="8" class="input-field mt-1 w-full font-mono text-sm bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded px-3 py-2 text-gray-900 dark:text-gray-100 focus:ring-blue-500 focus:border-blue-500" placeholder="You are..."></textarea>
+          </div>
+
+          <!-- Icon -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">Icon</label>
+            <div class="flex items-center gap-3 mt-1">
+              <img v-if="form.icon_base64" :src="form.icon_base64" class="w-16 h-16 rounded-lg object-cover border border-gray-200 dark:border-gray-700">
+              <div v-else class="w-16 h-16 rounded-lg bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs text-gray-500 border border-gray-300 dark:border-gray-600">None</div>
+              <input type="file" accept="image/*" @change="onFileChange" class="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/30 dark:file:text-blue-300">
+            </div>
+          </div>
         </div>
 
-        <!-- Description and Disclaimer -->
-        <div>
-            <label for="description" class="block text-sm font-medium">Description</label>
-            <textarea id="description" v-model="form.description" rows="3" class="input-field mt-1"></textarea>
+        <!-- Footer -->
+        <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2 bg-gray-50 dark:bg-gray-900/50">
+          <button type="button" class="px-4 py-2 text-sm font-medium rounded-md bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors" @click="emit('close')" :disabled="isLoading">Cancel</button>
+          <button type="button" class="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50" @click="submit" :disabled="isLoading">
+            {{ isLoading ? 'Saving…' : (isEditing ? 'Save Changes' : 'Create Personality') }}
+          </button>
         </div>
-        <div>
-            <label for="disclaimer" class="block text-sm font-medium">Disclaimer</label>
-            <textarea id="disclaimer" v-model="form.disclaimer" rows="2" class="input-field mt-1"></textarea>
-        </div>
-
-        <!-- System Prompt with AI Enhancement -->
-        <div>
-            <div class="flex items-center justify-between mb-1">
-                <label for="prompt" class="block text-sm font-medium">System Prompt</label>
-                <button @click="handleEnhancePrompt" type="button" class="btn btn-secondary btn-sm flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.572L16.5 21.75l-.398-1.178a3.375 3.375 0 00-2.3-2.3L12.75 18l1.178-.398a3.375 3.375 0 002.3-2.3L16.5 14.25l.398 1.178a3.375 3.375 0 002.3 2.3l1.178.398-1.178.398a3.375 3.375 0 00-2.3 2.3z" /></svg>
-                    <span>Enhance with AI</span>
-                </button>
-            </div>
-            <CodeMirrorEditor v-model="form.prompt_text" class="h-48" />
-        </div>
-
-        <!-- Script Code (Admin only) -->
-        <div v-if="authStore.user.is_admin">
-            <label for="script_code" class="block text-sm font-medium">Script Code (Python)</label>
-            <CodeMirrorEditor v-model="form.script_code" class="h-48 mt-1" language="python" />
-        </div>
-        
-        <!-- Advanced Settings (RAG, MCPs) -->
-        <div class="space-y-6 pt-6 border-t dark:border-gray-700">
-            <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">Advanced Settings</h3>
-            <!-- RAG Settings -->
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label for="data_source_type" class="block text-sm font-medium">Data Source Type</label>
-                    <select id="data_source_type" v-model="form.data_source_type" class="input-field mt-1">
-                        <option value="none">None</option>
-                        <option value="datastore">Data Store</option>
-                        <option value="static_text">Static Text</option>
-                    </select>
-                </div>
-                <div v-if="form.data_source_type === 'datastore'">
-                    <label for="data_source" class="block text-sm font-medium">Select Data Store</label>
-                    <select id="data_source" v-model="form.data_source" class="input-field mt-1">
-                        <option :value="null">Select a store</option>
-                        <option v-for="store in availableRagStores" :key="store.id" :value="store.id">
-                            {{ store.name }}
-                        </option>
-                    </select>
-                </div>
-            </div>
-            <div v-if="form.data_source_type === 'static_text'">
-                <div class="flex items-center justify-between mb-1">
-                    <label for="data_source_static" class="block text-sm font-medium">Static Text Content</label>
-                    <button @click="triggerStaticTextImport" type="button" class="btn btn-secondary btn-sm">Import from File</button>
-                    <input type="file" ref="staticTextInputRef" @change="handleStaticTextFileSelect" class="hidden" accept=".txt,.md,.json,.csv,.py,.js,text/*">
-                </div>
-                <CodeMirrorEditor v-model="form.data_source" id="data_source_static" class="h-32" />
-            </div>
-
-            <!-- Required Context Options (NEW) -->
-             <div>
-                <label class="block text-sm font-medium mb-1">Mandatory Context Features</label>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Selecting these will auto-activate them when this personality is used. Disabling them manually later will revert to the default personality.</p>
-                 <MultiSelectMenu 
-                    v-model="form.required_context_options" 
-                    :items="formattedContextOptions"
-                    placeholder="Select required features (e.g. Image Gen)"
-                    class="mt-1"
-                />
-            </div>
-
-            <!-- MCP Tools Settings -->
-            <div>
-                <label class="block text-sm font-medium">Active MCPs</label>
-                 <MultiSelectMenu 
-                    v-model="form.tools" 
-                    :items="availableMcpToolsForSelector"
-                    placeholder="Select tools"
-                    class="mt-1"
-                />
-            </div>
-        </div>
-
-        <!-- Public Toggle (Admin only) -->
-        <div v-if="authStore.user.is_admin" class="flex items-center pt-6 border-t dark:border-gray-700">
-            <input id="is_public" type="checkbox" v-model="form.is_public" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-            <label for="is_public" class="ml-2 block text-sm text-gray-900 dark:text-gray-200">Make Public (Available to all users)</label>
-        </div>
-      </form>
-    </template>
-    <template #footer>
-        <div class="w-full flex justify-between">
-            <div class="flex gap-2">
-                <button v-if="form.id" @click="handleExport" type="button" class="btn btn-secondary-outline">
-                    <IconArrowDownTray class="w-4 h-4 mr-2" />
-                    Export
-                </button>
-            </div>
-            <div class="flex gap-2">
-                <button @click="handleClose" type="button" class="btn btn-secondary">Cancel</button>
-                <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save' }}</button>
-            </div>
-        </div>
-    </template>
-  </GenericModal>
+      </div>
+    </div>
+  </Teleport>
 </template>
