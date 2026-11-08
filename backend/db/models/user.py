@@ -150,6 +150,8 @@ class User(Base):
     tts_models_config = Column(JSON, nullable=True)
     stt_binding_model_name = Column(String, nullable=True)
     stt_models_config = Column(JSON, nullable=True)
+    ttv_binding_model_name = Column(String, nullable=True)
+    ttv_models_config = Column(JSON, nullable=True)
     safe_store_vectorizer = Column(String, nullable=True)
     active_personality_id = Column(String, ForeignKey("personalities.id", name="fk_user_active_personality", ondelete="SET NULL"), nullable=True)
     active_voice_id = Column(String, ForeignKey("user_voices.id", ondelete="SET NULL"), nullable=True)

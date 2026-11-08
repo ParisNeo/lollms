@@ -928,6 +928,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "tts_models_config": "JSON",
             "stt_binding_model_name": "VARCHAR",
             "stt_models_config": "JSON",
+            "ttv_binding_model_name": "VARCHAR",
+            "ttv_models_config": "JSON",
             "active_voice_id": "VARCHAR REFERENCES user_voices(id) ON DELETE SET NULL",
             "include_memory_date_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
             "coding_style_constraints": "TEXT",

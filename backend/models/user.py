@@ -34,6 +34,7 @@ class UserCreateAdmin(BaseModel):
     tti_binding_model_name: Optional[str] = None
     tts_binding_model_name: Optional[str] = None
     stt_binding_model_name: Optional[str] = None
+    ttv_binding_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     rag_top_k: Optional[int] = None
     max_rag_len: Optional[int] = None
@@ -210,6 +211,8 @@ class UserAuthDetails(BaseModel):
     tts_models_config: Optional[Dict[str, Any]] = None
     stt_binding_model_name: Optional[str] = None
     stt_models_config: Optional[Dict[str, Any]] = None
+    ttv_binding_model_name: Optional[str] = None
+    ttv_models_config: Optional[Dict[str, Any]] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None
@@ -321,6 +324,7 @@ class UserUpdate(BaseModel):
     iti_binding_model_name: Optional[str] = None
     tts_binding_model_name: Optional[str] = None
     stt_binding_model_name: Optional[str] = None
+    ttv_binding_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None

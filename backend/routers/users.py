@@ -19,17 +19,29 @@ from datetime import timezone, timedelta
 from collections import defaultdict
 from sqlalchemy import func, desc
 
-# Self-healing schema patch for users.mcp_access_info
+# Self-healing schema patch: backfill columns that were added to the ORM
+# model after some installs had already created the ``users`` table.
+# Runs once at module-import time (before the app serves any request) so
+# ORM SELECTs for the new columns succeed on legacy databases.
+# Wrapped in try/except so fresh installs (where ``Base.metadata.create_all``
+# already creates the correct schema) and repeated imports are unaffected.
 try:
-    with engine.connect() as _migration_conn:
-        _insp = inspect(_migration_conn)
+    from sqlalchemy import inspect as _sa_inspect, text as _sa_text
+    from backend.db import engine as _db_engine
+    with _db_engine.begin() as _migration_conn:
+        _insp = _sa_inspect(_migration_conn)
         if _insp.has_table('users'):
-            _cols = [c['name'] for c in _insp.get_columns('users')]
+            _cols = {c['name'] for c in _insp.get_columns('users')}
             if 'mcp_access_info' not in _cols:
-                _migration_conn.execute(text("ALTER TABLE users ADD COLUMN mcp_access_info JSON"))
-                _migration_conn.commit()
+                _migration_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN mcp_access_info JSON"))
+            if 'ttv_binding_model_name' not in _cols:
+                _migration_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN ttv_binding_model_name VARCHAR"))
+            if 'ttv_models_config' not in _cols:
+                _migration_conn.execute(_sa_text("ALTER TABLE users ADD COLUMN ttv_models_config JSON"))
 except Exception:
-    pass
+    # Non-fatal: log at debug via logging if available, but never block boot.
+    import logging as _mig_log
+    _mig_log.getLogger(__name__).debug("Schema auto-migration skipped (non-fatal).", exc_info=True)
 
 users_router = APIRouter(
     prefix="/api/users",
