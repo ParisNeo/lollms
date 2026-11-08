@@ -4,10 +4,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, exists
 
 from backend.db import get_db
-from backend.db.base import FriendshipStatus
 from backend.db.utils import get_friendship_record
 from backend.db.base import follows_table
-from backend.db.models.user import User as DBUser, Friendship as DBFriendship
+from backend.db.models.user import User as DBUser
 from backend.db.models.service import MCP as DBMCP
 from backend.models import UserAuthDetails, UserProfileResponse, UserPublic
 from backend.models.user import UserMCPAccessInfo
@@ -27,7 +26,11 @@ from sqlalchemy import func, desc
 # already creates the correct schema) and repeated imports are unaffected.
 try:
     from sqlalchemy import inspect as _sa_inspect, text as _sa_text
-    from backend.db import engine as _db_engine
+    from backend.db import session as _db_session
+    _db_engine = getattr(_db_session, "engine", None)
+    if _db_engine is None:
+        raise RuntimeError("Database engine not initialized yet; skipping schema auto-migration.")
+
     with _db_engine.begin() as _migration_conn:
         _insp = _sa_inspect(_migration_conn)
         if _insp.has_table('users'):
@@ -58,14 +61,12 @@ def _project_user_public(user: DBUser) -> UserPublic:
     return UserPublic(
         id=user.id,
         username=user.username,
-        email=user.email,
         icon=user.icon,
         is_active=user.is_active,
         is_admin=getattr(user, "is_admin", False) or False,
         is_moderator=getattr(user, "is_moderator", False) or False,
         status=user.status,
-        created_at=user.created_at,
-        last_activity_at=user.last_activity_at
+        created_at=user.created_at
     )
 
 @users_router.get("/search", response_model=List[UserPublic])
@@ -133,8 +134,9 @@ def get_my_accessible_mcps(
     user_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
     accessible_system_mcp_ids = set()
     
-    if user_db and user_db.mcp_access_info and isinstance(user_db.mcp_access_info, list):
-        for m in user_db.mcp_access_info:
+    mcp_access_info = getattr(user_db, "mcp_access_info", None) if user_db else None
+    if isinstance(mcp_access_info, list):
+        for m in mcp_access_info:
             if isinstance(m, dict) and "id" in m:
                 accessible_system_mcp_ids.add(m["id"])
 
@@ -146,8 +148,8 @@ def get_my_accessible_mcps(
     results = []
     for mcp in personal_mcps:
         results.append(UserMCPAccessInfo(
-            id=mcp.id,
-            name=mcp.name,
+            id=int(mcp.id),
+            name=str(mcp.name),
             display_name=mcp.display_name,
             description=mcp.description,
             icon=mcp.icon,
@@ -160,8 +162,8 @@ def get_my_accessible_mcps(
             continue
             
         results.append(UserMCPAccessInfo(
-            id=mcp.id,
-            name=mcp.name,
+            id=int(mcp.id),
+            name=str(mcp.name),
             display_name=mcp.display_name,
             description=mcp.description,
             icon=mcp.icon,
@@ -361,13 +363,13 @@ def get_user_profile(
         follows_table.c.following_id == target_user.id
     ))).scalar()
 
-    friendship = get_friendship_record(db, current_user.id, target_user.id)
+    friendship = get_friendship_record(db, int(current_user.id), int(target_user.id))
     friendship_status = friendship.status if friendship else None
 
     return UserProfileResponse(
         user=_project_user_public(target_user),
         relationship={
-            "is_following": is_following,
+            "is_following": bool(is_following),
             "friendship_status": friendship_status
         }
     )
