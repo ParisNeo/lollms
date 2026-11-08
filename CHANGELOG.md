@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-08 09:42]
+
+- feat: update session handling and cleanup frontend assets
+
 ## [2026-11-08 05:09]
 
 - Fix missing TTV model configs: add `ttv_binding_model_name` and `ttv_models_config` columns

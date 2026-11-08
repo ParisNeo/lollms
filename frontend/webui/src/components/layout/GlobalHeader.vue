@@ -355,10 +355,13 @@ function selectSttModel(id) {
 }
 async function selectTtvModel(id) { 
     isMenuOpen.value = false;
-    const saved = await persistBindingPreference({ ttv_binding_model_name: id }, 'TTV');
-    if (saved) {
-        activeTtvModelName.value = id;
-    }
+    // The optimistic update inside updateUserPreferences flips the checkmark
+    // synchronously; persistBindingPreference surfaces a targeted error toast
+    // if the PATCH fails. Do NOT also set `activeTtvModelName.value = id` —
+    // its computed setter fires a redundant second updateUserPreferences call
+    // that (on the old merge code) re-patched with the just-clobbered null,
+    // silently rewriting the row back to "not selected".
+    await persistBindingPreference({ ttv_binding_model_name: id }, 'TTV');
 }
 function selectTtmModel(id) { 
     activeTtmModelName.value = id; 
@@ -380,8 +383,11 @@ onMounted(() => {
     loadActivePersona();
     // Re-hydrate the user object so binding model selections reflect the
     // latest persisted values after a hard refresh.
-    if (authStore.fetchUser) {
-        Promise.resolve().then(() => authStore.fetchUser()).catch(() => {});
+    // NOTE: the store method is `refreshUser` (not `fetchUser`). Calling a
+    // non-existent method guard-skipped silently and left the header showing
+    // stale binding state until the next auth broadcast.
+    if (typeof authStore.refreshUser === 'function') {
+        Promise.resolve().then(() => authStore.refreshUser()).catch(() => {});
     }
 });
 onUnmounted(() => {
@@ -651,6 +657,7 @@ async function handleRefreshModels() {
                          <DropdownSubmenu 
                             v-if="formattedAvailableTtvModels.length > 0" 
                             title="TTV Profile" 
+                            icon="video-camera"
                             :status-color="isTtvSelected ? 'green' : 'red'"
                             :status-text="isTtvSelected ? 'Selected' : 'None'"
                          >

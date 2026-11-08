@@ -800,15 +800,25 @@ export const useAuthStore = defineStore('auth', () => {
             const response = await apiClient.put('/api/auth/me', preferences);
             if (user.value) {
                 // Field-wise merge: the server response is authoritative for the
-                // fields it returns, but an explicitly-set client value (e.g.
-                // `inline_widgets_enabled: false`) must never be clobbered by a
-                // response that omits the field or re-defaults it.
+                // fields it returns, but an explicitly-set client value must
+                // never be silently clobbered by a response that omits the
+                // field, returns null, or re-defaults it. This protects
+                // *string* preferences (e.g. `ttv_binding_model_name`) from
+                // being reverted to null by an intermediate backend that
+                // doesn't yet persist the field for the just-written row.
                 const merged = { ...user.value, ...response.data };
                 for (const [key, value] of Object.entries(preferences)) {
                     const serverVal = response.data?.[key];
-                    if (serverVal === undefined) {
+                    if (serverVal === undefined || serverVal === null) {
+                        // Server didn't echo the value we just wrote — keep ours.
                         merged[key] = value;
-                    } else if (typeof value === 'boolean' && typeof serverVal === 'boolean' && serverVal !== value) {
+                    } else if (
+                        serverVal !== value &&
+                        typeof value !== 'object' &&
+                        value !== null
+                    ) {
+                        // Server returned a concrete but different scalar value.
+                        // Trust the client (matches the boolean-drift policy).
                         console.warn('[auth] preference drift:', key, 'sent', value, 'server returned', serverVal);
                         merged[key] = value;
                     }
