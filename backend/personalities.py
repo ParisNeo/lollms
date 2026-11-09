@@ -287,6 +287,8 @@ def _scan_handbag(path: Path, scope: str, owner: Optional[str]) -> Optional[Dict
         except Exception:
             manifest = {}
     icon_data = _read_handbag_icon(path)
+    extra_kbs = _normalize_extra_kbs(manifest.get("extra_knowledge_bases"))
+    native_rag_present = (path / "rag").is_dir() and any((path / "rag").iterdir())
     dto = {
         "name": manifest.get("name") or path.name,
         "handbag_name": path.name,
@@ -300,7 +302,12 @@ def _scan_handbag(path: Path, scope: str, owner: Optional[str]) -> Optional[Dict
         "icon_base64": icon_data,  # alias: consumers still binding this legacy field get the icon too
         "has_soul": (path / "SOUL.md").is_file(),
         "has_tools": any((path / "tools").glob("*.py")) if (path / "tools").is_dir() else False,
-        "has_rag": (path / "rag").is_dir() and any((path / "rag").iterdir()),
+        # ``has_rag`` now reflects extra knowledge bases too: a handbag with a
+        # linked SafeStore ``.db`` but no local ``rag/`` folder still exposes
+        # RAG capability at runtime, so the header badge must match reality.
+        "has_rag": native_rag_present or bool(extra_kbs),
+        "has_extra_kbs": bool(extra_kbs),
+        "extra_knowledge_bases": extra_kbs,
         "has_docs": (path / "docs").is_dir() and any((path / "docs").iterdir()),
         "has_skills": (path / "skills").is_dir() and any((path / "skills").iterdir()),
     }
@@ -433,6 +440,38 @@ def _load_manifest(path: Path) -> Dict[str, Any]:
         return {}
 
 
+def _normalize_extra_kbs(raw: Any) -> List[str]:
+    """Normalize a handbag manifest's ``extra_knowledge_bases`` into a flat list.
+
+    Accepts a single string / Path-like, or a mixed list of them (this mirrors
+    the shape that ``Handbag.normalize_extra_knowledge_bases(...)`` accepts in
+    ``lollms_client``). Entries are stripped, de-duplicated, and returned in
+    declaration order. Empty/invalid entries are dropped.
+
+    Existence is **intentionally not checked here**: the ``lollms_client``
+    ``Handbag`` loader skips non-existent entries with a warning (extra KBs
+    are optional by design), and the studio editor should be able to display
+    an entry the user is about to fix instead of having it silently vanish.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, (str, os.PathLike)):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    out: List[str] = []
+    seen = set()
+    for entry in raw:
+        if not isinstance(entry, (str, os.PathLike)):
+            continue
+        text = str(entry).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
 def read_handbag_detail(path: Path) -> Dict[str, Any]:
     """Full handbag content for the studio editor (manifest + SOUL prompt)."""
     if not path.is_dir():
@@ -440,7 +479,8 @@ def read_handbag_detail(path: Path) -> Dict[str, Any]:
     manifest = _load_manifest(path)
     soul_file = path / "SOUL.md"
     icon_data = _read_handbag_icon(path)
-    
+    extra_kbs = _normalize_extra_kbs(manifest.get("extra_knowledge_bases"))
+
     # Scan directories
     skills = []
     if (path / "skills").is_dir():
@@ -472,12 +512,23 @@ def read_handbag_detail(path: Path) -> Dict[str, Any]:
         "prompt_text": soul_file.read_text(encoding="utf-8") if soul_file.is_file() else "",
         "has_soul": soul_file.is_file(),
         "has_tools": len(tools) > 0,
-        "has_rag": len(databases) > 0,
+        # Mirror ``_scan_handbag``: extra KBs (SafeStore .db files, docs, or
+        # folders) count as RAG capability even when there is no local
+        # ``rag/`` folder. Without this, the studio editor would show "No
+        # RAG" for a handbag that already links a live datastore at runtime.
+        "has_rag": len(databases) > 0 or bool(extra_kbs),
         "has_docs": (path / "docs").is_dir() and any((path / "docs").iterdir()),
         "has_skills": len(skills) > 0,
         "skills": skills,
         "tools": tools,
         "databases": databases,
+        # Extra RAG sources declared in handbag.yaml — files (.db SafeStore
+        # databases, plain docs, ...) or folders. These are merged with the
+        # handbag's native ``rag/`` + ``docs/`` sources by
+        # ``LollmsPersonality.from_handbag()`` and are exposed to
+        # ``tool_query_rag`` transparently.
+        "extra_knowledge_bases": extra_kbs,
+        "has_extra_kbs": bool(extra_kbs),
     }
 
 
@@ -485,13 +536,21 @@ def write_handbag_files(path: Path, *, display_name: Optional[str] = None,
                         description: Optional[str] = None, author: Optional[str] = None,
                         category: Optional[str] = None,
                         prompt_text: Optional[str] = None,
-                        icon_base64: Optional[str] = None) -> None:
+                        icon_base64: Optional[str] = None,
+                        extra_knowledge_bases: Optional[List[Any]] = None) -> None:
     """Update handbag metadata (handbag.yaml), SOUL.md, and/or icon in place.
 
     ``icon_base64`` accepts either a data URI (``data:image/png;base64,...``)
     or a raw base64 payload; the decoded bytes are written to ``icon.png`` so
     the icon travels with the handbag folder and is picked up by
     ``_read_handbag_icon`` on the next catalog scan.
+
+    ``extra_knowledge_bases`` accepts the same shapes the ``lollms_client``
+    ``Handbag`` accepts at load time (a single string/Path or a mixed list of
+    them). When provided, the normalized list is written to ``handbag.yaml``
+    so ``LollmsPersonality.from_handbag()`` wires those sources into the
+    personality's RAG pipeline on the next load — no manual per-personality
+    RAG bookkeeping needed. Passing ``[]`` removes the key entirely.
     """
     if not path.is_dir():
         raise ValueError(f"Not a handbag folder: {path}")
@@ -500,6 +559,12 @@ def write_handbag_files(path: Path, *, display_name: Optional[str] = None,
                        ("author", author), ("category", category)):
         if value is not None:
             manifest[key] = value
+    if extra_knowledge_bases is not None:
+        normalized = _normalize_extra_kbs(extra_knowledge_bases)
+        if normalized:
+            manifest["extra_knowledge_bases"] = normalized
+        else:
+            manifest.pop("extra_knowledge_bases", None)
     if yaml is not None:
         (path / "handbag.yaml").write_text(
             yaml.safe_dump(manifest, allow_unicode=True), encoding="utf-8")

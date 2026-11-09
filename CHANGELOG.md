@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-09 12:07]
+
+- Fix handbag API and frontend data store interactions, update LLM client version to latest stable minor patch.
+
 ## [2026-11-09 06:36]
 
 - Fixes frontend asset paths and optimizes session handling; updates datastore query logic for better context management:

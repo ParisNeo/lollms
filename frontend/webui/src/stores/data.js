@@ -538,6 +538,15 @@ export const useDataStore = defineStore('data', () => {
                     has_soul: hb.has_soul,
                     has_tools: hb.has_tools,
                     has_rag: hb.has_rag,
+                    // Extra RAG sources declared in ``handbag.yaml`` (SafeStore
+                    // ``.db`` pointers, docs, or directories). Surfaced so the
+                    // PersonalityStudio / editor can display and edit them; the
+                    // runtime wiring is entirely inside ``LollmsPersonality.from_handbag()``
+                    // and requires no additional LoLLMS-side bookkeeping.
+                    has_extra_kbs: hb.has_extra_kbs || false,
+                    extra_knowledge_bases: Array.isArray(hb.extra_knowledge_bases)
+                        ? hb.extra_knowledge_bases
+                        : [],
                     has_docs: hb.has_docs,
                     has_skills: hb.has_skills,
                 };

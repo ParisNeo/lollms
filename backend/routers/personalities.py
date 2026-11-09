@@ -82,6 +82,14 @@ class HandbagCreate(BaseModel):
     category: Optional[str] = None
     prompt_text: Optional[str] = None
     icon_base64: Optional[str] = None
+    # Extra RAG sources: ``str`` / ``Path`` or a mixed list of them (mirrors
+    # ``Handbag.normalize_extra_knowledge_bases``). Each entry can point at a
+    # SafeStore ``.db`` (anywhere on disk), a document file, or a directory
+    # that will be recursively scanned. Stored in ``handbag.yaml`` so
+    # ``LollmsPersonality.from_handbag()`` wires them into the personality's
+    # RAG pipeline on the next chat turn — no manual per-personality DB
+    # plumbing required.
+    extra_knowledge_bases: Optional[List[Any]] = None
     scope: str = "personal"  # 'personal' | 'global' (global requires admin)
 
 class HandbagUpdate(BaseModel):
@@ -91,6 +99,9 @@ class HandbagUpdate(BaseModel):
     category: Optional[str] = None
     prompt_text: Optional[str] = None
     icon_base64: Optional[str] = None
+    # See ``HandbagCreate.extra_knowledge_bases``. Passing ``[]`` clears the
+    # key entirely; passing ``None`` leaves the stored value untouched.
+    extra_knowledge_bases: Optional[List[Any]] = None
 
 class SkillCreate(BaseModel):
     name: str
@@ -670,11 +681,13 @@ def create_handbag(payload: HandbagCreate,
     if path is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Invalid personality name")
-    if payload.display_name or payload.icon_base64:
+    if (payload.display_name or payload.icon_base64
+            or payload.extra_knowledge_bases is not None):
         write_handbag_files(
             path,
             display_name=payload.display_name,
             icon_base64=payload.icon_base64,
+            extra_knowledge_bases=payload.extra_knowledge_bases,
         )
     return {"handbag_name": slug, "scope": payload.scope}
 
@@ -708,6 +721,7 @@ def update_handbag(scope: str, handbag_name: str, payload: HandbagUpdate,
         category=payload.category,
         prompt_text=payload.prompt_text,
         icon_base64=payload.icon_base64,
+        extra_knowledge_bases=payload.extra_knowledge_bases,
     )
     return {"handbag_name": handbag_name, "scope": scope, "updated": True}
 
