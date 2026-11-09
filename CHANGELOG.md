@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-09 06:36]
+
+- Fixes frontend asset paths and optimizes session handling; updates datastore query logic for better context management:
+
+## [2026-11-09 05:35]
+
+- fix import and minor formatting issues in datastore.py and stores.py routers
+
 ## [2026-11-08 17:39]
 
 - Fixing imports and API inconsistencies for better user management.

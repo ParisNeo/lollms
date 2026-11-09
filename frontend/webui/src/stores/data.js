@@ -425,7 +425,7 @@ export const useDataStore = defineStore('data', () => {
         return response.data;
     }
 
-    async function queryDataStore({ storeId, query, top_k, min_similarity_percent, mode = "hybrid", retrieval_target = "chunks", window_before = 1, window_after = 1, dense_weight = 0.5, bm25_weight = 0.5, rrf_k = 60 }) {
+    async function queryDataStore({ storeId, query, top_k, min_similarity_percent, mode = "hybrid", retrieval_target = "chunks", window_before = 1, window_after = 1, dense_weight = 0.5, bm25_weight = 0.5, rrf_k = 60, reconstruct_overlapping_chunks = false }) {
         try {
             const response = await apiClient.post(`/api/store/${storeId}/query`, { 
                 query, 
@@ -437,7 +437,8 @@ export const useDataStore = defineStore('data', () => {
                 window_after,
                 dense_weight,
                 bm25_weight,
-                rrf_k
+                rrf_k,
+                reconstruct_overlapping_chunks
             });
             return response.data;
         } catch (error) {
@@ -453,7 +454,7 @@ export const useDataStore = defineStore('data', () => {
         return response.data;
     }
 
-    async function queryDataStoreAndAnswer({ storeId, query, top_k = 10, min_similarity_percent = 50.0, mode = "hybrid", dense_weight = 0.5, bm25_weight = 0.5, rrf_k = 60, system_prompt = null, max_tokens = 2048, temperature = 0.2 }) {
+    async function queryDataStoreAndAnswer({ storeId, query, top_k = 10, min_similarity_percent = 50.0, mode = "hybrid", dense_weight = 0.5, bm25_weight = 0.5, rrf_k = 60, system_prompt = null, max_tokens = 2048, temperature = 0.2, reconstruct_overlapping_chunks = false }) {
         try {
             const response = await apiClient.post(`/api/store/${storeId}/query-answer`, {
                 query,
@@ -465,7 +466,8 @@ export const useDataStore = defineStore('data', () => {
                 rrf_k,
                 system_prompt,
                 max_tokens,
-                temperature
+                temperature,
+                reconstruct_overlapping_chunks
             });
             return response.data;
         } catch (error) {

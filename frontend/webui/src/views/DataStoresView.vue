@@ -140,6 +140,7 @@ const queryTopK = ref(10);
 const queryMinSim = ref(50.0);
 const queryMode = ref('hybrid'); // 'dense' or 'hybrid'
 const retrievalTarget = ref('chunks'); // 'chunks' | 'window' | 'full_documents'
+const reconstructOverlappingChunks = ref(false);
 const windowBefore = ref(1);
 const windowAfter = ref(1);
 const denseWeight = ref(0.5);
@@ -294,8 +295,10 @@ const isAnyTaskRunningForSelectedStore = computed(() => !!currentUploadTask.valu
 function parseChunk(rawText) {
     if (!rawText) return { metadata: null, content: '' };
 
-    // Detect and extract Document Context / Metadata block
-    const metaBlockRegex = /^---\s*(?:Document Context|Metadata|Context)\s*---([\s\S]*?)(?:---[-]*|\n\n)/i;
+    // Detect and extract Document Context / Metadata block.
+    // Handles both the legacy "--- Document Context ---" form and the
+    // safe_store reconstruction header form: "--- Document: <name> ---".
+    const metaBlockRegex = /^---\s*(?:Document(?:\s+Context)?(?:\s*:\s*[^\n]*?)?|Metadata|Context)\s*---\r?\n([\s\S]*?)(?:\r?\n---[-]*\r?\n|\r?\n\r?\n)/i;
     const match = rawText.match(metaBlockRegex);
 
     if (match) {
@@ -334,6 +337,48 @@ function parseChunk(rawText) {
     return { metadata: null, content: rawText };
 }
 
+/**
+ * Normalizes raw chunk text so Markdown renders as readable structure
+ * rather than a wall of prose.
+ *
+ * Handles:
+ *  - safe_store reconstruction gap markers:  "... (hidden content) ..."
+ *  - metadata headers that leaked past parseChunk (e.g. "--- Document: X ---")
+ *  - "Matched Chunks: N" bookkeeping lines
+ *  - CRLF normalization
+ *  - paragraphs glued by a single newline (Markdown needs a blank line)
+ */
+function normalizeChunkMarkdown(rawText) {
+    if (!rawText) return '';
+
+    let text = rawText.replace(/\r\n?/g, '\n');
+
+    // Drop leaked header/footer rule lines and bookkeeping lines.
+    text = text
+        .split('\n')
+        .filter(line => {
+            const t = line.trim();
+            if (/^-{3,}$/.test(t)) return false;
+            if (/^---\s*Document(?:\s*Context)?(?:\s*:.*)?\s*---$/i.test(t)) return false;
+            if (/^Matched Chunks\s*:\s*\d+\s*$/i.test(t)) return false;
+            return true;
+        })
+        .join('\n');
+
+    // Turn safe_store gap markers into an explicit, readable break.
+    text = text.replace(
+        /^\s*\.{3}\s*\(hidden content\)\s*\.{3}\s*$/gim,
+        '\n\n> ⏭️ *…hidden content…*\n\n'
+    );
+
+    // Collapse 3+ blank lines, then promote single-newline paragraph breaks
+    // to double-newline ONLY when lines look like prose (not lists/code).
+    text = text.replace(/\n{3,}/g, '\n\n');
+    text = text.replace(/(?<![:\-*|`>\d])\n(?![ \t]*(?:[-*+|#>]|\d+\.|```))/g, '\n\n');
+
+    return text.trim();
+}
+
 function highlightSearchTerms(html, term) {
     if (!html || !term || !term.trim()) return html;
     const cleanTerm = term.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -343,10 +388,10 @@ function highlightSearchTerms(html, term) {
 
 function renderChunkContent(rawText) {
     const parsed = parseChunk(rawText);
-    const content = parsed.content || '';
+    const content = normalizeChunkMarkdown(parsed.content || '');
     let html = '';
     try {
-        html = marked.parse(content, { gfm: true, breaks: true, mangle: false, headerIds: false });
+        html = marked.parse(content, { gfm: true, breaks: false, mangle: false, headerIds: false });
     } catch (e) {
         html = `<p>${content}</p>`;
     }
@@ -359,6 +404,12 @@ function renderChunkContent(rawText) {
 function copyChunkText(text) {
     navigator.clipboard.writeText(text);
     uiStore.addNotification("Chunk content copied to clipboard.", "success");
+}
+
+// Resolves the displayable text for a result row. Reconstructed results expose a
+// merged `text` field; raw chunk results fall back to the existing keys.
+function getResultText(chunk) {
+    return chunk?.text || chunk?.full_text || chunk?.stitched_window_text || chunk?.chunk_text || '';
 }
 
 onMounted(() => {
@@ -778,7 +829,8 @@ async function handleQueryStore() {
             window_after: windowAfter.value,
             dense_weight: denseWeight.value,
             bm25_weight: bm25Weight.value,
-            rrf_k: rrfK.value
+            rrf_k: rrfK.value,
+            reconstruct_overlapping_chunks: reconstructOverlappingChunks.value
         });
         queryResults.value = results;
     } catch (error) {
@@ -804,7 +856,8 @@ async function handleAskAiWithEvidence() {
             mode: queryMode.value,
             dense_weight: denseWeight.value,
             bm25_weight: bm25Weight.value,
-            rrf_k: rrfK.value
+            rrf_k: rrfK.value,
+            reconstruct_overlapping_chunks: reconstructOverlappingChunks.value
         });
         aiAnswer.value = response.answer;
         queryResults.value = response.chunks || [];
@@ -828,7 +881,7 @@ function handleInChunkSearch() {
     const matches = [];
     
     queryResults.value.forEach((chunk, chunkIndex) => {
-        const text = chunk.chunk_text || '';
+        const text = getResultText(chunk);
         const regex = new RegExp(searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
         let match;
         while ((match = regex.exec(text)) !== null) {
@@ -867,7 +920,7 @@ function scrollToMatch(match) {
         const markElements = Array.from(chunkElement.querySelectorAll('mark'));
         if (markElements.length > 0) {
             let matchCounterInChunk = 0;
-            const text = queryResults.value[match.chunkIndex]?.chunk_text || '';
+            const text = getResultText(queryResults.value[match.chunkIndex]);
             const searchTerm = searchInChunks.value;
             const regex = new RegExp(searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
             let m;
@@ -1555,6 +1608,24 @@ async function handleImportStore() {
                                     </button>
                                 </div>
                             </div>
+
+                            <!-- Reconstruction Toggle -->
+                            <div class="flex items-start gap-3 p-3.5 rounded-xl bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/70">
+                                <input
+                                    id="reconstruct-overlapping-chunks"
+                                    v-model="reconstructOverlappingChunks"
+                                    type="checkbox"
+                                    class="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-600 shrink-0"
+                                >
+                                <div class="text-sm leading-tight">
+                                    <label for="reconstruct-overlapping-chunks" class="font-semibold text-gray-900 dark:text-gray-100 cursor-pointer select-none">
+                                        Reconstruct overlapping chunks
+                                    </label>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                        Merge adjacent retrieved chunks per document into a single chronological passage, deduplicating overlapping boundary text and bridging gaps. Opt-in; defaults to off.
+                                    </p>
+                                </div>
+                            </div>
                         </form>
                     </div>
 
@@ -1644,6 +1715,11 @@ async function handleImportStore() {
                                         <span class="font-bold text-xs text-gray-800 dark:text-gray-200 truncate" :title="chunk.file_path || chunk.document_title">
                                             {{ (chunk.file_path || chunk.document_title || '').split(/[/\\]/).pop() || `Evidence #${index + 1}` }}
                                         </span>
+                                        <span v-if="chunk.chunk_range"
+                                              class="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40 shrink-0"
+                                              :title="`Reconstructed from chunks ${chunk.chunk_range.start}–${chunk.chunk_range.end}`">
+                                            Chunks {{ chunk.chunk_range.start }}–{{ chunk.chunk_range.end }}
+                                        </span>
                                     </div>
 
                                     <div class="flex items-center gap-2">
@@ -1656,7 +1732,7 @@ async function handleImportStore() {
                                             {{ chunk.similarity_percent.toFixed(1) }}% Match
                                         </span>
 
-                                        <button @click.stop="copyChunkText(chunk.full_text || chunk.stitched_window_text || chunk.chunk_text)" class="p-1.5 text-gray-400 hover:text-blue-500 rounded-lg hover:bg-white dark:hover:bg-gray-700 transition-colors" title="Copy text">
+                                        <button @click.stop="copyChunkText(getResultText(chunk))" class="p-1.5 text-gray-400 hover:text-blue-500 rounded-lg hover:bg-white dark:hover:bg-gray-700 transition-colors" title="Copy text">
                                             <IconCopy class="w-3.5 h-3.5" />
                                         </button>
                                     </div>
@@ -1664,13 +1740,13 @@ async function handleImportStore() {
 
                                 <!-- Collapsed 2-line preview -->
                                 <div v-if="isChunkCollapsed(index)" @click="toggleChunkCollapse(index)" class="px-5 py-2.5 text-xs text-gray-500 dark:text-gray-400 line-clamp-2 italic cursor-pointer hover:text-gray-700 dark:hover:text-gray-200 border-t dark:border-gray-800/50 bg-white/40 dark:bg-gray-900/40">
-                                    "{{ (chunk.full_text || chunk.stitched_window_text || chunk.chunk_text || '').substring(0, 180) }}..."
+                                    "{{ getResultText(chunk).substring(0, 180) }}..."
                                 </div>
 
                                 <!-- Expanded Full Content Body -->
                                 <div v-else class="p-5 pt-3 space-y-3.5 border-t border-gray-100 dark:border-gray-800">
                                     <!-- Styled Metadata Card (if present) -->
-                                    <div v-if="parseChunk(chunk.chunk_text).metadata" 
+                                    <div v-if="parseChunk(getResultText(chunk)).metadata" 
                                          class="p-3.5 rounded-xl bg-gradient-to-br from-blue-50/60 to-indigo-50/30 dark:from-blue-950/20 dark:to-indigo-950/10 border border-blue-100 dark:border-blue-900/40 space-y-2">
 
                                         <div class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
@@ -1679,7 +1755,7 @@ async function handleImportStore() {
                                         </div>
 
                                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                                            <div v-for="(meta, mIdx) in parseChunk(chunk.chunk_text).metadata" :key="mIdx" 
+                                            <div v-for="(meta, mIdx) in parseChunk(getResultText(chunk)).metadata" :key="mIdx" 
                                                  :class="meta.key.toLowerCase() === 'title' ? 'sm:col-span-2' : ''"
                                                  class="flex flex-col gap-0.5">
                                                 <span class="text-[10px] font-bold uppercase text-gray-400 dark:text-gray-500">{{ meta.key }}</span>
@@ -1692,8 +1768,8 @@ async function handleImportStore() {
                                     </div>
 
                                     <!-- Chunk / Window / Full Document Content -->
-                                    <div class="prose prose-sm dark:prose-invert max-w-none text-xs text-gray-800 dark:text-gray-200 leading-relaxed font-sans break-words selection:bg-blue-100 dark:selection:bg-blue-900"
-                                         v-html="renderChunkContent(chunk.full_text || chunk.stitched_window_text || chunk.chunk_text)">
+                                    <div class="chunk-markdown prose prose-sm dark:prose-invert max-w-none text-xs text-gray-800 dark:text-gray-200 leading-relaxed font-sans break-words selection:bg-blue-100 dark:selection:bg-blue-900"
+                                         v-html="renderChunkContent(getResultText(chunk))">
                                     </div>
                                 </div>
                             </div>
@@ -1989,6 +2065,73 @@ async function handleImportStore() {
     border-radius: 3px;
     box-shadow: 0 0 5px #ff9632;
 }
+
+/* Readable Markdown rendering inside chunk cards. */
+.chunk-markdown > :first-child { margin-top: 0; }
+.chunk-markdown > :last-child { margin-bottom: 0; }
+.chunk-markdown p { margin: 0.5em 0; line-height: 1.65; }
+.chunk-markdown h1,
+.chunk-markdown h2,
+.chunk-markdown h3,
+.chunk-markdown h4 {
+    font-weight: 700;
+    line-height: 1.3;
+    margin: 1em 0 0.5em;
+    color: inherit;
+}
+.chunk-markdown h1 { font-size: 1.35em; border-bottom: 1px solid rgba(128,128,128,0.25); padding-bottom: 0.3em; }
+.chunk-markdown h2 { font-size: 1.2em; border-bottom: 1px solid rgba(128,128,128,0.15); padding-bottom: 0.25em; }
+.chunk-markdown h3 { font-size: 1.08em; }
+.chunk-markdown h4 { font-size: 1em; }
+.chunk-markdown ul,
+.chunk-markdown ol { margin: 0.5em 0; padding-left: 1.5em; }
+.chunk-markdown ul { list-style: disc; }
+.chunk-markdown ol { list-style: decimal; }
+.chunk-markdown li { margin: 0.2em 0; line-height: 1.55; }
+.chunk-markdown blockquote {
+    border-left: 3px solid #3b82f6;
+    padding: 0.35em 0.75em;
+    margin: 0.75em 0;
+    background: rgba(59,130,246,0.06);
+    border-radius: 0 4px 4px 0;
+    color: inherit;
+    font-style: italic;
+}
+.chunk-markdown pre {
+    background: rgba(0,0,0,0.05);
+    padding: 0.75em;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 0.75em 0;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+.dark .chunk-markdown pre { background: rgba(255,255,255,0.06); }
+.chunk-markdown code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: rgba(0,0,0,0.06);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+}
+.dark .chunk-markdown code { background: rgba(255,255,255,0.09); }
+.chunk-markdown pre code { background: none; padding: 0; font-size: 1em; }
+.chunk-markdown table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 0.75em 0;
+    font-size: 0.95em;
+}
+.chunk-markdown th,
+.chunk-markdown td {
+    border: 1px solid rgba(128,128,128,0.3);
+    padding: 0.35em 0.6em;
+    text-align: left;
+}
+.chunk-markdown th { background: rgba(128,128,128,0.1); font-weight: 700; }
+.chunk-markdown a { color: #2563eb; text-decoration: underline; }
+.dark .chunk-markdown a { color: #60a5fa; }
+.chunk-markdown hr { border: 0; border-top: 1px solid rgba(128,128,128,0.25); margin: 1em 0; }
 .tab-button { @apply px-1 py-4 text-sm font-medium border-b-2; }
 .tab-button.active { @apply border-blue-500 text-blue-600 dark:text-blue-400; }
 .tab-button.inactive { @apply border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-600; }

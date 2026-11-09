@@ -1504,6 +1504,7 @@ async def query_datastore_and_answer(
 
     ss = get_safe_store_instance(current_user.username, datastore_id, db)
     min_threshold = float(request_data.min_similarity_percent)
+    reconstruct = bool(getattr(request_data, "reconstruct_overlapping_chunks", False))
     results = []
 
     # 1. Retrieve Evidence Chunks
@@ -1516,7 +1517,8 @@ async def query_datastore_and_answer(
                     dense_weight=request_data.dense_weight,
                     bm25_weight=request_data.bm25_weight,
                     rrf_k=request_data.rrf_k,
-                    min_relevance_percent=min_threshold
+                    min_relevance_percent=min_threshold,
+                    reconstruct_overlapping_chunks=reconstruct
                 )
             except TypeError:
                 try:
@@ -1525,18 +1527,41 @@ async def query_datastore_and_answer(
                         top_k=request_data.top_k,
                         dense_weight=request_data.dense_weight,
                         bm25_weight=request_data.bm25_weight,
-                        rrf_k=request_data.rrf_k
+                        rrf_k=request_data.rrf_k,
+                        reconstruct_overlapping_chunks=reconstruct
                     )
-                except Exception:
-                    raw_hybrid = ss.query(request_data.query, top_k=request_data.top_k, min_similarity_percent=min_threshold)
+                except TypeError:
+                    try:
+                        raw_hybrid = ss.hybrid_query(
+                            query_text=request_data.query,
+                            top_k=request_data.top_k,
+                            dense_weight=request_data.dense_weight,
+                            bm25_weight=request_data.bm25_weight,
+                            rrf_k=request_data.rrf_k
+                        )
+                    except Exception:
+                        raw_hybrid = ss.query(request_data.query, top_k=request_data.top_k, min_similarity_percent=min_threshold)
+
+                if raw_hybrid and reconstruct and hasattr(ss, "reconstruct_overlapping_chunks"):
+                    raw_hybrid = ss.reconstruct_overlapping_chunks(raw_hybrid, add_metadata=True)
 
             results = raw_hybrid if raw_hybrid else []
         else:
-            results = ss.query(
-                request_data.query, 
-                top_k=request_data.top_k, 
-                min_similarity_percent=min_threshold
-            )
+            try:
+                results = ss.query(
+                    request_data.query, 
+                    top_k=request_data.top_k, 
+                    min_similarity_percent=min_threshold,
+                    reconstruct_overlapping_chunks=reconstruct
+                )
+            except TypeError:
+                results = ss.query(
+                    request_data.query, 
+                    top_k=request_data.top_k, 
+                    min_similarity_percent=min_threshold
+                )
+                if results and reconstruct and hasattr(ss, "reconstruct_overlapping_chunks"):
+                    results = ss.reconstruct_overlapping_chunks(results, add_metadata=True)
 
     sanitized_results = _sanitize_numpy(results)
 
@@ -1783,6 +1808,7 @@ async def query_datastore(
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db)
         min_threshold = float(request_data.min_similarity_percent)
+        reconstruct = bool(getattr(request_data, "reconstruct_overlapping_chunks", False))
         results = []
         with ss:
             if request_data.retrieval_target == "full_documents" and hasattr(ss, "query_full_documents"):
@@ -1827,23 +1853,46 @@ async def query_datastore(
                         dense_weight=request_data.dense_weight,
                         bm25_weight=request_data.bm25_weight,
                         rrf_k=request_data.rrf_k,
-                        min_similarity_percent=min_threshold
+                        min_similarity_percent=min_threshold,
+                        reconstruct_overlapping_chunks=reconstruct
                     )
                 except TypeError:
-                    raw_hybrid = ss.hybrid_query(
-                        query_text=request_data.query,
-                        top_k=request_data.top_k,
-                        dense_weight=request_data.dense_weight,
-                        bm25_weight=request_data.bm25_weight,
-                        rrf_k=request_data.rrf_k
-                    )
+                    try:
+                        raw_hybrid = ss.hybrid_query(
+                            query_text=request_data.query,
+                            top_k=request_data.top_k,
+                            dense_weight=request_data.dense_weight,
+                            bm25_weight=request_data.bm25_weight,
+                            rrf_k=request_data.rrf_k,
+                            reconstruct_overlapping_chunks=reconstruct
+                        )
+                    except TypeError:
+                        raw_hybrid = ss.hybrid_query(
+                            query_text=request_data.query,
+                            top_k=request_data.top_k,
+                            dense_weight=request_data.dense_weight,
+                            bm25_weight=request_data.bm25_weight,
+                            rrf_k=request_data.rrf_k
+                        )
+                        if raw_hybrid and reconstruct and hasattr(ss, "reconstruct_overlapping_chunks"):
+                            raw_hybrid = ss.reconstruct_overlapping_chunks(raw_hybrid, add_metadata=True)
                 results = raw_hybrid if raw_hybrid else []
             else:
-                results = ss.query(
-                    request_data.query, 
-                    top_k=request_data.top_k, 
-                    min_similarity_percent=min_threshold
-                )
+                try:
+                    results = ss.query(
+                        request_data.query, 
+                        top_k=request_data.top_k, 
+                        min_similarity_percent=min_threshold,
+                        reconstruct_overlapping_chunks=reconstruct
+                    )
+                except TypeError:
+                    results = ss.query(
+                        request_data.query, 
+                        top_k=request_data.top_k, 
+                        min_similarity_percent=min_threshold
+                    )
+                    if results and reconstruct and hasattr(ss, "reconstruct_overlapping_chunks"):
+                        results = ss.reconstruct_overlapping_chunks(results, add_metadata=True)
         return _sanitize_numpy(results)
     except Exception as e:
         trace_exception(e)

@@ -784,6 +784,16 @@ def _build_universal_profiles_for_modality(
     user_overrides: Dict[str, Any],
     forced_ctx_size: Optional[int] = None
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[str]]:
+    """Build two-tier profile dicts for a modality.
+
+    Tier 1 (`binding_profiles`): {alias -> {binding_name, binding_config, is_default}}
+    Tier 2 (`model_profiles`):   {name  -> {binding_profile_name, model_name, ..., is_default}}
+
+    Doctrine (UNIVERSAL_MODEL_PROFILES.md §3, §7, §12):
+      * exactly one default model profile per modality,
+      * every model profile references an existing binding profile,
+      * `model_name` lives ONLY on the model profile, never inside binding_config.
+    """
     all_bindings = db.query(binding_model_cls).filter(binding_model_cls.is_active == True).all()
     binding_profiles = {}
     model_profiles = {}
@@ -892,10 +902,16 @@ def _build_universal_profiles_for_modality(
                 for k, v in user_overrides.items():
                     profile_entry[k] = v
 
-            # Index under both full ID and short key for seamless lollms_client lookup
+            # Index under both full ID and short key for seamless lollms_client
+            # lookup. The bare-key entry is a shallow copy whose `is_default`
+            # is forced False — a single logical default must never be counted
+            # twice just because its profile is reachable under two aliases
+            # (doctrine §7, single-default invariant).
             model_profiles[prof_name] = profile_entry
             if orig_name not in model_profiles:
-                model_profiles[orig_name] = profile_entry
+                shadow = dict(profile_entry)
+                shadow["is_default"] = False
+                model_profiles[orig_name] = shadow
 
     # Second pass: Dynamically assemble Smart Router groups using member profiles
     for binding in all_bindings:
@@ -945,15 +961,24 @@ def _build_universal_profiles_for_modality(
                         "routing_strategy": group_strategy,
                         "model_profiles": assembled_pool
                     },
-                    "is_default": (binding.alias == active_binding_alias and group_key == active_model_name)
+                    # A binding profile slot is owned by the primary binding;
+                    # router group pseudo-bindings never claim it (§7).
+                    "is_default": False,
                 }
 
                 prof_full_name = f"{binding.alias}/{group_key}"
-                is_group_default = (binding.alias == active_binding_alias and (group_key == active_model_name or active_model_name is None))
+                # Strict default: only when the group name is explicitly the
+                # active model. Falling back to `active_model_name is None`
+                # would collide with the primary non-router default (§7).
+                is_group_default = (
+                    binding.alias == active_binding_alias
+                    and active_model_name is not None
+                    and group_key == active_model_name
+                )
                 if is_group_default:
                     default_model_profile_name = prof_full_name
 
-                model_profiles[prof_full_name] = {
+                router_profile = {
                     "binding_profile_name": smart_b_profile_name,
                     "model_name": group_key,
                     "title": cfg.get('title') or f"Smart Router ({group_key})",
@@ -965,10 +990,108 @@ def _build_universal_profiles_for_modality(
                     "selected_model_profiles": selected_profs,
                     "routing_strategy": group_strategy,
                     "is_default": is_group_default,
-                    **user_overrides
                 }
+                # User overrides must never flip `is_default` on a router group
+                # — the primary binding profile owns that slot (§7).
+                for ok, ov in user_overrides.items():
+                    if ok == "is_default":
+                        continue
+                    router_profile[ok] = ov
+                model_profiles[prof_full_name] = router_profile
 
     return binding_profiles, model_profiles, default_model_profile_name
+
+
+def _enforce_single_default_invariant(
+    modality: str,
+    binding_profiles: Dict[str, Any],
+    model_profiles: Dict[str, Any],
+) -> None:
+    """Repair violations of the single-default invariant (§7) in place.
+
+    IMPORTANT: `_build_universal_profiles_for_modality` intentionally registers
+    each model profile under TWO aliases — the namespaced id
+    (`"<binding_alias>/<profile_key>"`) and the bare key (`"<profile_key>"`) —
+    both pointing at the *same* dict object. Counting dict entries with
+    `is_default=True` therefore double-counts a single logical default.
+    We de-duplicate by object identity, not by key.
+
+    Any remaining violation (multiple *distinct* default profiles, or a model
+    profile referencing an unknown binding profile) is repaired here with a
+    warning instead of raising — the doctrine says the host app must keep the
+    invariant, not that it must crash on legacy config.
+    """
+    def _resolve_primary() -> Optional[str]:
+        # Prefer a namespaced key ("binding_alias/profile") when available —
+        # lollms_client accepts either form on switch.
+        for k in model_profiles:
+            if "/" in k and model_profiles[k].get("is_default"):
+                return k
+        for k, v in model_profiles.items():
+            if v.get("is_default"):
+                return k
+        return None
+
+    unique_default_objs: list[Dict[str, Any]] = []
+    seen_ids: set[int] = set()
+    for cfg in model_profiles.values():
+        if not cfg.get("is_default"):
+            continue
+        if id(cfg) in seen_ids:
+            continue
+        seen_ids.add(id(cfg))
+        unique_default_objs.append(cfg)
+
+    if len(unique_default_objs) > 1:
+        keeper = None
+        # Prefer the profile whose alias matches the target (i.e. the first
+        # namespaced default encountered). Fall back to the first default.
+        for k, v in model_profiles.items():
+            if v.get("is_default") and "/" in k:
+                keeper = v
+                break
+        if keeper is None:
+            keeper = unique_default_objs[0]
+        demoted_keys = []
+        for k, v in model_profiles.items():
+            if v.get("is_default") and v is not keeper:
+                v["is_default"] = False
+                demoted_keys.append(k)
+        ASCIIColors.warning(
+            f"[{modality}] doctrine repair — multiple model defaults "
+            f"collapsed to one; demoted: {demoted_keys}"
+        )
+
+    unique_binding_defaults: list[Dict[str, Any]] = []
+    seen_b_ids: set[int] = set()
+    for cfg in binding_profiles.values():
+        if not cfg.get("is_default"):
+            continue
+        if id(cfg) in seen_b_ids:
+            continue
+        seen_b_ids.add(id(cfg))
+        unique_binding_defaults.append(cfg)
+
+    if len(unique_binding_defaults) > 1:
+        keeper_b = unique_binding_defaults[0]
+        demoted_b = []
+        for k, v in binding_profiles.items():
+            if v.get("is_default") and v is not keeper_b:
+                v["is_default"] = False
+                demoted_b.append(k)
+        ASCIIColors.warning(
+            f"[{modality}] doctrine repair — multiple binding defaults "
+            f"collapsed to one; demoted: {demoted_b}"
+        )
+
+    for model_alias, model_cfg in model_profiles.items():
+        binding_ref = model_cfg.get("binding_profile_name")
+        if binding_ref and binding_ref not in binding_profiles:
+            ASCIIColors.warning(
+                f"[{modality}] doctrine repair — model profile '{model_alias}' "
+                f"references unknown binding profile '{binding_ref}'"
+            )
+
 
 def build_lollms_client_from_params(
     username: str, 
@@ -1112,9 +1235,12 @@ def build_lollms_client_from_params(
             user_overrides=ttm_params or {}
         )
 
-        # 1. Resolve Primary LLM Universal Profile and Config
+        # 1. Resolve Primary LLM Universal Profile
+        # NOTE: `primary_binding` is only used to locate the active profile.
+        # Its raw `config` is NEVER merged into a `llm_binding_config` kwarg —
+        # the binding profile (`llm_binding_profiles[target_binding_alias]`)
+        # already carries those settings (§3, §12).
         primary_binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
-        primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
 
         active_prof = None
         if default_llm_prof and default_llm_prof in llm_model_profiles:
@@ -1139,24 +1265,32 @@ def build_lollms_client_from_params(
         if not active_ctx or active_ctx <= 1:
             active_ctx = 32000
 
-        primary_config["model_name"] = actual_model
-        primary_config["ctx_size"] = active_ctx
-        primary_config["forced_context_size"] = active_ctx
+        # The connection tier carries ONLY connection settings. `model_name`,
+        # `ctx_size` and `forced_context_size` belong to the model profile
+        # (§2.2) — never flattened into binding_config (§9).
+        #
+        # The active model profile is the single source of execution config.
+        # Per-user params that are NOT overridden by a locked model profile
+        # are stored on the model profile entry; the binding config keeps the
+        # raw DB connection settings untouched.
+        if active_prof is not None:
+            active_prof["model_name"] = actual_model
+            active_prof["forced_context_size"] = active_ctx
+            active_prof["ctx_size"] = active_ctx
+            if not active_prof.get("allow_parameters_override", True):
+                # Locked profile: user params are ignored downstream.
+                pass
+            else:
+                for param_k, param_v in final_user_params.items():
+                    if param_v is not None:
+                        active_prof[param_k] = param_v
+                if llm_params:
+                    for param_k, param_v in llm_params.items():
+                        if param_v is not None:
+                            active_prof[param_k] = param_v
 
-        # Apply parameters respecting allow_parameters_override
-        if active_prof and not active_prof.get("allow_parameters_override", True):
-            for param_k in ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_activation', 'reasoning_effort', 'reasoning_summary']:
-                if active_prof.get(param_k) is not None:
-                    primary_config[param_k] = active_prof[param_k]
-            if llm_params:
-                primary_config.update(llm_params)
-        else:
-            primary_config.update(final_user_params)
-            primary_config["model_name"] = actual_model
-            primary_config["ctx_size"] = active_ctx
-            primary_config["forced_context_size"] = active_ctx
-
-        # 2. Resolve Primary TTS Binding
+        # 2. Resolve Primary TTS Binding — only used to identify the profile.
+        # No raw config merge: the profile registry carries everything.
         target_tts_alias = tts_binding_alias or (user_db.tts_binding_model_name.split('/')[0] if user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name else None)
         if not target_tts_alias:
             def_tts_name = settings.get("default_tts_binding_model")
@@ -1167,12 +1301,7 @@ def build_lollms_client_from_params(
             if def_tts_b:
                 target_tts_alias = def_tts_b.alias
 
-        primary_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == target_tts_alias, DBTTSBinding.is_active == True).first() if target_tts_alias else None
-        primary_tts_config = primary_tts_binding.config.copy() if primary_tts_binding and primary_tts_binding.config else {}
-        if tts_params:
-            primary_tts_config.update(tts_params)
-
-        # 3. Resolve Primary TTI Binding
+        # 3. Resolve Primary TTI Binding (profile only, no config flattening)
         target_tti_alias = tti_binding_alias or (user_db.tti_binding_model_name.split('/')[0] if user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name else None)
         if not target_tti_alias:
             def_tti_name = settings.get("default_tti_binding_model")
@@ -1183,12 +1312,7 @@ def build_lollms_client_from_params(
             if def_tti_b:
                 target_tti_alias = def_tti_b.alias
 
-        primary_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == target_tti_alias, DBTTIBinding.is_active == True).first() if target_tti_alias else None
-        primary_tti_config = primary_tti_binding.config.copy() if primary_tti_binding and primary_tti_binding.config else {}
-        if tti_params:
-            primary_tti_config.update(tti_params)
-
-        # 4. Resolve Primary STT Binding
+        # 4. Resolve Primary STT Binding (profile only)
         target_stt_alias = stt_binding_alias or (user_db.stt_binding_model_name.split('/')[0] if user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name else None)
         if not target_stt_alias:
             def_stt_name = settings.get("default_stt_binding_model")
@@ -1199,11 +1323,6 @@ def build_lollms_client_from_params(
             if def_stt_b:
                 target_stt_alias = def_stt_b.alias
 
-        primary_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.alias == target_stt_alias, DBSTTBinding.is_active == True).first() if target_stt_alias else None
-        primary_stt_config = primary_stt_binding.config.copy() if primary_stt_binding and primary_stt_binding.config else {}
-        if stt_params:
-            primary_stt_config.update(stt_params)
-
         # 5. Resolve Primary TTV Binding
         target_ttv_alias = ttv_binding_alias or settings.get("default_ttv_binding_model")
         if target_ttv_alias and '/' in target_ttv_alias:
@@ -1213,10 +1332,7 @@ def build_lollms_client_from_params(
             if def_ttv_b:
                 target_ttv_alias = def_ttv_b.alias
 
-        primary_ttv_binding = db.query(DBTTVBinding).filter(DBTTVBinding.alias == target_ttv_alias, DBTTVBinding.is_active == True).first() if target_ttv_alias else None
-        primary_ttv_config = primary_ttv_binding.config.copy() if primary_ttv_binding and primary_ttv_binding.config else {}
-        if ttv_params:
-            primary_ttv_config.update(ttv_params)
+        # TTV: profile-only, no config flattening.
 
         # 6. Resolve Primary TTM Binding
         target_ttm_alias = ttm_binding_alias or settings.get("default_ttm_binding_model")
@@ -1227,11 +1343,22 @@ def build_lollms_client_from_params(
             if def_ttm_b:
                 target_ttm_alias = def_ttm_b.alias
 
-        primary_ttm_binding = db.query(DBTTMBinding).filter(DBTTMBinding.alias == target_ttm_alias, DBTTMBinding.is_active == True).first() if target_ttm_alias else None
-        primary_ttm_config = primary_ttm_binding.config.copy() if primary_ttm_binding and primary_ttm_binding.config else {}
-        if ttm_params:
-            primary_ttm_config.update(ttm_params)
+        # TTM: profile-only, no config flattening.
 
+        # ------------------------------------------------------------------ #
+        # Universal Two-Tier Profiles (UNIVERSAL_MODEL_PROFILES.md §3, §7, §12)
+        #
+        # ONLY the profile-registry kwargs are passed to LollmsClient.
+        # Legacy per-modality `*_binding_name` / `*_binding_config` kwargs are
+        # DELIBERATELY OMITTED — passing them would auto-register a redundant
+        # "master" profile, eagerly instantiate the primary binding, and
+        # collapse the two tiers into a single flattened config, violating
+        # §9 (persistence), §12 (migration) and §1 (laziness).
+        #
+        # The execution tier (model profiles) carries `model_name`, `ctx_size`,
+        # `forced_context_size` and per-model params; the connection tier
+        # (binding profiles) carries only connection settings.
+        # ------------------------------------------------------------------ #
         client_init_params = {
             "load_llm": load_llm,
             "load_tti": load_tti,
@@ -1251,19 +1378,16 @@ def build_lollms_client_from_params(
             "ttv_model_profiles": ttv_model_profiles,
             "ttm_binding_profiles": ttm_binding_profiles,
             "ttm_model_profiles": ttm_model_profiles,
-            "llm_binding_name": primary_binding.name if primary_binding else None,
-            "llm_binding_config": primary_config,
-            "tts_binding_name": primary_tts_binding.name if primary_tts_binding else None,
-            "tts_binding_config": primary_tts_config,
-            "tti_binding_name": primary_tti_binding.name if primary_tti_binding else None,
-            "tti_binding_config": primary_tti_config,
-            "stt_binding_name": primary_stt_binding.name if primary_stt_binding else None,
-            "stt_binding_config": primary_stt_config,
-            "ttv_binding_name": primary_ttv_binding.name if primary_ttv_binding else None,
-            "ttv_binding_config": primary_ttv_config,
-            "ttm_binding_name": primary_ttm_binding.name if primary_ttm_binding else None,
-            "ttm_binding_config": primary_ttm_config
         }
+
+        # Enforce the single-default invariant per modality (§7) and the
+        # binding-reference invariant (§6) at session-init time — fail fast.
+        _enforce_single_default_invariant("llm", llm_binding_profiles, llm_model_profiles)
+        _enforce_single_default_invariant("tti", tti_binding_profiles, tti_model_profiles)
+        _enforce_single_default_invariant("tts", tts_binding_profiles, tts_model_profiles)
+        _enforce_single_default_invariant("stt", stt_binding_profiles, stt_model_profiles)
+        _enforce_single_default_invariant("ttv", ttv_binding_profiles, ttv_model_profiles)
+        _enforce_single_default_invariant("ttm", ttm_binding_profiles, ttm_model_profiles)
 
         attempted_mcp_servers: list[str] = []
 
@@ -1329,11 +1453,30 @@ def build_lollms_client_from_params(
                     attempted_mcp_servers.append(name)
 
                 if servers_list:
-                    client_init_params["tools_binding_name"] = "mcp"
-                    client_init_params["tools_binding_config"] = {
-                        "servers": servers_list,
-                        "servers_infos": servers_infos
+                    # Tools modality via the two-tier registry (§3.1, §8.9).
+                    # `binding_name="mcp"` stays; the toolset is the model name.
+                    client_init_params["tools_binding_profiles"] = {
+                        "mcp_main": {
+                            "binding_name": "mcp",
+                            "binding_config": {
+                                "servers": servers_list,
+                                "servers_infos": servers_infos,
+                            },
+                            "is_default": True,
+                        }
                     }
+                    client_init_params["tools_model_profiles"] = {
+                        "mcp_default_toolset": {
+                            "binding_profile_name": "mcp_main",
+                            "model_name": "default",
+                            "is_default": True,
+                        }
+                    }
+                    _enforce_single_default_invariant(
+                        "tools",
+                        client_init_params["tools_binding_profiles"],
+                        client_init_params["tools_model_profiles"],
+                    )
 
         # Everything that needs the database is done. Release the connection NOW so a slow
         # model load can't hold a pool slot (the outer finally closing again is harmless).
@@ -1345,26 +1488,29 @@ def build_lollms_client_from_params(
             # Strip volatile runtime-only params from the registry payload so that
             # temperature/top_p/reasoning changes do NOT trigger a full client rebuild.
             # These are applied per-request via _apply_runtime after cache retrieval.
+            # Volatile params are applied per-request via _apply_runtime so
+            # temperature/top_p/reasoning tweaks never trigger a client
+            # rebuild. They now live on the active MODEL PROFILE (not a
+            # flattened binding config).
             _VOLATILE_LLM_KEYS = {
                 "temperature", "top_k", "top_p", "repeat_penalty", "repeat_last_n",
                 "reasoning_activation", "reasoning_effort", "reasoning_summary",
                 "put_thoughts_in_context", "max_output_tokens",
                 "think", "thinking", "thinking_effort",
             }
-            registry_llm_cfg = registry_payload.get("llm_binding_config", {})
-            runtime_from_config = {}
-            if isinstance(registry_llm_cfg, dict):
+            runtime_from_config: Dict[str, Any] = {}
+            if active_prof is not None:
                 for vk in _VOLATILE_LLM_KEYS:
-                    if vk in registry_llm_cfg:
-                        runtime_from_config[vk] = registry_llm_cfg.pop(vk)
+                    if vk in active_prof and active_prof[vk] is not None:
+                        runtime_from_config[vk] = active_prof[vk]
 
             registry_key = _registry_key(registry_payload)
 
             # Merge runtime params: reasoning fields + volatile llm fields
             runtime = {
-                k: primary_config[k]
+                k: active_prof[k]
                 for k in ("reasoning_activation", "reasoning_effort")
-                if k in primary_config
+                if active_prof is not None and k in active_prof and active_prof[k] is not None
             }
             runtime.update(runtime_from_config)
 
@@ -1393,6 +1539,9 @@ def build_lollms_client_from_params(
 
                 try:
                     lc = LollmsClient(**registry_payload, callback=callback)
+                    # Post-construction: push forced ctx + runtime params onto the
+                    # live binding (the client's default model is the profile
+                    # marked is_default=True in llm_model_profiles).
                     _configure_client(lc, active_ctx, runtime)
                     _registry_put(registry_key, lc)
                     return lc

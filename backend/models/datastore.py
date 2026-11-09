@@ -83,6 +83,11 @@ class DataStoreQueryRequest(BaseModel):
     dense_weight: float = 0.5
     bm25_weight: float = 0.5
     rrf_k: int = 60
+    # Opt-in: merge adjacent overlapping chunks per document into a single
+    # chronological passage (deduplicated boundary text, gaps bridged with
+    # "..."). Without this field on the Pydantic model, FastAPI silently
+    # discards the value sent by the UI before it ever reaches the handler.
+    reconstruct_overlapping_chunks: bool = False
 
 class DataStoreAnswerRequest(DataStoreQueryRequest):
     system_prompt: Optional[str] = None
