@@ -1,5 +1,5 @@
 # backend/models/datastore.py
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -15,9 +15,24 @@ class DataStoreCreate(DataStoreBase):
     chunking_strategy: Optional[str] = "recursive"
     chunking_kwargs: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    @field_validator("vectorizer_config", "chunking_kwargs", mode="before")
+    @classmethod
+    def _normalize_dict_fields(cls, v):
+        # Accept ``null`` from the client as an empty dict instead of failing
+        # schema validation — a missing/blank vectorizer config used to surface
+        # as an opaque 422 that looked like "creation failed" in the UI.
+        return v if isinstance(v, dict) else {}
+
 class DataStoreEdit(DataStoreBase):
     chunking_strategy: Optional[str] = None
     chunking_kwargs: Optional[Dict[str, Any]] = None
+
+    @field_validator("chunking_kwargs", mode="before")
+    @classmethod
+    def _normalize_chunking_kwargs(cls, v):
+        if v is None:
+            return None
+        return v if isinstance(v, dict) else {}
 
 class DataStorePublic(DataStoreBase):
     model_config = ConfigDict(from_attributes=True)

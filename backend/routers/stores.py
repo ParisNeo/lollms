@@ -2689,7 +2689,13 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
 
 @datastore_router.post("", response_model=DataStorePublic, status_code=status.HTTP_201_CREATED)
 async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DataStorePublic:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore is not available on this server; DataStores cannot be created.")
+
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not user_db_record:
+        raise HTTPException(status_code=404, detail="User record not found.")
+
     if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first(): 
         raise HTTPException(status_code=400, detail=f"DataStore '{ds_create.name}' already exists.")
 
@@ -2701,10 +2707,39 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
     forced_vec = settings.get("force_rag_vectorizer")
 
     effective_vec_name = (forced_vec if force_rag and forced_vec else ds_create.vectorizer_name) or "default_st"
-    effective_vec_config = ds_create.vectorizer_config or {}
+    effective_vec_config = dict(ds_create.vectorizer_config or {})
 
     if is_sentence_transformer_vectorizer(effective_vec_name, effective_vec_config):
         effective_vec_config["use_shared_server"] = True
+
+    def _as_int(value: Any, fallback: int) -> int:
+        """Coerce a settings/caller value to int, falling back safely if missing/invalid."""
+        try:
+            if value is None:
+                return fallback
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    if force_rag:
+        resolved_chunk_size = _as_int(settings.get("force_rag_chunk_size"), 2048)
+        resolved_chunk_overlap = _as_int(settings.get("force_rag_chunk_overlap"), 256)
+    else:
+        resolved_chunk_size = _as_int(
+            ds_create.chunk_size,
+            _as_int(settings.get("default_chunk_size"), 2048),
+        )
+        resolved_chunk_overlap = _as_int(
+            ds_create.chunk_overlap,
+            _as_int(settings.get("default_chunk_overlap"), 256),
+        )
+
+    resolved_strategy = (
+        ds_create.chunking_strategy
+        or settings.get("default_rag_chunking_strategy")
+        or "recursive"
+    )
+    resolved_kwargs = ds_create.chunking_kwargs or {}
 
     new_ds_db_obj = DBDataStore(
         owner_user_id=user_db_record.id, 
@@ -2712,36 +2747,51 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
         description=ds_create.description,
         vectorizer_name=effective_vec_name,
         vectorizer_config=effective_vec_config,
-        chunk_size=(settings.get("force_rag_chunk_size", 2048) if force_rag else (ds_create.chunk_size or settings.get("default_chunk_size", 2048))),
-        chunk_overlap=(settings.get("force_rag_chunk_overlap", 256) if force_rag else (ds_create.chunk_overlap or settings.get("default_chunk_overlap", 256))),
-        chunking_strategy=ds_create.chunking_strategy or settings.get("default_rag_chunking_strategy", "recursive"),
-        chunking_kwargs=ds_create.chunking_kwargs or {}
+        chunk_size=resolved_chunk_size,
+        chunk_overlap=resolved_chunk_overlap,
+        chunking_strategy=resolved_strategy,
+        chunking_kwargs=resolved_kwargs
     )
     try:
         db.add(new_ds_db_obj)
         db.commit()
         db.refresh(new_ds_db_obj)
-        get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
-        
-        return DataStorePublic(
-            name=new_ds_db_obj.name,
-            description=new_ds_db_obj.description,
-            id=new_ds_db_obj.id,
-            owner_username=current_user.username,
-            created_at=new_ds_db_obj.created_at,
-            updated_at=new_ds_db_obj.updated_at,
-            permission_level='owner',
-            vectorizer_name=new_ds_db_obj.vectorizer_name,
-            vectorizer_config=new_ds_db_obj.vectorizer_config or {},
-            chunk_size=new_ds_db_obj.chunk_size,
-            chunk_overlap=new_ds_db_obj.chunk_overlap,
-            chunking_strategy=new_ds_db_obj.chunking_strategy,
-            chunking_kwargs=new_ds_db_obj.chunking_kwargs or {}
-        )
-    except Exception as e: 
+    except Exception as e:
         trace_exception(e)
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to persist DataStore record: {e}")
+
+    # Best-effort eager initialization of the SafeStore instance. The DataStore
+    # row has ALREADY been committed above — so a SafeStore init failure (e.g.
+    # embedding model not yet downloaded, transient network error, misconfigured
+    # vectorizer) must NOT be surfaced as a 500, otherwise the UI would report
+    # "creation failed" while the record silently persists and any retry would
+    # then hit "already exists". Lazy init inside get_safe_store_instance will
+    # retry the actual store initialization on first use.
+    try:
+        get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
+    except Exception as e:
+        trace_exception(e)
+        ASCIIColors.warning(
+            f"DataStore '{new_ds_db_obj.name}' was created but eager SafeStore "
+            f"initialization failed ({e}). It will be retried on first use."
+        )
+
+    return DataStorePublic(
+        name=new_ds_db_obj.name,
+        description=new_ds_db_obj.description,
+        id=new_ds_db_obj.id,
+        owner_username=current_user.username,
+        created_at=new_ds_db_obj.created_at,
+        updated_at=new_ds_db_obj.updated_at,
+        permission_level='owner',
+        vectorizer_name=new_ds_db_obj.vectorizer_name,
+        vectorizer_config=new_ds_db_obj.vectorizer_config or {},
+        chunk_size=new_ds_db_obj.chunk_size,
+        chunk_overlap=new_ds_db_obj.chunk_overlap,
+        chunking_strategy=getattr(new_ds_db_obj, "chunking_strategy", None) or "recursive",
+        chunking_kwargs=getattr(new_ds_db_obj, "chunking_kwargs", None) or {}
+    )
 
 @datastore_router.put("/{datastore_id}", response_model=DataStorePublic)
 async def update_datastore(datastore_id: str, ds_update: DataStoreEdit, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DataStorePublic:
@@ -2759,19 +2809,26 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreEdit, current_
 
     ds_db_obj.name = ds_update.name
     ds_db_obj.description = ds_update.description
+    if ds_update.chunking_strategy is not None:
+        ds_db_obj.chunking_strategy = ds_update.chunking_strategy
+    if ds_update.chunking_kwargs is not None:
+        ds_db_obj.chunking_kwargs = ds_update.chunking_kwargs
     try:
         db.commit()
         db.refresh(ds_db_obj)
         permission_level = 'owner' if ds_db_obj.owner_user_id == user_db_record.id else 'read_write'
         
+        owner_username = ds_db_obj.owner.username if getattr(ds_db_obj, "owner", None) else current_user.username
         return DataStorePublic(
              id=ds_db_obj.id, name=ds_db_obj.name, description=ds_db_obj.description,
-             owner_username=ds_db.owner.username, permission_level=permission_level,
+             owner_username=owner_username, permission_level=permission_level,
              created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at,
              vectorizer_name=ds_db_obj.vectorizer_name,
              vectorizer_config=ds_db_obj.vectorizer_config or {},
              chunk_size=ds_db_obj.chunk_size,
-             chunk_overlap=ds_db_obj.chunk_overlap
+             chunk_overlap=ds_db_obj.chunk_overlap,
+             chunking_strategy=getattr(ds_db_obj, "chunking_strategy", None) or "recursive",
+             chunking_kwargs=getattr(ds_db_obj, "chunking_kwargs", None) or {}
         )
     except Exception as e:
         db.rollback()
