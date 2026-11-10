@@ -28,7 +28,7 @@ bleach==6.4.0
 python-dotenv==1.2.4
 
 # --- LoLLMs Ecosystem & Client Library ---
-lollms-client==1.22.1
+lollms-client==1.22.2
 ascii_colors==0.13.0
 pipmaster==1.2.2
 openai==2.1.0
