@@ -42,6 +42,22 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-10 04:23]
+
+- fix: harden personality installation with path traversal and filename safety checks
+
+## [2026-11-10 02:55]
+
+- feat(flow-engine): add graph-based workflow execution engine
+
+## [2026-11-10 02:25]
+
+- chore: remove requirements_parisneo.txt
+
+## [2026-11-10 02:05]
+
+- feat(security): add security enhancements and update configuration
+
 ## [2026-11-10 04:54]
 
 - Fix: Update version of lollms-client to v1.22.2

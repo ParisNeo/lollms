@@ -24,8 +24,57 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 
-from backend.config import SECRET_KEY, ALGORITHM
+from backend.config import SECRET_KEY as _CONFIG_SECRET_KEY, ALGORITHM
 import json
+import warnings
+
+# ---------------------------------------------------------------------------
+# Signing-key resolution (SECURITY-CRITICAL)
+#
+# SECRET_KEY is imported as a module-level symbol by many call sites, but the
+# value shipped in `backend/config.py` may be a publicly known placeholder.
+# To prevent forgery of HS256 tokens with the published default key, we resolve
+# the key LAZILY at every sign/verify operation via `_get_signing_key()`:
+#
+#   1. Prefer `settings.get("SECRET_KEY")` — sanitized at startup by
+#      `_Settings._ensure_secure_secret_key` (auto-generated if unset/insecure).
+#   2. Fall back to the config-module value only while settings aren't loaded
+#      (e.g. very early imports). In that case we still reject known-public
+#      placeholders to close the window.
+#
+# Retro-compatibility: for installations that already have a secure, operator-
+# provided key (env var or previously rotated DB value), `settings.get`
+# returns exactly that value, so existing tokens remain valid. Only installs
+# stuck on the public placeholder rotate once — an unavoidable, one-time
+# session invalidation whose alternative is allowing permanent forgery.
+# ---------------------------------------------------------------------------
+_PUBLIC_PLACEHOLDER_KEYS = frozenset({
+    "a_very_secret_key_that_should_be_changed_for_production",
+    "a_very_secret_key_for_flask_sessions_or_jwt",
+    "my_super_secret_safe_store_key_CHANGE_ME",
+})
+
+def _get_signing_key() -> str:
+    """Return the effective SECRET_KEY used to sign/verify application JWTs."""
+    try:
+        from backend.settings import settings
+        candidate = settings.get("SECRET_KEY")
+        if isinstance(candidate, dict):
+            candidate = candidate.get("value")
+        if isinstance(candidate, str) and candidate and candidate not in _PUBLIC_PLACEHOLDER_KEYS:
+            return candidate
+    except Exception:
+        pass
+
+    fallback = _CONFIG_SECRET_KEY
+    if fallback in _PUBLIC_PLACEHOLDER_KEYS:
+        warnings.warn(
+            "SECURITY: JWT signing is using a PUBLICLY KNOWN placeholder SECRET_KEY. "
+            "Refusing to sign/verify with it — set SECRET_KEY or let settings auto-generate one.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return fallback
 
 import ast
 
@@ -344,7 +393,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if "iat" not in to_encode:
         to_encode["iat"] = int(now_utc.timestamp())
 
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, _get_signing_key(), algorithm=ALGORITHM)
     return encoded_jwt
 
 def create_sso_token(data: dict, secret_key: str, audience: str) -> str:
@@ -710,9 +759,9 @@ def send_password_reset_email(to_email: str, reset_link: str, username: str):
         send_generic_email(to_email, subject, text_content, send_as_text=True)
 
 def decode_main_access_token(token: str) -> Optional[dict]:
-    """Decodes a main application JWT using the global SECRET_KEY."""
+    """Decodes a main application JWT using the effective signing key."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, _get_signing_key(), algorithms=[ALGORITHM])
         return payload
     except JWTError:
         return None
