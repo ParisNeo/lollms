@@ -1,3 +1,4 @@
+import re
 import shutil
 import yaml
 import base64
@@ -170,13 +171,59 @@ def _write_handbag_manifest_from_legacy(installed_path: Path, config: dict) -> N
         print(f"WARNING: could not synthesize handbag.yaml at {manifest_path}: {exc}")
 
 
+def _resolve_zoo_source(repo_name: str, folder_name: str) -> Path:
+    """Resolve ``root/repo/folder_name`` and reject traversal outside the repo.
+
+    ``folder_name`` may legitimately be a nested relative path inside the zoo
+    repository (e.g. ``"simulators/python interpreter"``), so we cannot assume
+    it is a flat folder name. However we must still guarantee the resolved
+    source stays *inside* the target repository directory.
+    """
+    repo_root = (PERSONALITIES_ZOO_ROOT_PATH / repo_name).resolve()
+    source_path = (repo_root / folder_name).resolve()
+    if repo_root not in source_path.parents and source_path != repo_root:
+        raise ValueError(
+            f"Personality folder '{folder_name}' escapes repository "
+            f"'{repo_name}'."
+        )
+    return source_path
+
+
+_UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_handbag_folder_name(*candidates: Optional[str]) -> str:
+    """Derive a single, safe destination folder name for a handbag.
+
+    The zoo's ``folder_name`` is a repository-relative path that may contain
+    path separators and whitespace (e.g. ``"simulators/python interpreter"``),
+    which ``backend.personalities._safe_resolve`` rightly rejects because a
+    handbag must be a single directory component under the global root.
+
+    We therefore try, in order, each candidate (manifest name, then the
+    folder's basename). Each candidate is sanitized to a single path
+    component. If none yields a usable name, we fall back to a stable slug.
+    """
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        # Take only the final path segment, regardless of separators.
+        leaf = candidate.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].strip()
+        # Drop filesystem-hostile characters and collapse whitespace runs.
+        leaf = _UNSAFE_FILENAME_CHARS.sub("_", leaf)
+        leaf = re.sub(r"\s+", " ", leaf).strip(" .")
+        if leaf and leaf not in (".", "..") and not leaf.startswith("."):
+            return leaf
+    return "personality"
+
+
 def _install_personality_task(task, repo_name: str, folder_name: str):
     try:
         task.log(
             f"Starting install of '{folder_name}' from repo '{repo_name}'...",
             "INFO",
         )
-        source_path = PERSONALITIES_ZOO_ROOT_PATH / repo_name / folder_name
+        source_path = _resolve_zoo_source(repo_name, folder_name)
         if not source_path.is_dir():
             raise FileNotFoundError(
                 f"Source personality folder does not exist: {source_path}. "
@@ -199,10 +246,11 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
             raw_config = config
 
         ensure_personality_roots()
+        dest_name = _safe_handbag_folder_name(config.get("name"), folder_name)
         final_path = install_handbag_from_folder(
             Path(source_path),
             global_personalities_root(),
-            handbag_name=folder_name,
+            handbag_name=dest_name,
         )
         task.log(f"Handbag files copied to {final_path}.", "INFO")
 
@@ -269,7 +317,7 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
                 "WARNING",
             )
 
-        display_name = config.get("name") or Path(folder_name).name or folder_name
+        display_name = config.get("name") or dest_name
         task.log(
             f"Personality '{display_name}' installed to {final_path}.",
             "INFO",
