@@ -8,6 +8,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useImageStore } from '../../stores/images';
 import DiscussionList from './DiscussionList.vue';
+import VideoProjectList from './VideoProjectList.vue';
 
 import logoDefault from '../../assets/logo.png';
 import IconPlus from '../../assets/icons/IconPlus.vue';
@@ -196,8 +197,12 @@ async function handlePlusClick() {
     
     <!-- Main Content Area -->
     <div class="flex-1 min-h-0">
-      <!-- Expanded Content -->
-      <DiscussionList v-if="isSidebarOpen" class="h-full" />
+      <!-- Expanded Content: studio-context panels replace the discussion list
+           so each studio owns the "list" surface inside the global sidebar. -->
+      <template v-if="isSidebarOpen">
+        <VideoProjectList v-if="currentContext === 'video'" class="h-full" />
+        <DiscussionList v-else class="h-full" />
+      </template>
 
       <!-- Collapsed Content -->
       <div v-else class="h-full flex flex-col items-center py-3 space-y-2.5">

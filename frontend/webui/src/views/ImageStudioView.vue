@@ -41,6 +41,15 @@
                 <button @click="handleMoveToAlbum" class="btn-icon p-1.5 text-purple-600 hover:bg-purple-100 dark:hover:bg-purple-800/50" title="Move to Album">
                     <IconFolder class="w-4 h-4" />
                 </button>
+                <button
+                    v-if="ttvAvailable"
+                    @click="handleSendManyToVideoStudio"
+                    :disabled="isSendingToVideo"
+                    class="btn-icon p-1.5 text-red-600 hover:bg-red-100 dark:hover:bg-red-800/50 disabled:opacity-40"
+                    title="Send to Video Studio"
+                >
+                    <IconVideoCamera class="w-4 h-4" />
+                </button>
                 <button v-if="selectedImages.length === 2" @click="openCompareModal" class="btn-icon p-1.5 text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-800/50" title="Compare Side-by-Side">
                     <IconArrowsUpDown class="w-4 h-4 rotate-90" />
                 </button>
@@ -555,24 +564,27 @@
                                     </p>
 
                                     <div class="flex items-center justify-between pt-3 border-t border-white/15">
+                                        <!-- Primary actions (always visible) -->
                                         <div class="flex items-center gap-1">
-                                            <button @click.stop="copyPrompt(image.prompt)" class="p-2 bg-white/10 hover:bg-white/30 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Copy Prompt Text">
-                                                <IconCopy class="w-4 h-4" />
-                                            </button>
                                             <button @click.stop="reusePrompt(image)" class="p-2 bg-white/10 hover:bg-blue-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Reuse Settings in Studio">
                                                 <IconRefresh class="w-4 h-4" />
                                             </button>
-                                            <button @click.stop="openInpaintingEditor(image)" class="p-2 bg-white/10 hover:bg-purple-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Open Layer Canvas Studio">
-                                                <IconPencil class="w-4 h-4" />
-                                            </button>
-                                        </div>
-
-                                        <div class="flex items-center gap-1">
                                             <button @click.stop="downloadSingle(image)" class="p-2 bg-white/10 hover:bg-emerald-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Download Image File">
                                                 <IconArrowDownTray class="w-4 h-4" />
                                             </button>
-                                            <button @click.stop="openImageViewer(image, index)" class="p-2 bg-white/10 hover:bg-white/30 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Fullscreen Lightbox (Navigable)">
-                                                <IconMaximize class="w-4 h-4" />
+                                        </div>
+
+                                        <!-- Secondary actions collapsed into an overflow menu.
+                                             The menu is teleported to <body> (below) so the
+                                             card's overflow-hidden can't crop it. -->
+                                        <div class="relative">
+                                            <button
+                                                @click.stop="toggleImageMenu(image.id, $event)"
+                                                class="p-2 bg-white/10 hover:bg-white/30 rounded-xl text-white backdrop-blur-md transition-all active:scale-95"
+                                                :class="{ '!bg-white/30': openMenuImageId === image.id }"
+                                                title="More actions"
+                                            >
+                                                <IconEllipsisVertical class="w-4 h-4" />
                                             </button>
                                         </div>
                                     </div>
@@ -580,6 +592,53 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- ── TELEPORTED OVERFLOW MENU ── -->
+                    <Teleport to="body">
+                        <transition
+                            enter-active-class="transition ease-out duration-150"
+                            enter-from-class="opacity-0 scale-95"
+                            enter-to-class="opacity-100 scale-100"
+                            leave-active-class="transition ease-in duration-100"
+                            leave-from-class="opacity-100 scale-100"
+                            leave-to-class="opacity-0 scale-95"
+                        >
+                            <div
+                                v-if="openMenu.visible && selectedImageObjectsForMenu"
+                                data-overflow-menu
+                                @click.stop
+                                class="fixed w-52 rounded-xl bg-gray-900/95 dark:bg-gray-800/95 backdrop-blur-xl border border-white/15 shadow-2xl overflow-hidden"
+                                :style="{ top: `${openMenu.y}px`, left: `${openMenu.x}px`, zIndex: 9999 }"
+                            >
+                                <button @click.stop="copyPrompt(selectedImageObjectsForMenu.prompt); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition-colors">
+                                    <IconCopy class="w-3.5 h-3.5 shrink-0" />
+                                    <span>Copy prompt</span>
+                                </button>
+                                <button @click.stop="handleSendOneToDiscussion(selectedImageObjectsForMenu); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-blue-500/40 transition-colors">
+                                    <IconSend class="w-3.5 h-3.5 shrink-0" />
+                                    <span>Send to Discussion</span>
+                                </button>
+                                <button @click.stop="openInpaintingEditor(selectedImageObjectsForMenu); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-purple-500/40 transition-colors">
+                                    <IconPencil class="w-3.5 h-3.5 shrink-0" />
+                                    <span>Open in Layer Studio</span>
+                                </button>
+                                <button
+                                    v-if="ttvAvailable"
+                                    @click.stop="handleSendToVideoStudio(selectedImageObjectsForMenu); closeImageMenu()"
+                                    :disabled="isSendingToVideo"
+                                    class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-red-500/40 transition-colors disabled:opacity-40"
+                                >
+                                    <IconVideoCamera class="w-3.5 h-3.5 shrink-0" />
+                                    <span>Send to Video Studio</span>
+                                </button>
+                                <div class="h-px bg-white/10"></div>
+                                <button @click.stop="openImageViewerForMenu(); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition-colors">
+                                    <IconMaximize class="w-3.5 h-3.5 shrink-0" />
+                                    <span>Fullscreen lightbox</span>
+                                </button>
+                            </div>
+                        </transition>
+                    </Teleport>
 
                     <!-- ── PAGINATION CONTROLS ── -->
                     <div v-if="totalPages > 1" class="pt-6 pb-12 border-t dark:border-gray-800 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -657,6 +716,9 @@ import IconCheckCircle from '../assets/icons/IconCheckCircle.vue';
 import IconCopy from '../assets/icons/IconCopy.vue';
 import IconMagnifyingGlass from '../assets/icons/IconMagnifyingGlass.vue';
 import IconArrowsUpDown from '../assets/icons/IconArrowsUpDown.vue';
+import IconVideoCamera from '../assets/icons/IconVideoCamera.vue';
+import IconEllipsisVertical from '../assets/icons/IconEllipsisVertical.vue';
+import { useVideoStore } from '../stores/video';
 
 const imageStore = useImageStore();
 const dataStore = useDataStore();
@@ -664,7 +726,56 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const tasksStore = useTasksStore();
+const videoStore = useVideoStore();
 const router = useRouter();
+
+// Tracks a "Send to Video Studio" operation so we can disable the trigger
+// while the project + first-frame upload are in flight.
+const isSendingToVideo = ref(false);
+
+// Whether the server currently has a Text-to-Video binding active. Gates both
+// the batch action and the per-image menu entry — there is no point offering
+// "Send to Video Studio" if the platform cannot render videos at all.
+const ttvAvailable = computed(() => videoStore.capabilities?.ttv_available === true);
+
+// Overflow menu state. Only one thumbnail menu may be open at a time. The
+// menu itself is TELEPORTED to <body> and positioned with `fixed` coords
+// computed from the trigger button — otherwise the card's `overflow-hidden`
+// + rounded corners would crop it (as seen in the "menu cropped" bug).
+const MENU_WIDTH = 208;   // matches `w-52`
+const MENU_HEIGHT = 200;  // generous upper bound for 4 items + divider
+const openMenu = ref({ imageId: null, x: 0, y: 0, visible: false });
+const openMenuImageId = computed(() => openMenu.value.imageId);
+
+function toggleImageMenu(id, event) {
+    if (openMenu.value.imageId === id) {
+        closeImageMenu();
+        return;
+    }
+    const btn = event?.currentTarget;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const placeBelow = rect.bottom + MENU_HEIGHT + 16 < window.innerHeight;
+    const y = placeBelow ? rect.bottom + 8 : Math.max(8, rect.top - MENU_HEIGHT - 8);
+    const x = Math.max(8, Math.min(window.innerWidth - MENU_WIDTH - 8, rect.right - MENU_WIDTH));
+    openMenu.value = { imageId: id, x, y, visible: true };
+}
+
+function closeImageMenu() {
+    openMenu.value = { imageId: null, x: 0, y: 0, visible: false };
+}
+
+function closeMenuOnOutsideClick(e) {
+    if (!openMenu.value.imageId) return;
+    // The teleported menu carries `data-overflow-menu`; clicks inside it keep
+    // it open (each item closes it explicitly after running its action).
+    if (e.target.closest?.('[data-overflow-menu]')) return;
+    closeImageMenu();
+}
+
+function closeMenuOnViewportChange() {
+    if (openMenu.value.imageId) closeImageMenu();
+}
 
 const { 
     images, isLoading, isGenerating, 
@@ -1127,11 +1238,26 @@ async function openCompareModal() {
         uiStore.addNotification('Failed to load images for comparison.', 'error');
     }
 }
-
+// Defense-in-depth: selection toggles clear any open menu.
 function toggleSelection(id) { 
+    closeImageMenu();
     const i = selectedImages.value.indexOf(id); 
     if (i > -1) selectedImages.value.splice(i, 1); 
     else selectedImages.value.push(id); 
+}
+
+// Menu lookup — the menu references a specific image by id and resolves it
+// here so the teleported template stays declarative.
+const selectedImageObjectsForMenu = computed(() => {
+    if (!openMenu.value.imageId) return null;
+    return images.value.find(i => i.id === openMenu.value.imageId) || null;
+});
+
+function openImageViewerForMenu() {
+    const img = selectedImageObjectsForMenu.value;
+    if (!img) return;
+    const idx = filteredImages.value.findIndex(i => i.id === img.id);
+    if (idx >= 0) openImageViewer(img, idx);
 }
 
 function isSelected(id) { 
@@ -1222,6 +1348,107 @@ function reusePrompt(img) {
 
 function openInpaintingEditor(img) { router.push(`/image-studio/edit/${img.id}`); }
 
+// ── Send to Video Studio ────────────────────────────────────────────────
+// Creates a new video project in I2V mode with the given image attached as
+// its first frame, then routes the user straight into the Video Studio.
+async function sendImagesToVideoStudio(images) {
+    if (!Array.isArray(images) || images.length === 0) return;
+    isSendingToVideo.value = true;
+    let successCount = 0;
+    let lastSendError = null;
+    try {
+        for (const img of images) {
+            try {
+                // 1. Create the video project (I2V mode).
+                const { data: project } = await apiClient.post('/api/video-studio/projects', {
+                    title: (img.prompt || 'Untitled Video').slice(0, 60).trim() || 'Untitled Video',
+                    prompt: img.prompt || '',
+                    negative_prompt: img.negative_prompt || '',
+                    source_type: 'i2v',
+                    width: img.width || 512,
+                    height: img.height || 512,
+                    num_frames: 48,
+                    fps: 12,
+                });
+
+                // 2. Fetch the source image and upload it as the project's
+                //    first-frame using the **base64 JSON path** rather than
+                //    multipart FormData.
+                //
+                //    Multipart is fragile through axios: if the global apiClient
+                //    leaves a default `Content-Type` on the request (or if we set
+                //    `multipart/form-data` without letting the browser append the
+                //    boundary), the backend's `request.form()` parser fails and
+                //    returns 200-looking-but-empty / 400. The backend's
+                //    `_extract_frame_bytes_from_body` already accepts
+                //    `{ b64_image: "..." }` on the JSON path, so we send it
+                //    base64 — deterministic, header-agnostic, and always works.
+                const blobRes = await apiClient.get(
+                    `/api/image-studio/images/${img.id}/file`,
+                    { responseType: 'blob' }
+                );
+                const blob = blobRes.data instanceof Blob
+                    ? blobRes.data
+                    : new Blob([blobRes.data], { type: 'image/png' });
+                if (!blob || blob.size === 0) {
+                    throw new Error('Source image could not be read (empty payload).');
+                }
+                const b64Image = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const dataUrl = reader.result;
+                        const comma = typeof dataUrl === 'string' ? dataUrl.indexOf(',') : -1;
+                        resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
+                    };
+                    reader.onerror = () => reject(reader.error || new Error('FileReader failed'));
+                    reader.readAsDataURL(blob);
+                });
+                await apiClient.post(
+                    `/api/video-studio/projects/${project.id}/first-image`,
+                    { b64_image: b64Image }
+                );
+
+                // 3. Remember the last created project so we land on it.
+                videoStore.activeProjectId = project.id;
+                successCount++;
+            } catch (innerErr) {
+                console.error(`Send image #${img.id} to Video Studio failed:`, innerErr);
+                lastSendError = innerErr;
+            }
+        }
+
+        if (successCount > 0) {
+            await videoStore.fetchProjects();
+            uiStore.addNotification(
+                successCount === 1
+                    ? 'Sent to Video Studio.'
+                    : `Sent ${successCount} image(s) to Video Studio.`,
+                'success', 2500
+            );
+            router.push('/video-studio');
+        } else {
+            // Surface the backend's actual `detail` when available — a bare
+            // "Failed" hides actionable 400/415 diagnostics.
+            const detail = lastSendError?.response?.data?.detail
+                || lastSendError?.message
+                || 'Failed to send to Video Studio.';
+            uiStore.addNotification(detail, 'error');
+        }
+    } finally {
+        isSendingToVideo.value = false;
+    }
+}
+
+function handleSendToVideoStudio(image) {
+    return sendImagesToVideoStudio([image]);
+}
+
+function handleSendManyToVideoStudio() {
+    const images = selectedImageObjects.value;
+    if (!images.length) return;
+    return sendImagesToVideoStudio(images);
+}
+
 function openImageViewer(img, idx) { 
     // Build full sequence for the lightbox viewer so user can navigate seamlessly across all images
     const sequence = filteredImages.value.map((i, ord) => ({
@@ -1310,6 +1537,29 @@ async function handleMoveToDiscussion() {
     }
 }
 
+// Single-image → discussion. Mirrors the batch handler but targets an
+// individual thumbnail from the per-image overflow menu.
+async function handleSendOneToDiscussion(image) {
+    if (!image) return;
+    const { confirmed, value: id } = await uiStore.showConfirmation({
+        title: 'Send Image to Discussion',
+        message: 'Attach this image into the chosen discussion context.',
+        inputType: 'select',
+        inputOptions: discussionsStore.sortedDiscussions.map(d => ({ text: d.title, value: d.id })),
+    });
+    if (confirmed && id) {
+        try {
+            await imageStore.moveImagesToDiscussionBatch([image.id], id);
+            uiStore.addNotification('Image sent to discussion.', 'success', 2000);
+        } catch (e) {
+            uiStore.addNotification(
+                e?.response?.data?.detail || 'Failed to send image to discussion.',
+                'error'
+            );
+        }
+    }
+}
+
 async function handleMoveToAlbum() {
     const { confirmed, value: albumId } = await uiStore.showConfirmation({
         title: 'Organize into Album',
@@ -1362,11 +1612,22 @@ onMounted(() => {
     if (savedWidth) sidebarWidth.value = parseInt(savedWidth, 10);
     imageStore.fetchImages();
     if (dataStore.availableTtiModels.length === 0) dataStore.fetchAvailableTtiModels();
+    // Prime TTV capability so the "Send to Video Studio" action correctly
+    // appears/disappears without a page reload.
+    if (!videoStore.capabilities) {
+        videoStore.fetchCapabilities().catch(() => {});
+    }
     window.addEventListener('paste', handlePaste);
+    document.addEventListener('click', closeMenuOnOutsideClick);
+    window.addEventListener('resize', closeMenuOnViewportChange);
+    window.addEventListener('scroll', closeMenuOnViewportChange, true);
 });
 
 onUnmounted(() => { 
     window.removeEventListener('paste', handlePaste); 
+    document.removeEventListener('click', closeMenuOnOutsideClick);
+    window.removeEventListener('resize', closeMenuOnViewportChange);
+    window.removeEventListener('scroll', closeMenuOnViewportChange, true);
 });
 </script>
 
