@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-11 21:49]
+
+- feat: add TTV binding support to lollms_v1 router
+
 ## [2026-11-11 20:28]
 
 - feat: add video generation feature

@@ -60,6 +60,11 @@ try:
     from lollms_client.lollms_stt_binding import list_binding_models as list_stt_binding_models
 except ImportError:
     list_stt_binding_models = None
+
+try:
+    from lollms_client.lollms_ttv_binding import list_binding_models as list_ttv_binding_models
+except ImportError:
+    list_ttv_binding_models = None
 from backend.utils import track_service_usage, check_rate_limit
 from backend.routers.services.openai_v1 import (
     PersonalityListResponse, PersonalityInfo,
@@ -347,7 +352,8 @@ def _extract_raw_models_for_binding(b_type: str, binding_record: Any) -> List[An
         "llm": list_llm_binding_models,
         "tti": list_tti_binding_models,
         "tts": list_tts_binding_models,
-        "stt": list_stt_binding_models
+        "stt": list_stt_binding_models,
+        "ttv": list_ttv_binding_models
     }
     helper = helper_map.get(b_type)
     if helper:
