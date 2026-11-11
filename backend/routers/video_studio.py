@@ -83,6 +83,85 @@ def _active_tti(db: Session) -> Optional[DBTTIBinding]:
     return db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
 
 
+def _resolve_ttv_target(db: Session, username: str, requested_model: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Resolve the effective TTV binding alias + model name.
+
+    Mirrors ``lollms_v1._resolve_ttv_target`` but with one critical difference:
+    a bare model identifier like ``"ParisNeo/MiniMax-H3-FL2VA-FP8"`` is a
+    *namespaced model name* (HuggingFace ``owner/repo``), **not** a
+    ``binding_alias/model`` pair. Splitting it on the first ``/`` would send
+    both a bogus alias (``ParisNeo``) and a mangled model
+    (``MiniMax-H3-FL2VA-FP8``) to the engine.
+
+    Resolution order:
+
+      1. Explicit profile id resolved via ``get_universal_model_profile``
+         (handles ``binding_alias/profile_key``, ``profile_key``, ``title``,
+         ``name``, and physical ``model_name`` lookups uniformly).
+      2. Bare binding alias (``alias`` or ``name`` matching an active TTV
+         binding record).
+      3. The user's saved preference ``ttv_binding_model_name``.
+      4. The default active TTV binding record.
+
+    Returns ``(alias, model_name)`` where ``model_name`` is the *physical*
+    model identifier the engine expects (profile's ``model_name`` payload,
+    not the raw profile key/namespaced id).
+    """
+    from backend.session import get_universal_model_profile, user_sessions
+
+    if requested_model and requested_model.strip():
+        req = requested_model.strip()
+
+        # 1. Prefer the authoritative universal-profile resolver. It knows how
+        #    to distinguish "alias/profile" from a raw namespaced model name.
+        try:
+            prof_alias, prof_key, prof_info = get_universal_model_profile(
+                db, req, modality="ttv"
+            )
+        except Exception:
+            prof_alias, prof_key, prof_info = None, None, None
+        if prof_alias:
+            physical = (prof_info or {}).get("model_name") or prof_key
+            return prof_alias, physical
+
+        # 2. Bare binding alias match.
+        hit = (
+            db.query(DBTTVBinding)
+            .filter(
+                (DBTTVBinding.alias == req) | (DBTTVBinding.name == req),
+                DBTTVBinding.is_active == True,
+            )
+            .first()
+        )
+        if hit:
+            return hit.alias, hit.default_model_name
+
+    # 3. User preference — apply the same "is this a profile id?" resolution so
+    #    a saved "owner/repo" preference isn't misparsed as binding/model.
+    sess = user_sessions.get(username) or {}
+    user_pref = sess.get("ttv_binding_model_name")
+    if user_pref:
+        try:
+            prof_alias, prof_key, prof_info = get_universal_model_profile(
+                db, user_pref, modality="ttv"
+            )
+        except Exception:
+            prof_alias, prof_key, prof_info = None, None, None
+        if prof_alias:
+            physical = (prof_info or {}).get("model_name") or prof_key
+            return prof_alias, physical
+        if "/" in user_pref:
+            alias, model = user_pref.split("/", 1)
+            return alias or None, model or None
+        return user_pref, None
+
+    # 4. Default active TTV binding.
+    default_binding = _active_ttv(db)
+    if default_binding:
+        return default_binding.alias, default_binding.default_model_name
+    return None, None
+
+
 def _normalize_bytes(raw: Any) -> bytes:
     if isinstance(raw, bytes):
         return raw
@@ -151,16 +230,26 @@ def _run_generation_task(
     if not prompt:
         raise Exception("Prompt is empty. Fill in a prompt before rendering.")
 
-    # Resolve binding + model. Explicit `model_override` wins (alias/model format).
-    ttv_alias = ttv_model = None
+    # Resolve binding + model. `_resolve_ttv_target` is the single source of
+    # truth: it understands universal profile ids ("alias/profile"), bare
+    # binding aliases, and — crucially — does **not** misinterpret HF-style
+    # namespaced model names ("owner/repo") as a binding/model split.
     requested = model_override or project.get("model")
-    if requested:
-        if "/" in requested:
-            ttv_alias, ttv_model = requested.split("/", 1)
-        else:
-            ttv_model = requested
 
-    task.log("Connecting to Text-to-Video engine...")
+    from backend.db import get_db as _get_db
+    _db = next(_get_db())
+    try:
+        ttv_alias, ttv_model = _resolve_ttv_target(_db, username, requested)
+    finally:
+        _db.close()
+
+    if not ttv_alias:
+        raise Exception(
+            "No active Text-to-Video binding is configured. Add and activate a TTV "
+            "binding in the admin panel before rendering."
+        )
+
+    task.log(f"Connecting to Text-to-Video engine ({ttv_alias})...")
     task.set_progress(15)
 
     lc = build_lollms_client_from_params(
@@ -171,7 +260,10 @@ def _run_generation_task(
         ttv_model_name=ttv_model,
     )
     if not getattr(lc, "ttv", None):
-        raise Exception("Text-to-Video service is not configured or failed to load.")
+        raise Exception(
+            f"Text-to-Video engine '{ttv_alias}' could not be initialized. "
+            "Verify the binding is active and its configuration is valid."
+        )
 
     # Build generation kwargs
     kwargs: Dict[str, Any] = {}
@@ -214,6 +306,14 @@ def _run_generation_task(
         elif source_type == "flf":
             if not first_path or not last_path or not first_path.exists() or not last_path.exists():
                 raise Exception("Both first and last frame images are required for FLF generation.")
+            if not hasattr(lc.ttv, "generate_video_first_and_last_frame") or not callable(
+                lc.ttv.generate_video_first_and_last_frame
+            ):
+                raise Exception(
+                    f"The active TTV binding '{ttv_alias}' does not support first+last-frame "
+                    "interpolation. Switch the project to T2V or I2V mode, or configure a "
+                    "binding that exposes generate_video_first_and_last_frame()."
+                )
             if hasattr(lc.ttv, "supports_first_last_frame") and callable(lc.ttv.supports_first_last_frame):
                 if not lc.ttv.supports_first_last_frame():
                     raise Exception(
@@ -233,7 +333,25 @@ def _run_generation_task(
         raise
     except Exception as e:
         trace_exception(e)
-        raise Exception(f"Video generation failed: {e}")
+        err_text = str(e)
+
+        # Surfacing the two most common TTV daemon misconfigurations as
+        # actionable messages instead of opaque 500s from the binding layer.
+        if "Model mismatch" in err_text:
+            raise Exception(
+                f"The TTV engine rejected model '{ttv_model}' (binding '{ttv_alias}'): "
+                f"the daemon is serving a different checkpoint. Open the TTV binding "
+                f"settings and ensure the Universal Profile '{requested or ttv_model}' "
+                f"points to the model path the daemon is actually running, then retry. "
+                f"Engine message: {err_text}"
+            )
+        if "connection" in err_text.lower() or "refused" in err_text.lower():
+            raise Exception(
+                f"Could not reach the TTV engine at binding '{ttv_alias}'. Verify the "
+                f"daemon is running and reachable from this server. "
+                f"Engine message: {err_text}"
+            )
+        raise Exception(f"Video generation failed: {err_text}")
 
     task.log("Encoding finished video file...")
     task.set_progress(90)

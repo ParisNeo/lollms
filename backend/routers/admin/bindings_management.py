@@ -313,8 +313,46 @@ def _execute_binding_command_task(task: Task, binding_type: str, binding_data: D
                          if total > 0:
                              task.set_progress((completed / total) * 100)
                      parameters['callback'] = progress_callback
-                 
-                 result = method(**parameters)
+
+                 # Coerce incoming values against annotated types so admin-panel
+                 # string fields become ints/bools/floats as the binding expects.
+                 coerced: Dict[str, Any] = {}
+                 for name, value in parameters.items():
+                     ann = sig.parameters[name].annotation if name in sig.parameters else None
+                     if value is None or value == "":
+                         coerced[name] = value
+                         continue
+                     try:
+                         if ann in (int, "int"):
+                             coerced[name] = int(value)
+                         elif ann in (float, "float"):
+                             coerced[name] = float(value)
+                         elif ann in (bool, "bool"):
+                             coerced[name] = str(value).lower() in ("true", "1", "yes", "on")
+                         else:
+                             coerced[name] = value
+                     except (ValueError, TypeError):
+                         coerced[name] = value
+
+                 # Fail fast with an explicit, actionable message when the
+                 # admin form forgot a required argument, instead of a raw
+                 # Python TypeError.
+                 missing: list[str] = []
+                 for p_name, p_obj in sig.parameters.items():
+                     if p_name == "self" or p_name == "callback":
+                         continue
+                     if p_obj.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                         continue
+                     if p_obj.default is inspect.Parameter.empty and p_name not in coerced:
+                         missing.append(p_name)
+                 if missing:
+                     raise ValueError(
+                         f"Command '{command_name}' is missing required parameter(s): "
+                         f"{', '.join(missing)}. Fill them in the admin command form "
+                         f"and retry."
+                     )
+
+                 result = method(**coerced)
                  task.log(f"Command '{command_name}' completed successfully.")
                  task.set_progress(100)
                  return result
