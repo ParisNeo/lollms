@@ -10,7 +10,7 @@ import os
 import tempfile
 import re
 import io
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Tuple
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query, UploadFile, File, Form
@@ -39,6 +39,7 @@ from backend.db.models.voice import UserVoice as DBUserVoice
 from backend.security import verify_api_key
 from backend.session import user_sessions, build_lollms_client_from_params, get_safe_store_instance, get_user_data_root
 from backend.settings import settings
+from ascii_colors import trace_exception
 
 try:
     from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
