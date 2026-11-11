@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-11 20:28]
+
+- feat: add video generation feature
+
 ## [2026-11-10 05:30]
 
 - Fix: Update version of `ascii_colors` to latest major-minor patch.

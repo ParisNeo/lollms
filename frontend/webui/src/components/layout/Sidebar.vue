@@ -24,6 +24,7 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
 import IconMusicalNote from '../../assets/icons/IconMusicalNote.vue';
+import IconVideoCamera from '../../assets/icons/IconVideoCamera.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
@@ -77,8 +78,8 @@ watch([isSidebarOpen, isSidebarPinned], ([isOpen, isPinned]) => {
 const STUDIO_ROUTES = [
     '/notes-studio', '/skills-studio', '/artefacts-studio', 
     '/personality-studio', '/flow-studio', '/voices-studio', 
-    '/music-studio', '/image-studio', '/notebooks', '/notebook-studio',
-    '/datastores'
+    '/music-studio', '/image-studio', '/video-studio',
+    '/notebooks', '/notebook-studio', '/datastores'
 ];
 
 watch(() => route.path, (newPath) => {
@@ -124,6 +125,7 @@ const currentContext = computed(() => {
     if (path.startsWith('/flow-studio')) return 'flows';
     if (path.startsWith('/image-studio')) return 'images';
     if (path.startsWith('/music-studio')) return 'music';
+    if (path.startsWith('/video-studio')) return 'video';
     if (path.startsWith('/personality-studio')) return 'personality';
     if (path.startsWith('/profile')) return 'feed';
     return 'chat';
@@ -136,6 +138,7 @@ const plusButtonTitle = computed(() => {
         case 'flows': return 'New Workflow';
         case 'images': return 'New Album';
         case 'music': return 'New Song';
+        case 'video': return 'New Video Project';
         case 'personality': return 'New Personality';
         default: return 'New Discussion';
     }
@@ -163,6 +166,15 @@ async function handlePlusClick() {
             });
             if (confirmed && value) {
                 await imageStore.createAlbum(value);
+            }
+            break;
+        case 'video':
+            if (route.path !== '/video-studio') {
+                await router.push('/video-studio');
+                // Give the studio's onMounted time to wire its listener before firing.
+                setTimeout(() => window.dispatchEvent(new CustomEvent('lollms:new-video-project')), 120);
+            } else {
+                window.dispatchEvent(new CustomEvent('lollms:new-video-project'));
             }
             break;
         case 'personality':
@@ -302,6 +314,15 @@ async function handlePlusClick() {
               active-class="bg-amber-100/50 text-amber-600 dark:bg-amber-900/20"
             >
                 <IconMusicalNote class="w-5 h-5 text-amber-500" />
+            </router-link>
+
+            <router-link
+              to="/video-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Video Studio"
+              active-class="bg-red-100/50 text-red-600 dark:bg-red-900/20"
+            >
+                <IconVideoCamera class="w-5 h-5 text-red-500" />
             </router-link>
 
             <router-link

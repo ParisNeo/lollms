@@ -226,6 +226,27 @@ class TTVResponse(BaseModel):
     num_frames: int
     prompt: str
 
+# --- vLLM-Omni Compatible Video Job Models (Async + Sync) ---
+
+class VideoJobInfo(BaseModel):
+    """Metadata for an asynchronous video generation job (vLLM-Omni style)."""
+    id: str
+    object: str = "video.job"
+    status: str = "queued"  # queued | running | completed | failed
+    created_at: int
+    completed_at: Optional[int] = None
+    model: Optional[str] = None
+    prompt: Optional[str] = None
+    error: Optional[str] = None
+    # Echo back common generation parameters for observability.
+    width: Optional[int] = None
+    height: Optional[int] = None
+    num_frames: Optional[int] = None
+    fps: Optional[int] = None
+    num_inference_steps: Optional[int] = None
+    guidance_scale: Optional[float] = None
+    seed: Optional[int] = None
+
 # --- NEW: RAG Database Models ---
 class RagDatabaseInfo(BaseModel):
     id: str
@@ -494,6 +515,8 @@ async def get_capabilities(user: DBUser = Depends(get_user_for_lollms_service), 
         ttv_bindings = db.query(DBTTVBinding).filter(DBTTVBinding.is_active == True).all()
         if ttv_bindings:
             caps.append("text_to_video")
+            caps.append("image_to_video")
+            caps.append("video_generation_jobs")
         ttm_bindings = db.query(DBTTMBinding).filter(DBTTMBinding.is_active == True).all()
         if ttm_bindings:
             caps.append("text_to_music")
@@ -1383,6 +1406,635 @@ async def generate_video(
             num_frames=request.num_frames or 24,
             prompt=request.prompt
         )
+
+# --- vLLM-Omni Compatible Video Generation Endpoints (Async + Sync) ---
+#
+# These endpoints mirror the vLLM-Omni video generation API surface so that
+# clients built for vLLM-Omni diffusion servers can talk to LoLLMS without any
+# code changes.  They only activate when at least one TTV binding is configured
+# (otherwise the platform has no video engine to dispatch work to).
+#
+# Storage: jobs live in an in-memory registry keyed by ``vid_<uuid>``.  This is
+# intentional — the execution model is the same as the existing
+# ``/video/generations`` endpoint: the blocking binding call runs in the shared
+# router ``executor``.  A background janitor trims the registry to bound memory.
+
+import threading as _vt_threading
+
+_video_jobs: Dict[str, Dict[str, Any]] = {}
+_video_jobs_lock = _vt_threading.Lock()
+_VIDEO_JOBS_MAX = 256
+_VIDEO_JOB_TTL_SECONDS = 60 * 60  # completed/failed jobs are pruned after 1h
+
+
+def _prune_video_jobs() -> None:
+    """Drop oldest terminal jobs (completed/failed) when the registry fills up."""
+    now = int(time.time())
+    with _video_jobs_lock:
+        # First pass: TTL eviction of terminal jobs.
+        expired = [
+            jid for jid, job in _video_jobs.items()
+            if job["status"] in ("completed", "failed")
+            and job.get("completed_at")
+            and (now - job["completed_at"]) > _VIDEO_JOB_TTL_SECONDS
+        ]
+        for jid in expired:
+            _video_jobs.pop(jid, None)
+
+        # Second pass: hard cap on registry size.
+        while len(_video_jobs) > _VIDEO_JOBS_MAX:
+            # dict preserves insertion order — pop the oldest terminal job first.
+            victim = next(
+                (jid for jid, j in _video_jobs.items() if j["status"] in ("completed", "failed")),
+                None,
+            )
+            if victim is None:
+                break
+            _video_jobs.pop(victim, None)
+
+
+def _has_active_ttv_binding(db: Session) -> bool:
+    return db.query(DBTTVBinding).filter(DBTTVBinding.is_active == True).first() is not None
+
+
+def _resolve_ttv_target(
+    db: Session,
+    user: DBUser,
+    requested_model: Optional[str],
+) -> Tuple[str, Optional[str]]:
+    """
+    Resolve a TTV binding alias + model name from an incoming model string.
+
+    Resolution order:
+      1. Explicit `model` in "binding/model" or "binding" form.
+      2. User preference (`user.ttv_binding_model_name`).
+      3. Default active TTV binding (lowest id).
+    """
+    if requested_model and requested_model.strip():
+        req = requested_model.strip()
+        if "/" in req:
+            alias, model_obj = req.split("/", 1)
+            return alias, (model_obj or None)
+        target = db.query(DBTTVBinding).filter(
+            (DBTTVBinding.alias == req) | (DBTTVBinding.name == req),
+            DBTTVBinding.is_active == True,
+        ).first()
+        if target:
+            return target.alias, target.default_model_name
+
+    user_model = getattr(user, "ttv_binding_model_name", None)
+    if user_model:
+        if "/" in user_model:
+            alias, model_obj = user_model.split("/", 1)
+            return alias, (model_obj or None)
+        return user_model, None
+
+    default_binding = db.query(DBTTVBinding).filter(
+        DBTTVBinding.is_active == True
+    ).order_by(DBTTVBinding.id).first()
+    if default_binding:
+        return default_binding.alias, default_binding.default_model_name
+
+    raise HTTPException(
+        status_code=501,
+        detail="No active Text-to-Video (TTV) binding configured on the server.",
+    )
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _coerce_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def _guess_binary_extension(payload: bytes, default: str) -> str:
+    """Detect a reasonable file extension from magic bytes, else use `default`."""
+    if payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if payload.startswith(b"\xff\xd8\xff"):
+        return "jpg"
+    if payload.startswith(b"GIF87a") or payload.startswith(b"GIF89a"):
+        return "gif"
+    if len(payload) >= 12 and payload[8:12] == b"WEBP":
+        return "webp"
+    if len(payload) >= 12 and payload[4:8] == b"ftyp":
+        return "mp4"
+    if payload.startswith(b"RIFF") and len(payload) >= 12 and payload[8:12] == b"WAVE":
+        return "wav"
+    if payload.startswith(b"ID3") or (len(payload) >= 2 and payload[0] == 0xFF and payload[1] in (0xFB, 0xF3, 0xF2)):
+        return "mp3"
+    return default
+
+
+async def _normalize_reference_field(
+    field_name: str,
+    raw: Any,
+    ext_hint_key: str,
+) -> Tuple[Optional[Any], Dict[str, Any]]:
+    """
+    Normalize a reference field (`image_reference`, `video_reference`,
+    `mask_reference`, `audio_reference`) into a binding-friendly representation.
+
+    Accepts, in order of detection:
+      - ``UploadFile`` instance → returns raw bytes + ``{ext_hint_key: "<ext>"}``
+      - ``{"image_url": "..."}`` / ``{"audio_url": "..."}`` / ``{"video_url": "..."}`` dicts
+        → returns the URL string unchanged (bindings fetch over HTTP).
+      - JSON string of the above → parsed then handled.
+      - Base64 data URL → original bytes + extension hint.
+      - ``http(s)://`` URL string → passed through unchanged.
+      - Anything else → stringified and forwarded (bindings ignore unknowns).
+
+    Returns ``(value_or_None, extra_kwargs)``. When ``value_or_None`` is ``None``
+    the caller should NOT forward the field to the binding.
+    """
+    if raw is None:
+        return None, {}
+
+    # UploadFile from multipart/form-data
+    if hasattr(raw, "read") and hasattr(raw, "filename"):
+        try:
+            payload = await raw.read()
+        finally:
+            try:
+                await raw.close()
+            except Exception:
+                pass
+        if not payload:
+            return None, {}
+        ext = _guess_binary_extension(payload, default="bin")
+        return payload, {ext_hint_key: ext}
+
+    # String handling
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return None, {}
+
+        # Try JSON-wrapped URL envelope: {"image_url": ...} etc.
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    for url_key in ("image_url", "video_url", "audio_url", "mask_url", "url"):
+                        if url_key in parsed and parsed[url_key]:
+                            return str(parsed[url_key]), {}
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        if text.startswith(("http://", "https://")):
+            return text, {}
+
+        # Base64 data URL → decode to bytes so bindings that only accept paths
+        # or bytes still work.
+        if text.startswith("data:") and ";base64," in text:
+            try:
+                b64_body = text.split(",", 1)[1]
+                payload = base64.b64decode(b64_body, validate=True)
+            except Exception:
+                return None, {}
+            ext = _guess_binary_extension(payload, default="bin")
+            return payload, {ext_hint_key: ext}
+
+        # Bare base64 (no prefix) — attempt decode only if it looks like b64.
+        if len(text) > 128 and re.fullmatch(r"[A-Za-z0-9+/=\s]+", text):
+            try:
+                payload = base64.b64decode(text)
+                ext = _guess_binary_extension(payload, default="bin")
+                return payload, {ext_hint_key: ext}
+            except Exception:
+                pass
+
+        return text, {}
+
+    # Fallback (dicts, ints, etc.) — forward as-is; bindings ignore what they cannot use.
+    return raw, {}
+
+
+async def _parse_video_request(
+    request: Request,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Parse a video generation request into ``(params, reference_bytes_extra)``.
+
+    Supports both ``application/json`` and ``multipart/form-data`` per the
+    vLLM-Omni reference.
+
+    Returns:
+        params: normalized primitive fields (prompt, negative_prompt, width, ...)
+        refs:   binding kwargs derived from *_reference fields (image, image_ext,
+                video_reference, mask_reference, audio_reference, ...)
+    """
+    content_type = (request.headers.get("content-type") or "").lower()
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+    elif "application/x-www-form-urlencoded" in content_type:
+        form = await request.form()
+    else:
+        try:
+            body = await request.json()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid request body: {exc}. Expected application/json "
+                       f"or multipart/form-data with at least a 'prompt' field.",
+            )
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+        params: Dict[str, Any] = {
+            "prompt": body.get("prompt"),
+            "negative_prompt": body.get("negative_prompt"),
+            "width": _coerce_int(body.get("width")),
+            "height": _coerce_int(body.get("height")),
+            "num_frames": _coerce_int(body.get("num_frames")),
+            "fps": _coerce_int(body.get("fps")),
+            "num_inference_steps": _coerce_int(body.get("num_inference_steps")),
+            "guidance_scale": _coerce_float(body.get("guidance_scale")),
+            "seed": _coerce_int(body.get("seed")),
+            "model": body.get("model"),
+            "control_type": body.get("control_type"),
+        }
+
+        refs: Dict[str, Any] = {}
+        for src_key, dst_key, ext_key in (
+            ("image_reference", "image", "image_ext"),
+            ("video_reference", "video_reference", "video_ext"),
+            ("mask_reference", "mask_reference", "mask_ext"),
+            ("audio_reference", "audio_reference", "audio_ext"),
+        ):
+            if src_key in body and body[src_key] is not None:
+                val, extra = await _normalize_reference_field(src_key, body[src_key], ext_key)
+                if val is not None:
+                    refs[dst_key] = val
+                    refs.update(extra)
+
+        return params, refs
+
+    # Multipart / urlencoded path
+    def _form_get(field: str) -> Any:
+        # starlette's MultiDict: prefer first value
+        val = form.get(field)
+        return val
+
+    params = {
+        "prompt": _form_get("prompt"),
+        "negative_prompt": _form_get("negative_prompt"),
+        "width": _coerce_int(_form_get("width")),
+        "height": _coerce_int(_form_get("height")),
+        "num_frames": _coerce_int(_form_get("num_frames")),
+        "fps": _coerce_int(_form_get("fps")),
+        "num_inference_steps": _coerce_int(_form_get("num_inference_steps")),
+        "guidance_scale": _coerce_float(_form_get("guidance_scale")),
+        "seed": _coerce_int(_form_get("seed")),
+        "model": _form_get("model"),
+        "control_type": _form_get("control_type"),
+    }
+
+    refs: Dict[str, Any] = {}
+    for src_key, dst_key, ext_key in (
+        ("image_reference", "image", "image_ext"),
+        ("video_reference", "video_reference", "video_ext"),
+        ("mask_reference", "mask_reference", "mask_ext"),
+        ("audio_reference", "audio_reference", "audio_ext"),
+    ):
+        raw = form.get(src_key)
+        if raw is not None:
+            val, extra = await _normalize_reference_field(src_key, raw, ext_key)
+            if val is not None:
+                refs[dst_key] = val
+                refs.update(extra)
+
+    return params, refs
+
+
+def _invoke_ttv_binding(
+    ttv: Any,
+    prompt: str,
+    params: Dict[str, Any],
+    refs: Dict[str, Any],
+) -> bytes:
+    """
+    Dispatch to the correct TTV binding method based on the present reference
+    fields.  Follows the vLLM-Omni recipe semantics:
+
+      * image + audio  → lipsync
+      * image + video  → first/last frame interpolation
+      * everything else → standard text-to-video (passing references as kwargs)
+
+    Falls back gracefully when the binding lacks an optional capability.
+    """
+    base_kwargs: Dict[str, Any] = {}
+    for key in ("negative_prompt", "width", "height", "num_frames", "fps",
+                "num_inference_steps", "guidance_scale", "seed"):
+        val = params.get(key)
+        if val is not None:
+            base_kwargs[key] = val
+
+    image_ref = refs.get("image")
+    video_ref = refs.get("video_reference")
+    audio_ref = refs.get("audio_reference")
+    mask_ref = refs.get("mask_reference")
+
+    # Preserve extension hints + non-image references for advanced bindings.
+    ref_kwargs: Dict[str, Any] = {}
+    for k, v in refs.items():
+        if k not in ("image", "video_reference", "audio_reference", "mask_reference"):
+            ref_kwargs[k] = v  # e.g. image_ext, audio_ext
+
+    if image_ref is not None and audio_ref is not None:
+        # Lip-sync recipe
+        if hasattr(ttv, "supports_lipsync") and callable(ttv.supports_lipsync) and ttv.supports_lipsync():
+            lip_kwargs = dict(base_kwargs)
+            lip_kwargs.update(ref_kwargs)
+            return ttv.generate_lipsync_video(image_ref, audio_ref, prompt=prompt, **lip_kwargs)
+        # Fall through to standard generation if lipsync is not supported.
+
+    if image_ref is not None and video_ref is not None and params.get("control_type") != "inpaint":
+        # First / last frame interpolation recipe
+        if hasattr(ttv, "supports_first_last_frame") and callable(ttv.supports_first_last_frame) and ttv.supports_first_last_frame():
+            flf_kwargs = dict(base_kwargs)
+            flf_kwargs.update(ref_kwargs)
+            return ttv.generate_video_first_and_last_frame(
+                prompt=prompt,
+                start_image=image_ref,
+                end_image=video_ref,
+                **flf_kwargs,
+            )
+
+    # Standard text-to-video path — pass every reference as a kwarg; unknown
+    # kwargs are ignored per the lollms TTV binding contract.
+    std_kwargs = dict(base_kwargs)
+    std_kwargs.update(ref_kwargs)
+    if image_ref is not None:
+        std_kwargs["image"] = image_ref
+    if video_ref is not None:
+        std_kwargs["video_reference"] = video_ref
+    if audio_ref is not None:
+        std_kwargs["audio_reference"] = audio_ref
+    if mask_ref is not None:
+        std_kwargs["mask_reference"] = mask_ref
+    if params.get("control_type"):
+        std_kwargs["control_type"] = params["control_type"]
+
+    return _execute_video_generation_raw(ttv, prompt, **std_kwargs)
+
+
+def _run_video_job(
+    job_id: str,
+    username: str,
+    ttv_alias: str,
+    ttv_model: Optional[str],
+    prompt: str,
+    params: Dict[str, Any],
+    refs: Dict[str, Any],
+) -> None:
+    """Execute a queued video job, updating the in-memory registry on completion."""
+    with _video_jobs_lock:
+        job = _video_jobs.get(job_id)
+        if job is None:
+            return
+        job["status"] = "running"
+
+    try:
+        if not prompt or not str(prompt).strip():
+            raise ValueError("The 'prompt' field is required for video generation.")
+
+        lc = build_lollms_client_from_params(
+            username=username,
+            load_llm=False,
+            load_ttv=True,
+            ttv_binding_alias=ttv_alias,
+            ttv_model_name=ttv_model,
+            load_mcp=False,
+        )
+        if not hasattr(lc, "ttv") or not lc.ttv:
+            raise RuntimeError(f"TTV binding '{ttv_alias}' could not be initialized.")
+
+        video_bytes = _invoke_ttv_binding(lc.ttv, str(prompt), params, refs)
+        if not isinstance(video_bytes, (bytes, bytearray)) or not video_bytes:
+            raise RuntimeError("TTV binding returned an empty or invalid video stream.")
+
+        with _video_jobs_lock:
+            job = _video_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "completed"
+                job["completed_at"] = int(time.time())
+                job["_result_bytes"] = bytes(video_bytes)
+
+    except Exception as exc:
+        trace_exception(exc)
+        with _video_jobs_lock:
+            job = _video_jobs.get(job_id)
+            if job is not None:
+                job["status"] = "failed"
+                job["completed_at"] = int(time.time())
+                job["error"] = str(exc)
+
+
+def _job_public_view(job: Dict[str, Any]) -> VideoJobInfo:
+    """Strip internal-only fields (e.g. ``_result_bytes``) from a job for serialization."""
+    return VideoJobInfo(
+        id=job["id"],
+        status=job["status"],
+        created_at=job["created_at"],
+        completed_at=job.get("completed_at"),
+        model=job.get("model"),
+        prompt=job.get("prompt"),
+        error=job.get("error"),
+        width=job.get("width"),
+        height=job.get("height"),
+        num_frames=job.get("num_frames"),
+        fps=job.get("fps"),
+        num_inference_steps=job.get("num_inference_steps"),
+        guidance_scale=job.get("guidance_scale"),
+        seed=job.get("seed"),
+    )
+
+
+@lollms_v1_router.post("/videos", response_model=VideoJobInfo, status_code=202)
+async def submit_video_job(
+    request: Request,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /v1/videos — Submit an asynchronous video generation job (vLLM-Omni style).
+
+    Accepts ``application/json`` or ``multipart/form-data``.  Returns a job
+    descriptor; poll ``GET /v1/videos/{id}`` for status and download the MP4
+    via ``GET /v1/videos/{id}/content`` once completed.
+    """
+    if not _has_active_ttv_binding(db):
+        raise HTTPException(
+            status_code=501,
+            detail="No active Text-to-Video (TTV) binding configured. "
+                   "Configure and activate a TTV binding to enable video generation.",
+        )
+
+    params, refs = await _parse_video_request(request)
+
+    prompt_text = (params.get("prompt") or "").strip() if isinstance(params.get("prompt"), str) else params.get("prompt")
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail="The 'prompt' field is required.")
+
+    ttv_alias, ttv_model = _resolve_ttv_target(db, user, params.get("model"))
+
+    loop = asyncio.get_running_loop()
+    job_id = f"vid_{uuid.uuid4().hex}"
+    now_ts = int(time.time())
+
+    job_record: Dict[str, Any] = {
+        "id": job_id,
+        "status": "queued",
+        "created_at": now_ts,
+        "model": params.get("model") or (f"{ttv_alias}/{ttv_model}" if ttv_model else ttv_alias),
+        "prompt": prompt_text,
+        "width": params.get("width"),
+        "height": params.get("height"),
+        "num_frames": params.get("num_frames"),
+        "fps": params.get("fps"),
+        "num_inference_steps": params.get("num_inference_steps"),
+        "guidance_scale": params.get("guidance_scale"),
+        "seed": params.get("seed"),
+    }
+
+    with _video_jobs_lock:
+        _prune_video_jobs()
+        _video_jobs[job_id] = job_record
+
+    # Kick off in the shared executor — mirrors the existing /video/generations path.
+    loop.run_in_executor(
+        executor,
+        _run_video_job,
+        job_id,
+        user.username,
+        ttv_alias,
+        ttv_model,
+        prompt_text,
+        params,
+        refs,
+    )
+
+    return _job_public_view(job_record)
+
+
+@lollms_v1_router.get("/videos/{video_id}", response_model=VideoJobInfo)
+async def get_video_job(
+    video_id: str,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db),
+):
+    """GET /v1/videos/{id} — Poll job status/metadata."""
+    with _video_jobs_lock:
+        job = _video_jobs.get(video_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Video job '{video_id}' not found.")
+        return _job_public_view(job)
+
+
+@lollms_v1_router.get("/videos/{video_id}/content")
+async def download_video_content(
+    video_id: str,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db),
+):
+    """GET /v1/videos/{id}/content — Download the final MP4 once completed."""
+    with _video_jobs_lock:
+        job = _video_jobs.get(video_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Video job '{video_id}' not found.")
+        status = job["status"]
+        error = job.get("error")
+        payload = job.get("_result_bytes")
+
+    if status == "failed":
+        raise HTTPException(status_code=500, detail=f"Video job failed: {error or 'unknown error'}")
+    if status != "completed":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Video job is not ready (status: {status}). Poll the job first.",
+        )
+    if not payload:
+        raise HTTPException(status_code=500, detail="Video job completed but produced no content.")
+
+    return Response(
+        content=payload,
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": f'inline; filename="{video_id}.mp4"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@lollms_v1_router.post("/videos/sync")
+async def generate_video_sync(
+    request: Request,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /v1/videos/sync — Block until video generation finishes and return the
+    raw MP4 bytes directly (vLLM-Omni synchronous workflow).
+    """
+    if not _has_active_ttv_binding(db):
+        raise HTTPException(
+            status_code=501,
+            detail="No active Text-to-Video (TTV) binding configured. "
+                   "Configure and activate a TTV binding to enable video generation.",
+        )
+
+    params, refs = await _parse_video_request(request)
+    prompt_text = (params.get("prompt") or "").strip() if isinstance(params.get("prompt"), str) else params.get("prompt")
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail="The 'prompt' field is required.")
+
+    ttv_alias, ttv_model = _resolve_ttv_target(db, user, params.get("model"))
+    loop = asyncio.get_running_loop()
+
+    def _blocking() -> bytes:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            load_llm=False,
+            load_ttv=True,
+            ttv_binding_alias=ttv_alias,
+            ttv_model_name=ttv_model,
+            load_mcp=False,
+        )
+        if not hasattr(lc, "ttv") or not lc.ttv:
+            raise RuntimeError(f"TTV binding '{ttv_alias}' could not be initialized.")
+        result = _invoke_ttv_binding(lc.ttv, prompt_text, params, refs)
+        if not isinstance(result, (bytes, bytearray)) or not result:
+            raise RuntimeError("TTV binding returned an empty or invalid video stream.")
+        return bytes(result)
+
+    try:
+        video_bytes = await loop.run_in_executor(executor, _blocking)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        trace_exception(exc)
+        raise HTTPException(status_code=500, detail=f"Video generation failed: {exc}")
+
+    return Response(
+        content=video_bytes,
+        media_type="video/mp4",
+        headers={"Content-Disposition": f'attachment; filename="clip_{uuid.uuid4().hex[:8]}.mp4"'},
+    )
+
 
 # --- Per-Binding-Type Model Listing Endpoints ---
 

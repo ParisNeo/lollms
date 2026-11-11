@@ -125,6 +125,7 @@ from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
 from backend.routers.music_studio import music_studio_router
+from backend.routers.video_studio import video_studio_router
 from backend.routers.notes import notes_router
 from backend.routers.notebooks import router as notebooks_router
 from backend.routers.public import public_router
@@ -801,6 +802,7 @@ app.include_router(core_router, prefix="/api/discussions", tags=["Discussions"])
 
 for _router in (
     discussion_groups_router, voices_studio_router, image_studio_router, music_studio_router,
+    video_studio_router,
     notes_router, notebooks_router, public_router, lollms_v1_router, flow_studio_router,
     skills_router,
 ):

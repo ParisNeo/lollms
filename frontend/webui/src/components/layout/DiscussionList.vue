@@ -43,6 +43,7 @@ import IconDatabase from '../../assets/icons/IconDatabase.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue'; 
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconMusicalNote from '../../assets/icons/IconMusicalNote.vue';
+import IconVideoCamera from '../../assets/icons/IconVideoCamera.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
@@ -75,6 +76,10 @@ const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name || (
 const isVoicesStudioAvailable = computed(() => isTtsConfigured.value);
 const isImageStudioAvailable = computed(() => !!user.value?.tti_binding_model_name || (Array.isArray(availableTtiModels.value) && availableTtiModels.value.length > 0));
 const isMusicStudioAvailable = computed(() => !!user.value?.ttm_binding_model_name || (Array.isArray(availableTtmModels.value) && availableTtmModels.value.length > 0));
+
+// Video Studio is always listed so users can discover it and follow the
+// in-view "configure a TTV binding" guidance when none is active yet.
+const isVideoStudioAvailable = computed(() => true);
 const { flows } = storeToRefs(flowStore);
 
 const newsArticles = ref([]);
@@ -300,6 +305,8 @@ function handleTabClick(tab) {
         imageStore.fetchImages();
     } else if (tab === 'music') {
         if (!route.path.startsWith('/music-studio')) router.push('/music-studio');
+    } else if (tab === 'video') {
+        if (!route.path.startsWith('/video-studio')) router.push('/video-studio');
     }
 }
 
@@ -327,6 +334,8 @@ watch(() => route.path, (path) => {
         activeTab.value = 'images';
     } else if (path.startsWith('/music-studio')) {
         activeTab.value = 'music';
+    } else if (path.startsWith('/video-studio')) {
+        activeTab.value = 'video';
     } else if (path === '/' || path.startsWith('/chat')) {
         activeTab.value = uiStore.mainView === 'feed' ? 'feed' : 'chat';
     }
@@ -579,6 +588,17 @@ async function handleNewItem() {
         }
     } else if (activeTab.value === 'flows') {
         uiStore.openModal('flowWizard');
+    } else if (activeTab.value === 'video') {
+        // Navigate to the Video Studio; if we're already there, dispatch the
+        // "new project" event the studio listens for. Matches the collapsed
+        // dock's handlePlusClick behavior in Sidebar.vue.
+        if (!route.path.startsWith('/video-studio')) {
+            await router.push('/video-studio');
+            setTimeout(() => window.dispatchEvent(new CustomEvent('lollms:new-video-project')), 120);
+        } else {
+            window.dispatchEvent(new CustomEvent('lollms:new-video-project'));
+        }
+        if (window.innerWidth < 768) uiStore.closeSidebar();
     }
 }
 
@@ -758,6 +778,16 @@ function handleCopyDiscussionMarkdown() {
                 >
                     <IconMusicalNote class="w-3.5 h-3.5 mb-0.5" />
                     <span>MUSIC</span>
+                </button>
+                <button 
+                    v-if="isVideoStudioAvailable"
+                    @click="handleTabClick('video')" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'video' ? 'bg-white dark:bg-gray-900/50 text-red-600 dark:text-red-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Video Studio"
+                >
+                    <IconVideoCamera class="w-3.5 h-3.5 mb-0.5" />
+                    <span>VIDEO</span>
                 </button>
                 <button 
                     @click="handleTabClick('notebooks')" 

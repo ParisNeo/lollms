@@ -118,6 +118,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/video-studio',
+    name: 'VideoStudio',
+    component: () => import('../views/VideoStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/image-studio/edit/:id?',
     name: 'ImageEditor',
     component: () => import('../views/ImageEditorView.vue'),
