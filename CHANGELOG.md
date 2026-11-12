@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-11 23:52]
+
+- `Remove redundant asset references and optimize build pipeline for frontend modules`
+
 ## [2026-11-12 02:39]
 
 - fix(frontend): update video studio view
