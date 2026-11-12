@@ -220,11 +220,14 @@
                                 class="relative group rounded-lg overflow-hidden border dark:border-gray-700 bg-black/20 aspect-square"
                             >
                                 <img
-                                    :src="imageUrl(im.id)"
-                                    @error="(e) => (e.target.style.display = 'none')"
+                                    v-if="imageBlobs[im.id]"
+                                    :src="imageBlobs[im.id]"
                                     class="w-full h-full object-cover"
                                     :alt="im.prompt || 'library image'"
                                 />
+                                <div v-else class="w-full h-full flex items-center justify-center text-[9px] text-gray-400 bg-gray-200 dark:bg-gray-800">
+                                    Loading…
+                                </div>
                                 <div class="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
                                     <button v-if="edit.source_type !== 't2v'" @click.stop="useImageAsAnchor(im.id, 'first')" class="text-[9px] font-black uppercase text-blue-200 hover:text-white">Use as First</button>
                                     <button v-if="edit.source_type === 'flf'" @click.stop="useImageAsAnchor(im.id, 'last')" class="text-[9px] font-black uppercase text-blue-200 hover:text-white">Use as Last</button>
@@ -254,11 +257,14 @@
                                 @click="previewTake(v.id)"
                             >
                                 <img
-                                    :src="videoThumbUrl(v.id)"
+                                    v-if="videoThumbBlobs[v.id]"
+                                    :src="videoThumbBlobs[v.id]"
                                     class="w-full h-full object-cover"
                                     :alt="`Take ${videoLibrary.length - idx}`"
-                                    @error="(e) => { e.target.style.opacity = '0'; }"
                                 />
+                                <div v-else class="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-800">
+                                    <IconVideoCamera class="w-6 h-6 text-gray-400 opacity-50" />
+                                </div>
 
                                 <!-- Order + type badge -->
                                 <div class="absolute top-1 left-1 flex items-center gap-1">
@@ -310,7 +316,15 @@
                             <template v-for="(vid, i) in selectedVideoIds" :key="vid">
                                 <div class="shrink-0 w-24 relative group">
                                     <div class="aspect-video rounded border-2 border-blue-500 overflow-hidden bg-black/50">
-                                        <img :src="videoThumbUrl(vid)" class="w-full h-full object-cover" alt="" />
+                                        <img
+                                            v-if="videoThumbBlobs[vid]"
+                                            :src="videoThumbBlobs[vid]"
+                                            class="w-full h-full object-cover"
+                                            alt=""
+                                        />
+                                        <div v-else class="w-full h-full flex items-center justify-center">
+                                            <IconVideoCamera class="w-4 h-4 text-gray-400" />
+                                        </div>
                                     </div>
                                     <span class="absolute top-0.5 left-0.5 px-1 py-0.5 rounded bg-blue-600 text-white text-[8px] font-black">
                                         {{ i + 1 }}
@@ -664,17 +678,46 @@ const composeTaskId = ref(null);
 const compositionBlobUrl = ref(null);
 const previewVideoId = ref(null);
 
-function imageUrl(imageId) {
-    if (!activeProject.value) return '';
-    return `/api/video-studio/projects/${activeProject.value.id}/images/${imageId}?_=${imageLibrary.value.find(i => i.id === imageId)?.created_at || ''}`;
+// Auth-protected images must be fetched through apiClient (Bearer header) and
+// rendered as blob URLs. `<img src="/api/...">` cannot send the Authorization
+// header, so the server returns 401 and the tile shows a broken image. Keeping
+// per-id blob caches sidesteps repeated fetches for the same thumbnail.
+const imageBlobs = reactive({});       // imageId → object URL
+const videoThumbBlobs = reactive({});  // videoId → object URL
+
+function _revokeMap(map) {
+    for (const key of Object.keys(map)) {
+        try { URL.revokeObjectURL(map[key]); } catch (_) {}
+        delete map[key];
+    }
 }
 
-// Poster URL for a take. Backed by the /videos/{id}/thumbnail endpoint which
-// extracts a frame server-side via PyAV — avoids loading a whole MP4 blob per
-// tile just to show its first frame.
-function videoThumbUrl(videoId) {
-    if (!activeProject.value) return '';
-    return `/api/video-studio/projects/${activeProject.value.id}/videos/${videoId}/thumbnail?_=${Date.now()}`;
+async function _fetchBlobIntoMap(url, map, key) {
+    if (map[key]) return;                 // already cached
+    try {
+        const res = await apiClient.get(url, { responseType: 'blob' });
+        map[key] = URL.createObjectURL(res.data);
+    } catch (e) {
+        console.warn('Failed to load media blob:', url, e);
+    }
+}
+
+async function loadImageThumbBLOB(imageId) {
+    if (!activeProject.value) return;
+    await _fetchBlobIntoMap(
+        `/api/video-studio/projects/${activeProject.value.id}/images/${imageId}`,
+        imageBlobs,
+        imageId
+    );
+}
+
+async function loadVideoThumbBLOB(videoId) {
+    if (!activeProject.value) return;
+    await _fetchBlobIntoMap(
+        `/api/video-studio/projects/${activeProject.value.id}/videos/${videoId}/thumbnail`,
+        videoThumbBlobs,
+        videoId
+    );
 }
 
 // Click a take tile to load its specific MP4 into the main viewport.
@@ -731,6 +774,29 @@ async function loadMediaLibrary() {
     // Drop any timeline ids that no longer exist.
     const validIds = new Set((activeProject.value?.videos || []).map(v => v.id));
     selectedVideoIds.value = selectedVideoIds.value.filter(id => validIds.has(id));
+
+    // Purge blob cache entries for media that no longer exists.
+    const validImageIds = new Set((activeProject.value?.images || []).map(i => i.id));
+    for (const key of Object.keys(imageBlobs)) {
+        if (!validImageIds.has(key)) {
+            try { URL.revokeObjectURL(imageBlobs[key]); } catch (_) {}
+            delete imageBlobs[key];
+        }
+    }
+    const validVideoIds = new Set((activeProject.value?.videos || []).map(v => v.id));
+    for (const key of Object.keys(videoThumbBlobs)) {
+        if (!validVideoIds.has(key)) {
+            try { URL.revokeObjectURL(videoThumbBlobs[key]); } catch (_) {}
+            delete videoThumbBlobs[key];
+        }
+    }
+
+    // Prefetch all thumbnails in parallel — same auth-aware path as the video
+    // viewport. Failures are non-fatal (a placeholder icon stays visible).
+    await Promise.all([
+        ...(activeProject.value?.images || []).map(im => loadImageThumbBLOB(im.id)),
+        ...(activeProject.value?.videos || []).map(v => loadVideoThumbBLOB(v.id)),
+    ]);
 }
 
 async function onAddLibraryImages(event) {
@@ -986,7 +1052,14 @@ watch(tasks, async () => {
 watch(() => activeProject.value?.id, async (id) => {
     selectedVideoIds.value = [];
     previewVideoId.value = null;
-    if (!id) { _revokeIfSet(compositionBlobUrl); return; }
+    if (!id) {
+        _revokeIfSet(compositionBlobUrl);
+        _revokeMap(imageBlobs);
+        _revokeMap(videoThumbBlobs);
+        return;
+    }
+    _revokeMap(imageBlobs);
+    _revokeMap(videoThumbBlobs);
     await loadMediaLibrary();
     await loadCompositionBlob();
 });
@@ -1123,6 +1196,8 @@ onUnmounted(() => {
     _revokeIfSet(firstImageBlobUrl);
     _revokeIfSet(lastImageBlobUrl);
     _revokeIfSet(compositionBlobUrl);
+    _revokeMap(imageBlobs);
+    _revokeMap(videoThumbBlobs);
 });
 </script>
 
