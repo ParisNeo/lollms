@@ -118,6 +118,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/image-studio/environments',
+    name: 'ImageStudioEnvironments',
+    component: () => import('../views/StudioEnvironmentsView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/video-studio',
     name: 'VideoStudio',
     component: () => import('../views/VideoStudioView.vue'),

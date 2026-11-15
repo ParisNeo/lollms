@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-15 20:31]
+
+- feat(webui): refactor image editor toolbar and studio routing
+
 ## [2026-11-15 13:13]
 
 - Refactor: Remove unused assets and clean up dependencies in dist/assets

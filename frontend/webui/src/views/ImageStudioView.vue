@@ -75,6 +75,9 @@
                 <button @click="handleNewBlankImage" class="btn-icon p-1.5 text-gray-500 hover:text-blue-600" title="Open Layer Canvas Studio">
                     <IconPlus class="w-4.5 h-4.5" />
                 </button>
+                <button @click="router.push('/image-studio/environments')" class="btn-icon p-1.5 text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-900/30" title="Open Custom Studios (Infographic · Restoration · Character)">
+                    <IconSparkles class="w-4.5 h-4.5" />
+                </button>
             </div>
 
             <!-- Primary Generate Button -->
@@ -648,13 +651,8 @@
                                     <div class="flex items-center justify-between pt-3 border-t border-white/15">
                                         <!-- Primary actions (always visible) -->
                                         <div class="flex items-center gap-1">
-                                            <button 
-                                                @click.stop="toggleSelection(image.id)" 
-                                                class="p-2 rounded-xl text-white backdrop-blur-md transition-all active:scale-95"
-                                                :class="isSelected(image.id) ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white/10 hover:bg-blue-500'"
-                                                :title="isSelected(image.id) ? 'Unstage from Edit' : 'Stage for Edit'"
-                                            >
-                                                <IconCheckCircle class="w-4 h-4" />
+                                            <button @click.stop="openInpaintingEditor(image)" class="p-2 bg-white/10 hover:bg-purple-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Edit Image in Layer Studio">
+                                                <IconPencil class="w-4 h-4" />
                                             </button>
                                             <button @click.stop="reusePrompt(image)" class="p-2 bg-white/10 hover:bg-indigo-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Reuse Settings in Studio">
                                                 <IconRefresh class="w-4 h-4" />
@@ -708,14 +706,7 @@
                                     <IconCheckCircle class="w-3.5 h-3.5 shrink-0" />
                                     <span>{{ isSelected(selectedImageObjectsForMenu.id) ? 'Unstage from Edit' : 'Stage for Edit' }}</span>
                                 </button>
-                                <button @click.stop="handleSendOneToDiscussion(selectedImageObjectsForMenu); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-blue-500/40 transition-colors">
-                                    <IconSend class="w-3.5 h-3.5 shrink-0" />
-                                    <span>Send to Discussion</span>
-                                </button>
-                                <button @click.stop="openInpaintingEditor(selectedImageObjectsForMenu); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-purple-500/40 transition-colors">
-                                    <IconPencil class="w-3.5 h-3.5 shrink-0" />
-                                    <span>Open in Layer Studio</span>
-                                </button>
+
                                 <button
                                     v-if="ttvAvailable"
                                     @click.stop="handleSendToVideoStudio(selectedImageObjectsForMenu); closeImageMenu()"
