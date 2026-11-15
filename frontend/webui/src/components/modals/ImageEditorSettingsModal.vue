@@ -14,7 +14,9 @@
                 <div>
                     <label for="size" class="block text-sm font-medium">Image Size</label>
                     <select id="size" v-model="settings.imageSize" class="input-field mt-1">
-                        <option v-for="size in imageSizes" :key="size.value" :value="size.value">{{ size.label }}</option>
+                        <optgroup v-for="group in imageSizeGroups" :key="group.label" :label="group.label">
+                            <option v-for="size in group.items" :key="size.value" :value="size.value">{{ size.label }}</option>
+                        </optgroup>
                     </select>
                 </div>
                 <div>
@@ -55,17 +57,44 @@ const dataStore = useDataStore();
 
 const settings = computed(() => uiStore.modalData('imageEditorSettings')?.settings);
 
-const imageSizes = [
-    { value: '1024x1024', label: '1024x1024 (Square 1:1)' },
-    { value: '1152x896', label: '1152x896 (Landscape ~4:3)' },
-    { value: '896x1152', label: '896x1152 (Portrait ~3:4)' },
-    { value: '1216x832', label: '1216x832 (Landscape ~3:2)' },
-    { value: '832x1216', label: '832x1216 (Portrait ~2:3)' },
-    { value: '1344x768', label: '1344x768 (Widescreen 16:9)' },
-    { value: '768x1344', label: '768x1344 (Tall 9:16)' },
-    { value: '1536x640', label: '1536x640 (Cinematic ~2.4:1)' },
-    { value: '640x1536', label: '640x1536 (Tall Cinematic ~1:2.4)' },
-    { value: '512x512', label: '512x512 (Small Square)' },
+const imageSizeGroups = [
+    {
+        label: 'Screen / Display',
+        items: [
+            { value: '1024x1024', label: '1024×1024 (Square 1:1)' },
+            { value: '1152x896', label: '1152×896 (Landscape ~4:3)' },
+            { value: '896x1152', label: '896×1152 (Portrait ~3:4)' },
+            { value: '1216x832', label: '1216×832 (Landscape ~3:2)' },
+            { value: '832x1216', label: '832×1216 (Portrait ~2:3)' },
+            { value: '1344x768', label: '1344×768 (Widescreen 16:9)' },
+            { value: '768x1344', label: '768×1344 (Tall 9:16)' },
+            { value: '1536x640', label: '1536×640 (Cinematic ~2.4:1)' },
+            { value: '640x1536', label: '640×1536 (Tall Cinematic ~1:2.4)' },
+            { value: '512x512', label: '512×512 (Small Square)' },
+        ]
+    },
+    {
+        label: 'Print · ISO A-Series (1:√2)',
+        items: [
+            { value: '640x896', label: 'A6 Portrait (640×896)' },
+            { value: '896x1280', label: 'A5 Portrait (896×1280)' },
+            { value: '1088x1536', label: 'A4 Portrait (1088×1536)' },
+            { value: '1248x1760', label: 'A3 Portrait (1248×1760)' },
+            { value: '896x640', label: 'A6 Landscape (896×640)' },
+            { value: '1280x896', label: 'A5 Landscape (1280×896)' },
+            { value: '1536x1088', label: 'A4 Landscape (1536×1088)' },
+            { value: '1760x1248', label: 'A3 Landscape (1760×1248)' },
+        ]
+    },
+    {
+        label: 'Print · US Standard',
+        items: [
+            { value: '1088x1408', label: 'Letter Portrait (1088×1408)' },
+            { value: '1408x1088', label: 'Letter Landscape (1408×1088)' },
+            { value: '896x1472', label: 'Legal Portrait (896×1472)' },
+            { value: '1472x896', label: 'Legal Landscape (1472×896)' },
+        ]
+    }
 ];
 
 const modelConfigurableParameters = computed(() => {

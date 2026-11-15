@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-15 13:09]
+
+- feat(image): add timelapse generation and refine image editing workflows
+
 ## [2026-11-11 23:52]
 
 - `Remove redundant asset references and optimize build pipeline for frontend modules`

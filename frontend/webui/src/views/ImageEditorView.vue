@@ -27,8 +27,8 @@
             <button @click="saveProject" class="btn btn-secondary btn-sm h-8 px-3 rounded-xl flex items-center gap-1.5" title="Save Multi-Layer Project File (.json)">
                 <IconFolder class="w-3.5 h-3.5 text-amber-500"/> <span class="hidden sm:inline text-xs font-bold">Project</span>
             </button>
-            <button @click="saveCanvas" class="btn btn-primary btn-sm h-8 px-3 rounded-xl flex items-center gap-1.5 shadow-lg shadow-blue-500/20" title="Flatten and Save PNG to Gallery">
-                <IconSave class="w-3.5 h-3.5" /> <span class="hidden sm:inline text-xs font-bold">Save PNG</span>
+            <button @click="openSaveModal" class="btn btn-primary btn-sm h-8 px-3 rounded-xl flex items-center gap-1.5 shadow-lg shadow-blue-500/20" title="Export / Save in chosen format">
+                <IconSave class="w-3.5 h-3.5" /> <span class="hidden sm:inline text-xs font-bold">Save / Export</span>
             </button>
             
             <button @click="showMobileSidebar = !showMobileSidebar" class="lg:hidden btn btn-secondary p-1.5 ml-1 h-8 w-8 flex items-center justify-center rounded-xl"><IconAdjustmentsHorizontal class="w-4 h-4" /></button>
@@ -741,6 +741,103 @@
                 </div>
             </aside>
         </div>
+
+        <!-- ── SAVE / EXPORT FORMAT MODAL ── -->
+        <Teleport to="body">
+            <Transition
+                enter-active-class="transition-opacity duration-200"
+                enter-from-class="opacity-0"
+                enter-to-class="opacity-100"
+                leave-active-class="transition-opacity duration-150"
+                leave-from-class="opacity-100"
+                leave-to-class="opacity-0"
+            >
+                <div
+                    v-if="isSaveModalOpen"
+                    class="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+                    @click.self="closeSaveModal"
+                >
+                    <div class="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-md w-full border border-gray-200 dark:border-gray-800 overflow-hidden flex flex-col max-h-[90vh]">
+                        <!-- Header -->
+                        <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-start justify-between gap-3 shrink-0">
+                            <div>
+                                <h3 class="text-sm font-black uppercase tracking-widest text-gray-800 dark:text-gray-100">Save Image</h3>
+                                <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Choose an output format for this export.</p>
+                            </div>
+                            <button @click="closeSaveModal" class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" title="Close">
+                                <IconXMark class="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <!-- Body -->
+                        <div class="p-5 space-y-4 overflow-y-auto custom-scrollbar">
+                            <!-- Format picker -->
+                            <div>
+                                <label class="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 block mb-2">Format</label>
+                                <div class="grid grid-cols-4 gap-2">
+                                    <button
+                                        v-for="fmt in saveFormats"
+                                        :key="fmt.id"
+                                        @click="saveFormat = fmt.id"
+                                        class="flex flex-col items-center p-2 rounded-xl border transition-all"
+                                        :class="saveFormat === fmt.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 ring-1 ring-blue-500 shadow-sm' : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600'"
+                                    >
+                                        <span class="text-xl mb-1 leading-none">{{ fmt.emoji }}</span>
+                                        <span class="text-[10px] font-black uppercase">{{ fmt.label }}</span>
+                                        <span class="text-[8px] opacity-60 leading-tight text-center mt-0.5">{{ fmt.hint }}</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Quality (lossy formats only) -->
+                            <div v-if="['jpeg', 'webp', 'pdf'].includes(saveFormat)" class="space-y-1">
+                                <div class="flex justify-between items-center">
+                                    <label class="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500">Quality</label>
+                                    <span class="font-mono text-[10px] font-bold text-blue-600 dark:text-blue-400">{{ Math.round(saveQuality * 100) }}%</span>
+                                </div>
+                                <input type="range" min="0.4" max="1" step="0.01" v-model.number="saveQuality" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500" />
+                            </div>
+
+                            <!-- Filename -->
+                            <div class="space-y-1">
+                                <label class="text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 block">File Name</label>
+                                <div class="flex items-center gap-1">
+                                    <input
+                                        v-model="saveFilename"
+                                        type="text"
+                                        class="input-field w-full text-xs"
+                                        placeholder="composition"
+                                        @keydown.enter="confirmSave"
+                                    />
+                                    <span class="text-[10px] font-mono font-bold text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-1.5 rounded-lg shrink-0">.{{ saveExtension }}</span>
+                                </div>
+                            </div>
+
+                            <!-- Also add to gallery -->
+                            <div class="flex items-center justify-between gap-3 p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700">
+                                <div class="min-w-0">
+                                    <p class="text-xs font-bold text-gray-700 dark:text-gray-200">Also add to gallery</p>
+                                    <p class="text-[10px] text-gray-500 dark:text-gray-400">Saved as a PNG in Image Studio.</p>
+                                </div>
+                                <button @click="saveAlsoToGallery = !saveAlsoToGallery" :class="saveAlsoToGallery ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'" class="w-9 h-5 rounded-full relative transition-colors shrink-0">
+                                    <div class="absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow" :style="{ left: saveAlsoToGallery ? '18px' : '2px' }"></div>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Footer -->
+                        <div class="px-5 py-3 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end gap-2 shrink-0">
+                            <button @click="closeSaveModal" class="btn btn-secondary" :disabled="isSavingImage">Cancel</button>
+                            <button @click="confirmSave" class="btn btn-primary flex items-center gap-2" :disabled="isSavingImage">
+                                <IconAnimateSpin v-if="isSavingImage" class="w-4 h-4 animate-spin" />
+                                <IconSave v-else class="w-4 h-4" />
+                                <span>{{ isSavingImage ? 'Saving…' : 'Save' }}</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </Transition>
+        </Teleport>
     </div>
 </template>
 
@@ -760,6 +857,7 @@ import IconEraser from '../assets/icons/IconEraser.vue';
 import IconUndo from '../assets/icons/IconUndo.vue';
 import IconRedo from '../assets/icons/IconRedo.vue';
 import IconSave from '../assets/icons/IconSave.vue';
+import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconMinus from '../assets/icons/IconMinus.vue';
 import IconMaximize from '../assets/icons/IconMaximize.vue';
@@ -844,6 +942,192 @@ const outputAsNewLayer = ref(true);
 const selectedModel = ref('');
 const isProcessingTask = ref(false);
 const activeTaskId = ref(null);
+
+// ── Save / Export Modal State ──
+// The toolbar "Save" action now opens a format picker instead of blindly
+// flattening to PNG. `saveCanvas()` (below) is retained as the gallery-save
+// pipeline and is reused by `confirmSave()` when "also add to gallery" is on.
+const isSaveModalOpen = ref(false);
+const saveFormat = ref('png'); // 'png' | 'jpeg' | 'webp' | 'pdf'
+const saveQuality = ref(0.92);
+const saveAlsoToGallery = ref(true);
+const saveFilename = ref('composition');
+const isSavingImage = ref(false);
+
+const saveFormats = [
+    { id: 'png',  label: 'PNG',  hint: 'Lossless · alpha',   emoji: '🖼️' },
+    { id: 'jpeg', label: 'JPG',  hint: 'Smaller · no alpha', emoji: '📷' },
+    { id: 'webp', label: 'WEBP', hint: 'Compact · modern',   emoji: '🌐' },
+    { id: 'pdf',  label: 'PDF',  hint: 'Document export',    emoji: '📄' }
+];
+
+const saveExtension = computed(() => (
+    { png: 'png', jpeg: 'jpg', webp: 'webp', pdf: 'pdf' }[saveFormat.value] || 'png'
+));
+
+function buildCompositeCanvas() {
+    const comp = document.createElement('canvas');
+    comp.width = imageCanvasRef.value.width;
+    comp.height = imageCanvasRef.value.height;
+    const cc = comp.getContext('2d');
+    layers.value.filter(l => l.visible).forEach(l => {
+        if (l.ctx) {
+            cc.globalAlpha = l.opacity;
+            cc.globalCompositeOperation = l.blendMode || 'source-over';
+            cc.drawImage(l.ctx.canvas, 0, 0);
+        }
+    });
+    return comp;
+}
+
+// JPEG/PDF have no alpha channel — composite onto solid white first so the
+// transparent areas of the layered canvas don't turn black after encoding.
+function flattenWithWhiteBackground(comp) {
+    const bg = document.createElement('canvas');
+    bg.width = comp.width;
+    bg.height = comp.height;
+    const c = bg.getContext('2d');
+    c.fillStyle = '#FFFFFF';
+    c.fillRect(0, 0, bg.width, bg.height);
+    c.drawImage(comp, 0, 0);
+    return bg;
+}
+
+function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+/**
+ * Builds a minimal, spec-compliant single-page PDF wrapping a JPEG-compressed
+ * copy of the canvas (DCTDecode filter). No external library needed — we
+ * assemble the object table, xref and trailer with correct byte offsets.
+ */
+function canvasToPdfBlob(canvas, quality = 0.92) {
+    return new Promise((resolve, reject) => {
+        const w = canvas.width;
+        const h = canvas.height;
+        canvas.toBlob(async (jpegBlob) => {
+            if (!jpegBlob) {
+                reject(new Error('Failed to encode JPEG for PDF.'));
+                return;
+            }
+            try {
+                const jpegBuf = new Uint8Array(await jpegBlob.arrayBuffer());
+                const enc = new TextEncoder();
+
+                const parts = [];
+                let byteLen = 0;
+                const pushBytes = (u8) => { parts.push(u8); byteLen += u8.length; };
+                const pushStr = (s) => pushBytes(enc.encode(s));
+
+                const objOffsets = {};
+
+                // Header + binary marker (percent + 4 bytes >= 128)
+                pushStr('%PDF-1.4\n');
+                pushBytes(new Uint8Array([0x25, 0xE2, 0xE3, 0xCF, 0xD3, 0x0A]));
+
+                objOffsets[1] = byteLen;
+                pushStr('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+
+                objOffsets[2] = byteLen;
+                pushStr('2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n');
+
+                objOffsets[3] = byteLen;
+                pushStr(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n`);
+
+                objOffsets[4] = byteLen;
+                pushStr(`4 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBuf.length} >>\nstream\n`);
+                pushBytes(jpegBuf);
+                pushStr('\nendstream\nendobj\n');
+
+                const contentBytes = enc.encode(`q\n${w} 0 0 ${h} 0 0 cm\n/Im0 Do\nQ\n`);
+                objOffsets[5] = byteLen;
+                pushStr(`5 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`);
+                pushBytes(contentBytes);
+                pushStr('\nendstream\nendobj\n');
+
+                // xref table (20-byte entries) + trailer
+                const xrefStart = byteLen;
+                let xref = 'xref\n0 6\n0000000000 65535 f \n';
+                for (let i = 1; i <= 5; i++) {
+                    xref += String(objOffsets[i]).padStart(10, '0') + ' 00000 n \n';
+                }
+                pushStr(xref);
+                pushStr(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`);
+
+                resolve(new Blob(parts, { type: 'application/pdf' }));
+            } catch (err) {
+                reject(err);
+            }
+        }, 'image/jpeg', quality);
+    });
+}
+
+function openSaveModal() {
+    const base = (prompt.value || 'composition')
+        .trim()
+        .slice(0, 40)
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s+/g, '_') || 'composition';
+    saveFilename.value = base;
+    saveFormat.value = 'png';
+    saveQuality.value = 0.92;
+    saveAlsoToGallery.value = true;
+    isSaveModalOpen.value = true;
+}
+
+function closeSaveModal() {
+    if (isSavingImage.value) return;
+    isSaveModalOpen.value = false;
+}
+
+async function confirmSave() {
+    if (!imageCanvasRef.value || isSavingImage.value) return;
+    isSavingImage.value = true;
+    try {
+        const comp = buildCompositeCanvas();
+        const cleanName = (saveFilename.value || 'composition')
+            .trim()
+            .replace(/\.[^.]+$/, '') || 'composition';
+        const finalName = `${cleanName}.${saveExtension.value}`;
+
+        // 1. Download in the chosen format
+        if (saveFormat.value === 'pdf') {
+            const blob = await canvasToPdfBlob(flattenWithWhiteBackground(comp), saveQuality.value);
+            triggerDownload(blob, finalName);
+        } else {
+            const mime = saveFormat.value === 'jpeg'
+                ? 'image/jpeg'
+                : saveFormat.value === 'webp'
+                    ? 'image/webp'
+                    : 'image/png';
+            const target = saveFormat.value === 'jpeg' ? flattenWithWhiteBackground(comp) : comp;
+            const blob = await new Promise((res) => target.toBlob(res, mime, saveQuality.value));
+            if (blob) triggerDownload(blob, finalName);
+        }
+
+        // 2. Optionally persist a PNG copy into the gallery (reuses the
+        //    existing saveCanvas pipeline, including its own notification).
+        if (saveAlsoToGallery.value) {
+            saveCanvas();
+        }
+
+        uiStore.addNotification(`Exported ${finalName}`, 'success', 2000);
+        isSaveModalOpen.value = false;
+    } catch (e) {
+        console.error('Export failed:', e);
+        uiStore.addNotification('Failed to export image.', 'error');
+    } finally {
+        isSavingImage.value = false;
+    }
+}
 
 const recentColors = ref(['#000000', '#FFFFFF', '#EF4444', '#10B981', '#3B82F6', '#F59E0B', '#8B5CF6']);
 
@@ -1033,7 +1317,14 @@ const quickEditModifiers = [
     { label: 'Face Refine', emoji: '👤', prompt: 'realistic natural skin texture, visible fine pores, catchlights in eyes, individually defined hair strands, photorealistic', negative: 'plastic skin, airbrushed, cartoon, waxy face' },
     { label: 'Heal Scratches', emoji: '🩹', prompt: 'seamless scratch repair, crease removal, stain heal, sharp details recovered, damage-free restoration', negative: 'scratches, cracks, stains, torn, dust spots' },
     { label: 'Color Pop', emoji: '💥', prompt: 'vivid dynamic color palette, rich color depth, chromatic brilliance, high saturation balance', negative: 'dull, muted, faded, washed out' },
-    { label: 'Teal & Orange', emoji: '🎬', prompt: 'cinematic teal and orange color harmony, cool moody shadow tones, warm golden subject accents', negative: 'muddy colors, green tint' }
+    { label: 'Teal & Orange', emoji: '🎬', prompt: 'cinematic teal and orange color harmony, cool moody shadow tones, warm golden subject accents', negative: 'muddy colors, green tint' },
+    { label: 'Despeckle Scan', emoji: '🧽', prompt: 'professionally despeckled scanned document, removed dust spots, print noise, and minute debris, ultra clean uniform page background, 600 DPI sharpness', negative: 'speckles, dust, dots, print noise, dirty scan' },
+    { label: 'Deskew Doc', emoji: '📐', prompt: 'perfectly deskewed leveled scan, straight horizontal baselines, square-cropped edges, geometric document alignment', negative: 'tilted, crooked, wavy baseline, skewed scan' },
+    { label: 'Recover Faded Ink', emoji: '🖋️', prompt: 'restored faded and degraded ink density, recovered washed-out print contrast, deepened low-opacity lettering, carbon copy recovery', negative: 'washed out, faded, illegible, low contrast, invisible faint text' },
+    { label: 'Align Perspective', emoji: '📏', prompt: 'absolutely aligned perspective, corrected skewed document orientation, straightened baselines, uniform rectangular page geometry, four-corner pinning, snapped to vertical truth', negative: 'tilted, skewed, off-axis, rotated, canted, drifting baselines' },
+    { label: 'Auto-Crop Borders', emoji: '✂️', prompt: 'auto-detected page borders, precise edge cropping, tight content-aware crop, removed outer blank margins, sharp rectangular document boundary', negative: 'misaligned crop, missing borders, cut-off content, uneven margin, black edge band' },
+    { label: 'Pin Corners', emoji: '📌', prompt: 'four document corners detected and pinned, perspective pinpoints locked to rectangular page, corner extraction registration, restored straight border rectangle, unified page frame', negative: 'crooked corners, missed corner, floating edges, unbalanced page' },
+    { label: 'Dewarp Page', emoji: '📖', prompt: 'page curvature dewarped, flattened curved book page, straightened distorted text lines, cylindrical perspective correction, dewarped flat print surface', negative: 'wavy text, curled page, barrel distortion, curved lines, bowl warp' }
 ];
 
 onMounted(async () => {
@@ -2099,6 +2390,11 @@ function handleWheel(e) {
 }
 
 function handleKeydown(e) {
+    if (e.key === 'Escape' && isSaveModalOpen.value) {
+        e.preventDefault();
+        closeSaveModal();
+        return;
+    }
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     
     if (e.key === 'b' || e.key === 'B') setTool('brush');
@@ -2125,7 +2421,7 @@ function handleKeydown(e) {
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        saveCanvas();
+        openSaveModal();
     }
 }
 </script>

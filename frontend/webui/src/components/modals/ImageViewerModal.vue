@@ -84,6 +84,17 @@
       </div>
     </Transition>
   </Teleport>
+
+  <!-- Format picker for the lightbox download action -->
+  <ImageFormatExportModal
+      :visible="isDownloadModalOpen"
+      :default-filename="downloadDefaultFilename"
+      :saving="isDownloading"
+      title="Download Image"
+      description="Choose an output format for this export."
+      @confirm="handleDownloadConfirm"
+      @close="isDownloadModalOpen = false"
+  />
 </template>
 
 <script setup>
@@ -92,6 +103,8 @@ import { useRouter } from 'vue-router';
 import { useUiStore } from '../../stores/ui';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import apiClient from '../../services/api';
+import ImageFormatExportModal from './ImageFormatExportModal.vue';
+import { exportImageBlobAsFormat } from '../../services/imageExport';
 
 import IconClose from '../../assets/icons/IconClose.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
@@ -116,6 +129,22 @@ const imageWrapperRef = ref(null);
 const imageList = computed(() => uiStore.imageViewer.imageList);
 const currentImage = computed(() => imageList.value[currentIndex.value] || null);
 const currentImageSrc = computed(() => currentImage.value?.src);
+
+// Format-picker state for the lightbox download action — the raw download is
+// replaced with an explicit format choice (PNG/JPG/WEBP/PDF) so users are
+// never surprised by a silently-encoded default.
+const isDownloadModalOpen = ref(false);
+const isDownloading = ref(false);
+const downloadDefaultFilename = computed(() => {
+    const img = currentImage.value;
+    if (!img) return 'image';
+    const source = img.filename || img.prompt || `image_${currentIndex.value + 1}`;
+    return source
+        .trim()
+        .slice(0, 40)
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s+/g, '_') || 'image';
+});
 
 const hasNext = computed(() => currentIndex.value < imageList.value.length - 1);
 const hasPrevious = computed(() => currentIndex.value > 0);
@@ -155,23 +184,28 @@ function handleKeydown(e) {
   }
 }
 
-async function downloadImage() {
+function downloadImage() {
     if (!currentImageSrc.value) return;
+    isDownloadModalOpen.value = true;
+}
+
+async function handleDownloadConfirm({ format, quality, filename }) {
+    if (!currentImageSrc.value || isDownloading.value) return;
+    isDownloading.value = true;
     try {
-        const response = await apiClient.get(currentImageSrc.value, {
-            responseType: 'blob',
+        const response = await apiClient.get(currentImageSrc.value, { responseType: 'blob' });
+        const { filename: saved } = await exportImageBlobAsFormat(response.data, {
+            format,
+            quality,
+            filename
         });
-        const url = window.URL.createObjectURL(new Blob([response.data]));
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', currentImage.value?.filename || 'image.png');
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
+        uiStore.addNotification(`Downloaded ${saved}`, 'success', 2000);
+        isDownloadModalOpen.value = false;
     } catch (error) {
         console.error('Download failed:', error);
         uiStore.addNotification('Failed to download image.', 'error');
+    } finally {
+        isDownloading.value = false;
     }
 }
 

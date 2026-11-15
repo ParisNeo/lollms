@@ -65,9 +65,9 @@
                 <button @click="handleRefresh" class="btn-icon p-1.5 text-gray-500 hover:text-blue-600" title="Refresh Gallery">
                     <IconRefresh class="w-4.5 h-4.5" :class="{'animate-spin': isLoading}" />
                 </button>
-                <label class="btn-icon p-1.5 text-gray-500 hover:text-blue-600 cursor-pointer" title="Upload Image File(s)">
+                <label class="btn-icon p-1.5 text-gray-500 hover:text-blue-600 cursor-pointer" title="Upload Image / PDF File(s)">
                     <IconArrowUpTray class="w-4.5 h-4.5" />
-                    <input type="file" @change="handleUpload" class="hidden" accept="image/*" multiple>
+                    <input type="file" @change="handleUpload" class="hidden" accept="image/*,application/pdf,.pdf" multiple>
                 </label>
                 <button @click="openCameraModal" class="btn-icon p-1.5 text-gray-500 hover:text-blue-600" title="Capture from Webcam">
                     <IconCamera class="w-4.5 h-4.5" />
@@ -100,8 +100,8 @@
         <!-- Drag and drop ingestion overlay -->
         <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 backdrop-blur-sm border-4 border-dashed border-blue-500 rounded-3xl z-50 flex flex-col items-center justify-center m-6 pointer-events-none animate-in fade-in zoom-in-95">
             <IconPhoto class="w-16 h-16 text-blue-600 mb-2 animate-bounce" />
-            <p class="text-2xl font-black uppercase tracking-widest text-blue-600">Drop Images to Ingest</p>
-            <p class="text-xs text-blue-500 font-bold uppercase mt-1">Automatic placement in current album</p>
+            <p class="text-2xl font-black uppercase tracking-widest text-blue-600">Drop Images or PDFs to Ingest</p>
+            <p class="text-xs text-blue-500 font-bold uppercase mt-1">PDF pages become individual gallery images</p>
         </div>
 
         <div class="grow min-h-0 flex relative overflow-hidden">
@@ -210,7 +210,7 @@
                         <!-- Categorized Style Library with Quick Search -->
                         <div class="space-y-3 pt-2">
                             <div class="flex items-center justify-between">
-                                <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Style Preset Library (50+)</span>
+                                <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Style Preset Library (190+)</span>
                                 <span v-if="selectedStyle !== 'None'" class="text-[9px] font-bold text-blue-500 uppercase bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
                                     Active: {{ selectedStyle }}
                                 </span>
@@ -263,12 +263,84 @@
                     <div v-show="activeDockTab === 'parameters'" class="space-y-5 animate-in fade-in">
                         <!-- Aspect Ratios -->
                         <div class="space-y-2">
-                            <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block">
-                                Aspect Ratio & Orientation
-                            </label>
-                            <div class="grid grid-cols-3 gap-2">
+                            <div class="flex items-center justify-between gap-2">
+                                <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest block">
+                                    Aspect Ratio & Orientation
+                                </label>
+                                <div class="flex items-center gap-0.5 bg-gray-100 dark:bg-gray-800 p-0.5 rounded-lg shrink-0">
+                                    <button 
+                                        @click="ratioCategory = 'screen'"
+                                        class="px-2 py-0.5 text-[9px] font-black uppercase rounded-md transition-all"
+                                        :class="ratioCategory === 'screen' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                    >
+                                        Screen
+                                    </button>
+                                    <button 
+                                        @click="ratioCategory = 'paper'"
+                                        class="px-2 py-0.5 text-[9px] font-black uppercase rounded-md transition-all"
+                                        :class="ratioCategory === 'paper' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                    >
+                                        Paper
+                                    </button>
+                                </div>
+                            </div>
+                            <!-- ── KEEP ORIGINAL SIZE (EDIT MODE ONLY) ── -->
+                            <div 
+                                v-if="isSelectionMode && selectedImageObjects[0]"
+                                class="space-y-2 p-2.5 rounded-xl border border-blue-300/60 dark:border-blue-800/60 bg-blue-50/60 dark:bg-blue-900/20"
+                            >
+                                <!-- Header row: toggle + native resolution badge -->
+                                <div class="flex items-center justify-between gap-2">
+                                    <div class="flex items-center gap-2 min-w-0">
+                                        <span class="text-[10px] font-black uppercase tracking-widest text-blue-700 dark:text-blue-300">Keep Original Size</span>
+                                        <span 
+                                            class="text-[9px] font-mono font-bold text-blue-700 dark:text-blue-200 bg-white/70 dark:bg-blue-900/40 px-1.5 py-0.5 rounded shrink-0"
+                                            title="First selected image resolution"
+                                        >
+                                            {{ selectedImageObjects[0].width || '?' }}×{{ selectedImageObjects[0].height || '?' }}
+                                        </span>
+                                    </div>
+                                    <button 
+                                        @click="keepOriginalSize = !keepOriginalSize" 
+                                        :class="keepOriginalSize ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'" 
+                                        class="w-9 h-5 rounded-full relative transition-colors shrink-0"
+                                        :title="keepOriginalSize ? 'Uses the first selected image dimensions' : 'Uses the aspect ratio selected below'"
+                                    >
+                                        <div class="absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow" :style="{ left: keepOriginalSize ? '18px' : '2px' }"></div>
+                                    </button>
+                                </div>
+
+                                <!-- Resolution downscale row: shown only when keeping source size -->
+                                <div v-if="keepOriginalSize && keepSizeTargetDims" class="space-y-1.5 pt-1.5 border-t border-blue-200/60 dark:border-blue-800/40">
+                                    <div class="flex items-center justify-between gap-2">
+                                        <span class="text-[9px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-300">Reduce Resolution</span>
+                                        <span class="text-[9px] font-mono font-bold text-blue-700 dark:text-blue-200 bg-white/70 dark:bg-blue-900/40 px-1.5 py-0.5 rounded">
+                                            {{ keepSizeTargetDims.w }}×{{ keepSizeTargetDims.h }}
+                                        </span>
+                                    </div>
+                                    <div class="flex items-center gap-1">
+                                        <button 
+                                            v-for="lvl in [1, 0.75, 0.5, 0.25]" 
+                                            :key="lvl"
+                                            @click="resolutionScale = lvl"
+                                            class="flex-1 py-1 text-[10px] font-black rounded-md border transition-all"
+                                            :class="resolutionScale === lvl ? 'border-blue-500 bg-blue-600 text-white shadow-sm' : 'border-blue-200 dark:border-blue-800/60 bg-white/70 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 hover:bg-white dark:hover:bg-blue-800/40'"
+                                            :title="`Scale output to ${Math.round(lvl * 100)}% (same aspect ratio)`"
+                                        >
+                                            {{ Math.round(lvl * 100) }}%
+                                        </button>
+                                    </div>
+                                    <p v-if="resolutionScale < 1" class="text-[9px] text-blue-500 font-bold leading-tight">
+                                        ⬇ Same aspect ratio · {{ Math.round(resolutionScale * 100) }}% of original pixels
+                                    </p>
+                                </div>
+                            </div>
+                            <div 
+                                class="grid grid-cols-3 gap-2 transition-opacity duration-200"
+                                :class="{'opacity-30 pointer-events-none': isSelectionMode && keepOriginalSize}"
+                            >
                                 <button 
-                                    v-for="ratio in aspectRatios" 
+                                    v-for="ratio in currentRatios" 
                                     :key="ratio.name"
                                     @click="imageSize = ratio.value"
                                     class="p-2.5 rounded-2xl border flex flex-col items-center justify-center transition-all"
@@ -279,6 +351,9 @@
                                     <span class="text-[8px] opacity-60 font-mono">{{ ratio.value }}</span>
                                 </button>
                             </div>
+                            <p v-if="isSelectionMode && keepOriginalSize" class="text-[9px] font-bold text-blue-500/90 uppercase text-center tracking-wider">
+                                🔒 Aspect ratio locked · {{ Math.round(resolutionScale * 100) }}% scale
+                            </p>
                         </div>
 
                         <!-- Generation Count & Seed -->
@@ -521,7 +596,8 @@
                             <div 
                                 v-for="(image, index) in filteredImages" 
                                 :key="image.id" 
-                                @click="toggleSelection(image.id)" 
+                                @click="openImageViewer(image, index)" 
+                                title="Click to open fullscreen · Use the + badge to stage for editing"
                                 class="relative aspect-square rounded-3xl overflow-hidden group cursor-pointer border-2 transition-all duration-300 bg-white dark:bg-gray-900 shadow-md hover:shadow-2xl" 
                                 :class="isSelected(image.id) ? 'border-blue-500 ring-4 ring-blue-500/20 scale-[0.98]' : 'border-transparent hover:border-gray-200 dark:hover:border-gray-700'"
                             >
@@ -533,9 +609,15 @@
 
                                 <!-- Selection Badge + Synchronized Stage Order Indicator -->
                                 <div class="absolute top-3 left-3 z-10 flex items-center gap-1.5">
-                                    <div class="w-6 h-6 rounded-full border-2 border-white dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 backdrop-blur flex items-center justify-center shadow-lg transition-opacity duration-200" :class="isSelected(image.id) ? '!bg-blue-600 !border-blue-600 opacity-100' : 'opacity-0 group-hover:opacity-100'">
+                                    <button
+                                        @click.stop="toggleSelection(image.id)"
+                                        class="w-6 h-6 rounded-full border-2 flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-110"
+                                        :class="isSelected(image.id) ? 'bg-blue-600 border-blue-600' : 'border-white dark:border-gray-700 bg-white/75 dark:bg-gray-900/75 hover:bg-blue-500 hover:border-blue-500'"
+                                        :title="isSelected(image.id) ? 'Unstage from edit queue' : 'Stage for editing'"
+                                    >
                                         <IconCheckCircle v-if="isSelected(image.id)" class="w-4 h-4 text-white" />
-                                    </div>
+                                        <IconPlus v-else class="w-4 h-4 text-gray-700 dark:text-gray-200" />
+                                    </button>
                                     <span 
                                         v-if="isSelected(image.id)" 
                                         class="px-2 py-0.5 rounded-md bg-blue-600 text-[10px] font-mono font-black text-white shadow-lg border border-white/20 animate-in fade-in"
@@ -566,7 +648,15 @@
                                     <div class="flex items-center justify-between pt-3 border-t border-white/15">
                                         <!-- Primary actions (always visible) -->
                                         <div class="flex items-center gap-1">
-                                            <button @click.stop="reusePrompt(image)" class="p-2 bg-white/10 hover:bg-blue-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Reuse Settings in Studio">
+                                            <button 
+                                                @click.stop="toggleSelection(image.id)" 
+                                                class="p-2 rounded-xl text-white backdrop-blur-md transition-all active:scale-95"
+                                                :class="isSelected(image.id) ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white/10 hover:bg-blue-500'"
+                                                :title="isSelected(image.id) ? 'Unstage from Edit' : 'Stage for Edit'"
+                                            >
+                                                <IconCheckCircle class="w-4 h-4" />
+                                            </button>
+                                            <button @click.stop="reusePrompt(image)" class="p-2 bg-white/10 hover:bg-indigo-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Reuse Settings in Studio">
                                                 <IconRefresh class="w-4 h-4" />
                                             </button>
                                             <button @click.stop="downloadSingle(image)" class="p-2 bg-white/10 hover:bg-emerald-500 rounded-xl text-white backdrop-blur-md transition-all active:scale-95" title="Download Image File">
@@ -613,6 +703,10 @@
                                 <button @click.stop="copyPrompt(selectedImageObjectsForMenu.prompt); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-white/10 transition-colors">
                                     <IconCopy class="w-3.5 h-3.5 shrink-0" />
                                     <span>Copy prompt</span>
+                                </button>
+                                <button @click.stop="toggleSelection(selectedImageObjectsForMenu.id)" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-blue-500/40 transition-colors">
+                                    <IconCheckCircle class="w-3.5 h-3.5 shrink-0" />
+                                    <span>{{ isSelected(selectedImageObjectsForMenu.id) ? 'Unstage from Edit' : 'Stage for Edit' }}</span>
                                 </button>
                                 <button @click.stop="handleSendOneToDiscussion(selectedImageObjectsForMenu); closeImageMenu()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-blue-500/40 transition-colors">
                                     <IconSend class="w-3.5 h-3.5 shrink-0" />
@@ -679,6 +773,17 @@
                 </div>
             </main>
         </div>
+
+        <!-- Format picker for the tile download action -->
+        <ImageFormatExportModal
+            :visible="isDownloadModalOpen"
+            :default-filename="downloadDefaultFilename"
+            :saving="isDownloading"
+            title="Download Image"
+            description="Choose an output format for this export."
+            @confirm="handleDownloadConfirm"
+            @close="isDownloadModalOpen = false"
+        />
     </div>
 </template>
 
@@ -719,6 +824,8 @@ import IconArrowsUpDown from '../assets/icons/IconArrowsUpDown.vue';
 import IconVideoCamera from '../assets/icons/IconVideoCamera.vue';
 import IconEllipsisVertical from '../assets/icons/IconEllipsisVertical.vue';
 import { useVideoStore } from '../stores/video';
+import ImageFormatExportModal from '../components/modals/ImageFormatExportModal.vue';
+import { exportImageBlobAsFormat } from '../services/imageExport';
 
 const imageStore = useImageStore();
 const dataStore = useDataStore();
@@ -796,11 +903,36 @@ const isResizing = ref(false);
 const searchQuery = ref('');
 const filterOrientation = ref('all');
 const useFullResThumbnails = ref(false);
+// When editing, default to preserving the first selected image's exact
+// dimensions rather than the manually picked aspect ratio (natural img2img).
+const keepOriginalSize = ref(true);
+// Manual downscale factor applied while "Keep Original Size" is enabled.
+// 1.0 = native resolution; lower values reduce output pixel count while
+// preserving the source image's aspect ratio exactly (e.g. 0.5 → half width
+// AND half height, so the same crop still fits the frame).
+const resolutionScale = ref(1);
 const isDraggingOver = ref(false);
 const isEnhancingPrompt = ref(false);
 const isEnhancingNegative = ref(false);
 const isAnyEnhancing = computed(() => isEnhancingPrompt.value || isEnhancingNegative.value);
 let searchDebounceTimer = null;
+
+// Download format modal state — the tile hover "download" action opens this
+// picker instead of dumping the raw file, mirroring the editor's Save/Export
+// behaviour. `downloadTargetImage` holds the tile that triggered the modal.
+const isDownloadModalOpen = ref(false);
+const downloadTargetImage = ref(null);
+const isDownloading = ref(false);
+const downloadDefaultFilename = computed(() => {
+    const img = downloadTargetImage.value;
+    if (!img) return 'image';
+    const base = (img.prompt || 'creation')
+        .trim()
+        .slice(0, 40)
+        .replace(/[^\w\s-]/g, '')
+        .replace(/\s+/g, '_') || 'creation';
+    return `${base}_${img.id.slice(0, 8)}`;
+});
 
 const sidebarStyle = computed(() => ({
     width: window.innerWidth >= 1024 ? `${sidebarWidth.value}px` : undefined,
@@ -825,9 +957,28 @@ const selectedImageObjects = computed(() => {
     return selectedImages.value.map(id => idMap.get(id)).filter(Boolean);
 });
 
+// Dimensions that will actually be sent to the edit task when "Keep Original
+// Size" is enabled. At 100% we preserve the native resolution verbatim; at
+// lower scales we shrink both axes by the same factor (preserving aspect
+// ratio) and snap to a multiple of 8 for diffusion-friendliness.
+const keepSizeTargetDims = computed(() => {
+    const img = selectedImageObjects.value[0];
+    if (!img?.width || !img?.height) return null;
+    const scale = resolutionScale.value;
+    if (scale >= 1) return { w: img.width, h: img.height };
+    const roundTo8 = (v) => Math.max(64, Math.round((v * scale) / 8) * 8);
+    return { w: roundTo8(img.width), h: roundTo8(img.height) };
+});
+
 const areAllSelected = computed({ 
     get: () => filteredImages.value.length > 0 && selectedImages.value.length === filteredImages.value.length, 
     set: (v) => { selectedImages.value = v ? filteredImages.value.map(i => i.id) : []; } 
+});
+
+// Reset the manual downscale factor when the edit selection empties so the
+// next unrelated selection starts fresh at 100%.
+watch(() => selectedImages.value.length, (len) => {
+    if (len === 0) resolutionScale.value = 1;
 });
 
 // Drag and drop reordering state for staged images
@@ -920,6 +1071,8 @@ const collapsedStyles = ref({
     '💎 Image Enhancement & Restoration': false,
     '🌈 Colorization & Color Grading': false,
     '📸 Photographic & Realism': false,
+    '📠 Scan Repair & Cleanup': false,
+    '📄 Paper Documents & Print': false,
     '🎮 3D, CGI & Sci-Fi': true,
     '🎨 Traditional Mediums': true,
     '🎌 Anime, Manga & Comics': true,
@@ -1108,6 +1261,56 @@ const styleLibrary = {
         { name: 'Worms Eye Ground', emoji: '🐛', prompt: 'extreme ground-level worm eye perspective looking up from the floor, towering monumental scale, dramatic floor textures', negative: 'eye level, bird eye view' },
         { name: 'Split Diopter Focus', emoji: '🔍', prompt: 'vintage cinema split-diopter shot, simultaneous tack-sharp focus on both extreme close-up foreground and distant background', negative: 'standard single focus plane, uniform blur' },
         { name: 'Rule of Thirds', emoji: '🎯', prompt: 'masterful rule-of-thirds composition, golden ratio framing, ample evocative negative space, balanced artistic storytelling', negative: 'centered passport mugshot, awkward crop' }
+    ],
+
+    '📄 Paper Documents & Print': [
+        { name: 'Book Page', emoji: '📖', prompt: 'elegant typographic interior page of a printed book, perfectly justified serif body text, generous margins, chapter heading, drop cap opening paragraph, pagination footer, professional typesetting, cream textured paper', negative: 'digital screen, glowing pixels, distorted letters, gibberish text, web UI, aspirational' },
+        { name: "Children's Storybook", emoji: '🧒', prompt: "whimsical illustrated children's storybook page, hand-painted gouache illustration, playful hand-lettered typography, warm inviting pastel colors, decorative floral corner borders, generous white space, large friendly text", negative: 'scary, dark, horror, corporate design, realistic photograph, gore' },
+        { name: 'Academic Paper', emoji: '🔬', prompt: 'scientific journal article page layout, structured abstract, two-column justified serif body text, LaTeX-style math formatting, figure with italicized caption, numbered references section, clean academic typesetting, white paper', negative: 'cartoon, hand-drawn, colorful, playful, magazine glossy, comic' },
+        { name: 'Magazine Cover', emoji: '📰', prompt: 'glossy high-fashion magazine cover design, striking full-bleed central photograph, bold masthead serif title, multiple cover line teasers in smaller type, issue date and barcode, professional editorial layout', negative: 'plain empty, dull, cluttered, amateur, low resolution' },
+        { name: 'Magazine Spread', emoji: '📖', prompt: 'sophisticated two-page editorial magazine spread, elegant grid layout, hero photography crossing the gutter, pull quotes in large display type, stylish captions and kickers, refined use of white space, editorial typography', negative: 'single page only, blog post, cluttered, low quality, watermarked' },
+        { name: 'Newspaper Front Page', emoji: '🗞️', prompt: 'vintage broadsheet newspaper front page, multi-column justified text, bold dramatic headlines, halftone black-and-white photographs, masthead with date and edition line, newsprint texture with ink bleed, tabloid layout', negative: 'digital screen, clean modern website, glossy magazine, colorful, cartoon' },
+        { name: 'Infographic Poster', emoji: '📊', prompt: 'modern infographic poster layout, data visualization charts and donut graphs, colorful section dividers with flat icons, large statistics numbers, clean sans-serif typography, structured visual hierarchy, professional data design', negative: 'dense paragraphs, blurry text, no layout, chaotic colors, illegible numbers' },
+        { name: 'Scientific Poster', emoji: '🎓', prompt: 'academic research conference poster, wide bold title banner with author and institution names, clearly labeled structured sections, methodology flow diagram, data bar graphs, references footer, professional blue header accents, portrait A0 layout', negative: 'casual slides, informal messy, blurry, unreadable, handwritten' },
+        { name: 'Movie Poster', emoji: '🎬', prompt: 'dramatic cinematic movie poster layout, iconic hero shot on the upper half, large stylized title typography in the lower third, tagline quote above title, billing block credits footer, release date, professional key art composition', negative: 'amateur, cluttered, missing title, generic stock photo, low resolution' },
+        { name: 'Vintage Travel Poster', emoji: '✈️', prompt: 'retro 1950s travel advertising poster, bold flat vector illustration, art deco chrome typography, limited warm color palette, scenic destination landmark hero, decorative geometric borders, screen-print texture', negative: 'modern photograph, digital 3D render, cluttered, glossy, cheap' },
+        { name: 'Business Card', emoji: '💼', prompt: 'minimalist premium business card design, elegant monogram logo mark, refined sans-serif and serif typography pair, generous white space, subtle embossed texture, deep matte black and gold foil accents, luxury corporate identity', negative: 'cluttered, clipart, low resolution, casual, watermark, low effort' },
+        { name: 'Tri-fold Brochure', emoji: '📄', prompt: 'clean tri-fold brochure layout, structured panels with clear visual hierarchy across three folds, product photography, sans-serif headings, bullet points with small icons, light background, corporate branding, print-ready CMYK design', negative: 'single image, cluttered, low quality, blurry text, no structure' },
+        { name: 'Restaurant Menu', emoji: '🍽️', prompt: 'elegant fine dining restaurant menu design, decorative script headings, refined serif body descriptions, delicate watercolor illustrations of signature dishes, warm cream and charcoal palette, gold foil border accents, editorial layout', negative: 'casual diner menu, fast food, cluttered, cheap, ugly, no typography' },
+        { name: 'Greeting Card', emoji: '💌', prompt: 'heartfelt greeting card design, ornate decorative botanical illustration framing the border, elegant hand-lettered calligraphy message in the center, warm cream cotton paper texture, subtle gold foil details, silk ribbon accent, portrait folded layout', negative: 'generic, corporate blank, plain, low effort, cluttered, digital' },
+        { name: 'Certificate Award', emoji: '🏆', prompt: 'formal certificate of achievement design, ornamental flowing baroque borders, official embossed gold seal with ribbon rosette, elegant serif and blackletter typography, symmetric centered layout, cream parchment background, signed at the bottom', negative: 'casual, plain, modern flat design, blurry, illegible, comic style' },
+        { name: 'Comic Book Page', emoji: '💥', prompt: 'dynamic comic book interior page, structured multi-panel grid layout, bold black ink linework, vivid flat colors, hand-lettered speech and thought bubbles, onomatopoeia sound effects like POW and WHOOSH, action speed lines, halftone shading', negative: 'prose paragraphs, single image, photorealistic, no panels, no speech bubbles' }
+    ],
+
+    '📠 Scan Repair & Cleanup': [
+        { name: 'Despeckle Clean', emoji: '🧽', prompt: 'professionally despeckled scanned document, completely removed dust spots and print noise, ultra-clean uniform page background, crisp 600 DPI scan clarity, zero debris, pristine flatbed scan', negative: 'speckles, dust spots, print noise, dot debris, gritty scan, dirty paper' },
+        { name: 'Deskew Straighten', emoji: '📐', prompt: 'perfectly deskewed leveled scan, straight horizontal baselines, square-cropped edges, geometric document auto-alignment, corrected rotation, clean rectangular borders', negative: 'tilted, crooked, wavy baseline, skewed scan, rotated page, angled edges' },
+        { name: 'Dust & Scratch', emoji: '🧹', prompt: 'seamless dust, hair, and scratch removal, pristine film scan restoration, dirt-free surface, clean glass flatbed recovery, microscopic damage repair', negative: 'dust, hair strands, scratches, dirt, smudges, fingerprints, grit on scan' },
+        { name: 'Fold & Crease Heal', emoji: '🗒️', prompt: 'folded paper crease removal, seamless wrinkle repair, flattened page restoration, removed diagonal fold marks, paper distortion correction, ironed-out flat surface', negative: 'creases, wrinkles, folds, crumpled paper, bent corners, distorted sheet' },
+        { name: 'Yellowed Page White', emoji: '📜', prompt: 'aged yellowed paper whiteness restoration, removed brown age spots and foxing, pure clean white document background, deacidified archival tone correction, neutral balanced page color', negative: 'yellowed, aged, brown tint, foxing spots, stained paper, old yellow pages' },
+        { name: 'Faded Ink Recovery', emoji: '🖋️', prompt: 'recovered faded and degraded ink density, deepened washed-out print contrast, enhanced low-contrast lettering, carbon copy recovery, restored archival ink visibility, boosted legibility', negative: 'washed out, faded, illegible, low contrast, invisible faint text, ghosted letters' },
+        { name: 'Show-Through Removal', emoji: '🔦', prompt: 'removed ink show-through from reverse side, bleed-through elimination, cleaned hidden ghost text, single-sided clean scan, decoupled back-face printing, pure front content', negative: 'show-through, bleed-through, ghost text, mirrored printing, reverse-side visible, see-through inks' },
+        { name: 'Moiré Pattern Clean', emoji: '🌊', prompt: 'removed moiré interference patterns from halftone scan, descreened printed image, decluttered repeating dot artifacts, clean digital reconstruction, print-scanning artifact elimination', negative: 'moiré, interference patterns, halftone dots, repeating grid, wavy scan lines, printing artifacts' },
+        { name: 'Scan Shadow Fix', emoji: '🌑', prompt: 'removed scanner shadow band, hand-shadow elimination, uniform even page illumination, flatbed lighting correction, balanced white illumination, no gradient shadows across page', negative: 'scan shadow, hand shadow, dark band, uneven illumination, gradient shadow, vignetted scan' },
+        { name: 'Hole Punch Repair', emoji: '🕳️', prompt: 'repaired hole punch damage, filled torn tissue gaps, corrected stapled and punched corners, seamless binding repair, reconstructed continuous page surface, damage-free margins', negative: 'holes, punch marks, torn tissue, missing corners, staple damage, cut-out gaps' },
+        { name: 'Photocopy Cleanup', emoji: '🖨️', prompt: 'cleaned faded photocopy, removed toner smudges and xerox stripes, clean crisp sharpened copy of a copy, restored clean print density, pristine machine output', negative: 'toner smudges, xerox stripes, photocopy noise, faded copy, broken print lines, dirty drum artifacts' },
+        { name: 'Microfiche Restore', emoji: '📽️', prompt: 'restored microfilm and microfiche archive scan, refocused distorted archival imagery, grain reduction, contrast balance, sharpened microform capture, legible reproduced text', negative: 'blurry fiche, distorted microfilm, grain, illegible archive, faded fiche, unreadable microcards' },
+        { name: 'Blueprint Recovery', emoji: '📘', prompt: 'restored faded engineering blueprint drawing, recovered deep cyanotype blue background, sharpened technical linework, dimension annotations recovered, precise drafting detail, crisp architectural plan', negative: 'faded blueprint, illegible linework, missing annotations, broken drafting lines, washed cyanotype' },
+        { name: 'Handwriting Enhance', emoji: '✍️', prompt: 'handwritten archive enhancement, boldened faded ink strokes, separated overlapping text, revealed pencil rubbing, restored calligraphic archives, improved legibility of cursive script', negative: 'illegible handwriting, faded ink, overlapping letters, faint pencil, smudged script, unreadable cursive' },
+        { name: 'Water Stain Remove', emoji: '💧', prompt: 'removed water stains and tide marks from scanned page, coffee ring repair, warped paper flattening, cleaned dried liquid residue, restored even paper tone, pristine archival page', negative: 'water stains, tide marks, coffee rings, warped paper, liquid residue, mottled page' },
+        { name: 'Torn Edge Repair', emoji: '🩹', prompt: 'repaired ragged torn paper edges, filled missing page corners, seamless document border reconstruction, chip repair, reunified rectangular margins, clean-finished page outline', negative: 'torn edges, ragged border, missing corners, chipped page, ripped paper, jagged outline' },
+        { name: 'Alignment Fix', emoji: '📏', prompt: 'absolute alignment fix, restored perfect horizontal baselines, corrected skewed scan orientation, snapped to vertical truth, reconstructed axis-aligned page orientation, unified perspective grid', negative: 'tilted, skewed, off-axis, rotated, canted, drifting baselines, off-angle scan' },
+        { name: 'Border Auto-Detect', emoji: '✂️', prompt: 'automatic page border detection, precise edge boundary traced and cropped, content-aware border trim, cleaned outer margins detected, tight rectangular page crop, sharp document boundary, auto bounded edges', negative: 'misaligned crop, missing borders, cut-off content, uneven margin, black edge band, scanner bed edges' },
+        { name: 'Corner Pin', emoji: '📌', prompt: 'four document corners detected and pinned, perspective pinpoints locked to rectangular page, corner extraction registration, restored straight border rectangle, four-corner geometry snapped, unified page frame', negative: 'crooked corners, missed corner, floating edges, unbalanced page, rounded corner, missing registration point' },
+        { name: 'Margin Register', emoji: '📎', prompt: 'uniform margin registration, aligned consistent edge spacing, straight trimmed borders, symmetric page margins, professional print alignment, pinned top/bottom binding edges', negative: 'inconsistent margins, uneven spacing, wavy borders, crooked frame, wandering gutters' },
+        { name: 'Gutter Shadow Remove', emoji: '📚', prompt: 'removed book gutter shadow, eliminated spine crease gradient, flat even spine lighting, no binding shadow across page, even white illumination across the fold, matching page tone on both sides of the gutter', negative: 'gutter shadow, spine crease, binding shadow, dark strip, uneven illumination near gutter, black spoon shadow' },
+        { name: 'Page Curl & Dewarp', emoji: '📖', prompt: 'page curvature dewarped, flattened curved book page, straightened distorted text lines, cylindrical perspective correction, restored flat print surface, dewarped page bowl', negative: 'wavy text, curled page, barrel distortion, curved lines, bowl warp, bent sheet, wavy baseline' },
+        { name: 'Binarize Threshold', emoji: '⚫', prompt: 'clean binarized black-and-white scan, pure threshold lines, low-noise two-tone conversion, crisp solid black ink on pure white, clean thresholding, no gray halos, OCR-ready binary page', negative: 'grayscale, faint ink, gray banding, muddy threshold, dirty binarization, gradient speckle noise' },
+        { name: 'Neutralize Color Cast', emoji: '🎨', prompt: 'removed color cast, neutralized cyan/blue/yellow tints, uniform accurate page neutrality, white balanced white paper, calibrated neutral gray balance, corrected indoor scanner tint', negative: 'cyan cast, blue tint, yellow shift, green cast, magenta cast, off-white, tungsten glow, fluorescent green cast' },
+        { name: 'Auto Levels', emoji: '⚡', prompt: 'auto levels applied, normalized histogram, deep blacks and clean paper whites, corrected tonal balance, expanded dynamic range, standardized paper contrast, balanced exposure per page', negative: 'flat histogram, gray wash, muddy midtones, clipped highlights, blown shadow detail' },
+        { name: 'Redaction Blackout', emoji: '⬛', prompt: 'opaque black redaction bars, sensitive content fully blacked out, clean solid black censor bands, GDPR-compliant redaction, no residual ink visible through redaction, sharp geometric masking blocks', negative: 'half-tone redaction, faded redaction, leaking ink, illegible bars, transparent mask, gray boxes' },
+        { name: 'Staple & Pin Remove', emoji: '📍', prompt: 'removed staple pin marks, filled staple holes, erased pin rust stains, cleaned paper clip indentations, seamless paper-clip corner damage repair, restored continuous page surface', negative: 'staple marks, pin holes, rust stains, clip indentations, staple perforations, punch-shadow' },
+        { name: 'Barcode Preserve', emoji: '📊', prompt: 'crisp barcode preservation, sharp QR code clarity, machine-readable 1D/2D code, unaltered high-contrast black bars and quiet zone, decoded barcode intact, preserved scanner code readability', negative: 'blurry barcode, broken QR, faded code, distorted bars, unreadable scanner code, smudged data matrix' }
     ]
 };
 
@@ -1136,7 +1339,8 @@ const quickNegativePresets = [
     { label: 'Photo Reality', value: '3D render, cartoon, anime, illustration, plastic skin, airbrushed' }
 ];
 
-const aspectRatios = [
+// ── Screen / display aspect ratios ──
+const screenRatios = [
     { name: '1:1 Square', value: '1024x1024', style: { width: '18px', height: '18px' } },
     { name: '16:9 Cinema', value: '1344x768', style: { width: '24px', height: '14px' } },
     { name: '9:16 Story', value: '768x1344', style: { width: '14px', height: '24px' } },
@@ -1144,6 +1348,31 @@ const aspectRatios = [
     { name: '3:2 Photo', value: '1216x832', style: { width: '22px', height: '15px' } },
     { name: '21:9 Ultra', value: '1536x640', style: { width: '26px', height: '11px' } }
 ];
+
+// ── Print paper ratios ──
+// Pixel dimensions are chosen to be diffusion-friendly (multiples of 16/32)
+// while preserving the physical paper aspect ratio within ~1% tolerance:
+//   • ISO A-series → 1:√2 ≈ 1:1.4142
+//   • US Letter (8.5×11 in) → 1:1.2941
+//   • US Legal (8.5×14 in)  → 1:1.6471
+const paperRatios = [
+    { name: 'A6 Portrait',     value: '640x896',   style: { width: '14px', height: '20px' } },
+    { name: 'A5 Portrait',     value: '896x1280',  style: { width: '16px', height: '23px' } },
+    { name: 'A4 Portrait',     value: '1088x1536', style: { width: '17px', height: '24px' } },
+    { name: 'A3 Portrait',     value: '1248x1760', style: { width: '19px', height: '26px' } },
+    { name: 'Letter Portrait', value: '1088x1408', style: { width: '18px', height: '23px' } },
+    { name: 'Legal Portrait',  value: '896x1472',  style: { width: '16px', height: '26px' } },
+    { name: 'A6 Landscape',    value: '896x640',   style: { width: '20px', height: '14px' } },
+    { name: 'A5 Landscape',    value: '1280x896',  style: { width: '23px', height: '16px' } },
+    { name: 'A4 Landscape',    value: '1536x1088', style: { width: '24px', height: '17px' } },
+    { name: 'A3 Landscape',    value: '1760x1248', style: { width: '26px', height: '19px' } },
+    { name: 'Letter Landscape', value: '1408x1088', style: { width: '23px', height: '18px' } },
+    { name: 'Legal Landscape', value: '1472x896',  style: { width: '26px', height: '16px' } }
+];
+
+// Toggle between device/cinematic ratios and printable paper formats.
+const ratioCategory = ref('screen');
+const currentRatios = computed(() => ratioCategory.value === 'paper' ? paperRatios : screenRatios);
 
 const selectedModel = computed(() => user.value?.tti_binding_model_name);
 
@@ -1186,21 +1415,32 @@ function copyPrompt(text) {
     uiStore.copyToClipboard(text);
 }
 
-async function downloadSingle(image) {
+function downloadSingle(image) {
+    downloadTargetImage.value = image;
+    isDownloadModalOpen.value = true;
+}
+
+async function handleDownloadConfirm({ format, quality, filename }) {
+    const img = downloadTargetImage.value;
+    if (!img) return;
+    isDownloading.value = true;
     try {
-        const response = await apiClient.get(`/api/image-studio/images/${image.id}/file`, { responseType: 'blob' });
-        const url = URL.createObjectURL(response.data);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${image.prompt ? image.prompt.slice(0, 30) : 'creation'}_${image.id}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        uiStore.addNotification('Image download started.', 'success', 2000);
+        const response = await apiClient.get(
+            `/api/image-studio/images/${img.id}/file`,
+            { responseType: 'blob' }
+        );
+        const { filename: saved } = await exportImageBlobAsFormat(response.data, {
+            format,
+            quality,
+            filename
+        });
+        uiStore.addNotification(`Downloaded ${saved}`, 'success', 2000);
+        isDownloadModalOpen.value = false;
     } catch (e) {
         console.error('Download failed:', e);
         uiStore.addNotification('Failed to download image.', 'error');
+    } finally {
+        isDownloading.value = false;
     }
 }
 
@@ -1279,7 +1519,23 @@ async function handleGenerateOrApply() {
     };
 
     if (isSelectionMode.value) {
-        const [w, h] = imageSize.value.split('x').map(Number);
+        // Honor "Keep Original Size": reuse the first selected image's
+        // dimensions instead of the manually picked aspect ratio. When the
+        // user dialed a Resolution Scale < 100%, use the pre-computed scaled
+        // target dimensions (same aspect ratio, fewer pixels). Falls back
+        // to the picked ratio when the first image lacks recorded dimensions
+        // (e.g. very old uploads without a persisted width/height pair).
+        const firstImage = selectedImageObjects.value[0];
+        let w, h;
+        if (keepOriginalSize.value && keepSizeTargetDims.value) {
+            w = keepSizeTargetDims.value.w;
+            h = keepSizeTargetDims.value.h;
+        } else if (keepOriginalSize.value && firstImage?.width && firstImage?.height) {
+            w = firstImage.width;
+            h = firstImage.height;
+        } else {
+            [w, h] = imageSize.value.split('x').map(Number);
+        }
         await imageStore.editImage({ ...payload, image_ids: selectedImages.value, width: w, height: h });
         selectedImages.value = [];
     } else {
@@ -1450,6 +1706,7 @@ function handleSendManyToVideoStudio() {
 }
 
 function openImageViewer(img, idx) { 
+    closeImageMenu();
     // Build full sequence for the lightbox viewer so user can navigate seamlessly across all images
     const sequence = filteredImages.value.map((i, ord) => ({
         id: i.id,
@@ -1582,7 +1839,11 @@ function handleDragLeave(e) { if (!e.currentTarget.contains(e.relatedTarget)) is
 async function handleDrop(e) { 
     e.preventDefault(); 
     isDraggingOver.value = false; 
-    const f = Array.from(e.dataTransfer.files).filter(i => i.type.startsWith('image/')); 
+    const f = Array.from(e.dataTransfer.files).filter(i =>
+        i.type.startsWith('image/') ||
+        i.type === 'application/pdf' ||
+        (i.name || '').toLowerCase().endsWith('.pdf')
+    ); 
     if (f.length) await imageStore.uploadImages(f); 
 }
 

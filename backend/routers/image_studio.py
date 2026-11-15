@@ -41,6 +41,59 @@ from backend.tasks.image_generation_tasks import (
     _generate_timelapse_task
 )
 
+# --- PDF Upload → Per-Page Images ---
+# Uploaded PDFs are exploded into individual PNG images (one per page) so the
+# gallery can treat each page as a first-class image (thumbnails, edits, sends
+# to discussion, batch ZIP download, etc. all keep working unchanged).
+PDF_MIME_TYPES = {"application/pdf", "application/x-pdf", "application/x-pdf-1.7"}
+MAX_PDF_PAGES = 500  # Guardrail against maliciously huge PDFs
+
+
+def _is_pdf_upload(file: UploadFile) -> bool:
+    """Detect PDF uploads by MIME type, with a filename fallback."""
+    if not file:
+        return False
+    if (file.content_type or "").lower() in PDF_MIME_TYPES:
+        return True
+    return (file.filename or "").lower().endswith(".pdf")
+
+
+def _render_pdf_to_page_pngs(content: bytes):
+    """
+    Render every page of a PDF into a PNG at 150 DPI.
+
+    Returns a list of ``(png_bytes, width, height)`` tuples in page order.
+    Raises ``RuntimeError`` / ``ValueError`` for unsupported PDFs (missing
+    dependency, empty document, password lock, or exceeding the page cap).
+    """
+    try:
+        import fitz  # PyMuPDF
+    except ImportError as exc:
+        raise RuntimeError("PDF support requires PyMuPDF ('fitz'). Please install it.") from exc
+
+    doc = fitz.open(stream=content, filetype="pdf")
+    try:
+        if getattr(doc, "needs_pass", False):
+            raise ValueError("Password-protected PDFs are not supported.")
+        if doc.page_count == 0:
+            raise ValueError("The uploaded PDF contains no pages.")
+        if doc.page_count > MAX_PDF_PAGES:
+            raise ValueError(
+                f"PDF has {doc.page_count} pages, exceeding the {MAX_PDF_PAGES}-page limit."
+            )
+
+        # 150 DPI keeps text legible while keeping per-page PNGs reasonably small.
+        scale = 150 / 72
+        matrix = fitz.Matrix(scale, scale)
+        results = []
+        for page in doc:
+            pix = page.get_pixmap(matrix=matrix, alpha=False)
+            results.append((pix.tobytes("png"), pix.width, pix.height))
+        return results
+    finally:
+        doc.close()
+
+
 image_studio_router = APIRouter(
     prefix="/api/image-studio",
     tags=["Image Studio"],
@@ -345,11 +398,52 @@ async def upload_images(
         if album: target_album_id = album.id
 
     for file in files:
-        s_filename = secure_filename(file.filename)
+        content = await file.read()
+        if not content:
+            continue
+
+        # ── PDF path: split every page into its own image record ──
+        if _is_pdf_upload(file):
+            pdf_basename = secure_filename(file.filename or "document.pdf").rsplit(".", 1)[0] or "document"
+            try:
+                page_pngs = _render_pdf_to_page_pngs(content)
+            except Exception as e:
+                trace_exception(e)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not process PDF '{file.filename}': {e}",
+                )
+
+            page_count = len(page_pngs)
+            for idx, (page_bytes, page_w, page_h) in enumerate(page_pngs, start=1):
+                filename = f"{uuid.uuid4().hex}_{pdf_basename}_page_{idx}.png"
+                file_path = user_images_path / filename
+                with open(file_path, "wb") as buffer:
+                    buffer.write(page_bytes)
+
+                new_image = UserImage(
+                    id=str(uuid.uuid4()),
+                    owner_user_id=current_user.id,
+                    filename=filename,
+                    prompt=f"{pdf_basename} — Page {idx}",
+                    album_id=target_album_id,
+                    width=page_w,
+                    height=page_h,
+                    generation_params={
+                        "source": "pdf",
+                        "pdf_filename": file.filename,
+                        "page": idx,
+                        "page_count": page_count,
+                    },
+                )
+                db.add(new_image)
+                new_images_db.append(new_image)
+            continue
+
+        # ── Standard image path ──
+        s_filename = secure_filename(file.filename or "upload")
         filename = f"{uuid.uuid4().hex}_{s_filename}"
         file_path = user_images_path / filename
-
-        content = await file.read()
         with open(file_path, "wb") as buffer:
             buffer.write(content)
 
