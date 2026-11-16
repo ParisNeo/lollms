@@ -21,7 +21,6 @@ const formData = ref({
     email: '',
     is_admin: false,
     is_moderator: false,
-    user_ui_level: 0,
     
     // LLM Settings
     lollms_model_name: null,
@@ -128,7 +127,6 @@ watch(() => uiStore.isModalOpen('adminCreateUser'), (isOpen) => {
             email: '',
             is_admin: false,
             is_moderator: false,
-            user_ui_level: 0,
             lollms_model_name: null,
             llm_ctx_size: null,
             llm_temperature: null,
@@ -262,14 +260,6 @@ async function handleSubmit() {
                         </div>
                     </div>
 
-                    <div>
-                        <label for="ui-level" class="label">UI Level</label>
-                        <SimpleSelectMenu
-                            v-model="formData.user_ui_level"
-                            :options="uiLevelOptions"
-                            class="mt-1"
-                        />
-                    </div>
                 </div>
 
                 <!-- Roles -->

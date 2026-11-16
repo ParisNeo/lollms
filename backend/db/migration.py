@@ -93,7 +93,6 @@ def _bootstrap_global_settings(connection):
         "default_lollms_model_name": { "value": "", "type": "string", "description": "Default model name assigned to newly created users.", "category": "Defaults" },
         "default_llm_ctx_size": { "value": 32000, "type": "integer", "description": "Default context size (in tokens) for new users.", "category": "Defaults" },
         "default_llm_temperature": { "value": 0.7, "type": "float", "description": "Default generation temperature for new users.", "category": "Defaults" },
-        "default_user_ui_level": { "value": 0, "type": "integer", "description": "Default UI level for new users (0: Beginner, 2: Intermediate, 4: Expert).", "category": "Defaults" },
         "default_auto_title": { "value": True, "type": "boolean", "description": "Enable automatic discussion title generation for new users by default.", "category": "Defaults" },
         "default_safe_store_vectorizer": { "value": "default_st", "type": "string", "description": "Default vectorizer alias or name for newly created datastores.", "category": "RAG" },
         "restrict_vectorizers_to_aliases": { "value": False, "type": "boolean", "description": "If enabled, users can only choose from the admin-defined RAG Bindings when creating a new Data Store.", "category": "RAG" },
@@ -385,7 +384,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
     if inspector.has_table("global_configs"):
         _bootstrap_global_settings(connection)
-        keys_to_remove_str = "('default_mcps', 'default_personalities')"
+        keys_to_remove_str = "('default_mcps', 'default_personalities', 'default_user_ui_level')"
         try:
             result = connection.execute(text(f"DELETE FROM global_configs WHERE key IN {keys_to_remove_str}"))
             if result.rowcount > 0:
@@ -910,7 +909,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "rag_graph_response_type": "VARCHAR DEFAULT 'chunks_summary'",
             "put_thoughts_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
             "auto_title": "BOOLEAN DEFAULT 0 NOT NULL",
-            "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
+            "ai_response_language":"VARCHAR DEFAULT 'auto'",
             "force_ai_response_language": "BOOLEAN DEFAULT 0 NOT NULL",
             "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
             "chat_active": "BOOLEAN DEFAULT 1 NOT NULL",
@@ -1025,6 +1024,27 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("UPDATE users SET first_login_done = 1 WHERE first_login_done IS NULL"))
                 connection.commit()
             except Exception: connection.rollback()
+
+        # --- Drop deprecated 'user_ui_level' column (tier system removed) ---
+        # The tier system is gone project-wide; everyone now behaves as expert level.
+        # NOTE: `user_columns_db` was captured BEFORE the new_user_cols_defs add-loop.
+        # Re-inspect so we reliably detect the column on legacy DBs that predate the model change.
+        _current_user_cols = [c['name'] for c in inspector.get_columns('users')]
+        if 'user_ui_level' in _current_user_cols:
+            try:
+                import sqlite3
+                if sqlite3.sqlite_version_info >= (3, 35, 0):
+                    connection.execute(text("ALTER TABLE users DROP COLUMN user_ui_level"))
+                    connection.commit()
+                    print("INFO: Dropped deprecated 'user_ui_level' column from 'users' table.")
+                else:
+                    print(
+                        "WARNING: SQLite < 3.35 detected; cannot DROP COLUMN 'user_ui_level'. "
+                        "The column is now unused and safe to ignore."
+                    )
+            except Exception as e:
+                print(f"WARNING: Could not drop 'user_ui_level' column from users table: {e}")
+                connection.rollback()
 
         user_constraints = inspector.get_unique_constraints('users')
         if 'email' in new_user_cols_defs and not any(c['name'] == 'uq_user_email' for c in user_constraints):

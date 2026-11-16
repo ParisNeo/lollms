@@ -449,7 +449,7 @@ async function handleRefreshModels() {
         <div class="h-6 w-px bg-gray-200 dark:border-gray-700 hidden sm:block"></div>
 
         <!-- Clean, Single-Avatar Status-Aware Universal Model Selector -->
-        <div class="relative" v-if="user && user.user_ui_level >= 2">
+        <div class="relative" v-if="user">
             <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" 
                 class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl transition-all group border shadow-xs active:scale-95"
                 :class="{
@@ -808,7 +808,7 @@ async function handleRefreshModels() {
 
         <TasksManagerButton />
         
-        <NotificationBell v-if="user && user.user_ui_level >= 2" />
+        <NotificationBell v-if="user" />
         
         <ThemeSelector />
         

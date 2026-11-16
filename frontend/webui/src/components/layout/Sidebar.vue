@@ -216,7 +216,6 @@ async function handlePlusClick() {
         </button>
 
         <button 
-          v-if="user && user.user_ui_level >= 2" 
           @click="goToFeed" 
           class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Feed"

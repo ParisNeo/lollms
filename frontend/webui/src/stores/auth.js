@@ -545,7 +545,6 @@ export const useAuthStore = defineStore('auth', () => {
                 // Only redirect/create discussion if the user is on the root path '/'
                 if (currentPath === '/' || currentPath === '') {
                     let targetView = user.value.first_page;
-                    if (user.value.user_ui_level < 2 && targetView === 'feed') targetView = 'new_discussion'; 
                     uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
 
                     if (targetView === 'last_discussion') {

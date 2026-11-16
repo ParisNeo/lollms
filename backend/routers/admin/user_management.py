@@ -233,11 +233,6 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         if user_dict.get(field) is None:
             user_dict[field] = settings.get(setting_key)
 
-    if user_dict.get('user_ui_level', 0) == 0:
-        beginner_default = settings.get('default_lollms_model_name_beginner')
-        if beginner_default:
-            user_dict['lollms_model_name'] = beginner_default
-
     user_dict.pop('google_client_secret_json', None)
 
     new_user = DBUser(

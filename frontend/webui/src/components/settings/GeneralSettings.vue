@@ -11,7 +11,6 @@ const { user } = storeToRefs(authStore);
 const { languages } = storeToRefs(dataStore);
 
 const form = ref({
-    user_ui_level: 0,
     first_page: 'feed',
     ai_response_language: 'auto',
     auto_title: false,
@@ -25,14 +24,6 @@ const isSaving = ref(false);
 const hasChanges = ref(false);
 let pristineState = '{}';
 
-const uiLevels = [
-    { value: 0, label: 'Beginner' },
-    { value: 1, label: 'Novice' },
-    { value: 2, label: 'Intermediate' },
-    { value: 3, label: 'Advanced' },
-    { value: 4, label: 'Expert' }
-];
-
 const homePages = [
     { value: 'feed', label: 'Social Feed' },
     { value: 'last_discussion', label: 'Last Used Discussion' },
@@ -43,7 +34,6 @@ function populateForm() {
     if (!user.value) return;
 
     form.value = {
-        user_ui_level: user.value.user_ui_level,
         first_page: user.value.first_page || 'feed',
         ai_response_language: user.value.ai_response_language || 'auto',
         auto_title: user.value.auto_title,
@@ -71,7 +61,6 @@ async function handleSave() {
     isSaving.value = true;
     try {
         const payload = {
-            user_ui_level: form.value.user_ui_level,
             first_page: form.value.first_page,
             ai_response_language: form.value.ai_response_language,
             auto_title: form.value.auto_title,
@@ -97,15 +86,6 @@ async function handleSave() {
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                    <!-- UI Level -->
-                    <div>
-                        <label for="uiLevel" class="block text-sm font-medium text-gray-700 dark:text-gray-300">UI Level</label>
-                        <select id="uiLevel" v-model.number="form.user_ui_level" class="input-field mt-1">
-                            <option v-for="level in uiLevels" :key="level.value" :value="level.value">{{ level.label }}</option>
-                        </select>
-                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Controls the complexity and number of features shown.</p>
-                    </div>
-
                     <!-- Default Home Page -->
                     <div>
                         <label for="homePage" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default Home Page</label>

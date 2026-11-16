@@ -350,10 +350,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         db_was_created = True
 
     try:
-        session_ui_level = db_user.user_ui_level
-        if db_user.is_admin and session_ui_level != 4:
-            session_ui_level = 4
-
         if username not in user_sessions:
             with _session_init_lock:
                 if username not in user_sessions:
@@ -523,7 +519,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             default_rag_metadata_mode=db_user.default_rag_metadata_mode,
             rag_settings_forced=rag_settings_forced,
             auto_title=db_user.auto_title,
-            user_ui_level=session_ui_level if isinstance(session_ui_level, int) else int(session_ui_level) if isinstance(session_ui_level, str) else 0, chat_active=db_user.chat_active, first_page=db_user.first_page,
+            chat_active=db_user.chat_active, first_page=db_user.first_page,
             ai_response_language=db_user.ai_response_language,
             force_ai_response_language=db_user.force_ai_response_language,
             fun_mode=db_user.fun_mode,

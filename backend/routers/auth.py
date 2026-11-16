@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
+from backend.db.models.memory import UserMemory
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from backend.models.user import (
@@ -477,7 +478,7 @@ async def update_my_data_zone(
     db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
-    db_user.data_zone = payload.content
+    db_user.data_zone = payload.data_zone
     try:
         db.commit()
         return {"message": "Data zone updated successfully."}
@@ -492,7 +493,13 @@ async def update_my_memory(
     db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
-    db_user.memories.append(title=payload.title, content=payload.content, created_at= datetime.datetime.now(timezone.utc), updated_at= datetime.datetime.now(timezone.utc))
+    new_memory = UserMemory(
+        title=payload.title,
+        content=payload.content,
+        created_at=datetime.datetime.now(timezone.utc),
+        updated_at=datetime.datetime.now(timezone.utc),
+    )
+    db_user.memories.append(new_memory)
     try:
         db.commit()
         return {"message": "Memory updated successfully."}
@@ -530,7 +537,6 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
         llm_temperature=settings.get("default_llm_temperature"),
         first_login_done=False, # CHANGED to False so the Terms modal appears
-        user_ui_level=settings.get("default_user_ui_level", 0),
         auto_title=settings.get("default_auto_title", False),
         image_generation_enabled=has_active_tti # Auto-enable image generation if TTI backend exists
     )
@@ -809,9 +815,7 @@ async def create_first_admin(user_data: UserCreateAdmin, db: Session = Depends(g
         status="active", # Force to be active status
         lollms_model_name=settings.get("default_lollms_model_name"),
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
-        llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
-        user_ui_level=4,
         auto_title=True,
         first_login_done=False # Changed to False to force Terms of Use
     )

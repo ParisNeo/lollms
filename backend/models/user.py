@@ -47,7 +47,6 @@ class UserCreateAdmin(BaseModel):
     rag_bm25_weight: Optional[float] = 0.5
     rag_graph_weight: Optional[float] = 0.3
     rag_rrf_k: Optional[int] = 60
-    user_ui_level: int = 0
     first_page: str = "feed"
     message_font_size: int = 14
     auto_title: bool = False
@@ -98,7 +97,6 @@ class UserPasswordResetAdmin(BaseModel):
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     is_moderator: Optional[bool] = None
-    user_ui_level: Optional[int] = None
     status: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -235,7 +233,6 @@ class UserAuthDetails(BaseModel):
     default_rag_chunk_overlap: Optional[int] = 256
     default_rag_metadata_mode: Optional[str] = "none"
     auto_title: bool = False
-    user_ui_level: int = 0
     chat_active: bool = True
     first_page: str = "feed"
     ai_response_language: Optional[str] = "auto"
@@ -350,7 +347,6 @@ class UserUpdate(BaseModel):
     default_rag_metadata_mode: Optional[str] = None
     put_thoughts_in_context: Optional[bool] = None
     auto_title: Optional[bool] = None
-    user_ui_level: Optional[int] = None
     chat_active: Optional[bool] = None
     first_page: Optional[str] = None
     ai_response_language: Optional[str] = None

@@ -186,7 +186,6 @@ class User(Base):
     default_rag_metadata_mode = Column(String, default="none", nullable=True, server_default="'none'")
 
     auto_title = Column(Boolean, default=False, nullable=False, server_default='0')
-    user_ui_level = Column(Integer, default=0, nullable=True, server_default='0')
     chat_active = Column(Boolean, default=True, nullable=False, server_default='1')
     first_page = Column(String, default="feed", nullable=False, server_default="'feed'")
     ai_response_language = Column(String, default="auto", nullable=True, server_default="'auto'")
@@ -216,7 +215,7 @@ class User(Base):
 
     groups = relationship("Group", secondary=user_group_link, back_populates="members")
 
-    __table__args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
+    __table_args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
     
     def verify_password(self, plain_password):
         return pwd_context.verify(plain_password, self.hashed_password)
@@ -228,7 +227,7 @@ class UserStarredDiscussion(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     discussion_id = Column(String, nullable=False, index=True)
     user = relationship("User", back_populates="starred_discussions")
-    __table__args__ = (UniqueConstraint('user_id', 'discussion_id', name='uq_user_discussion_star'),)
+    __table_args__ = (UniqueConstraint('user_id', 'discussion_id', name='uq_user_discussion_star'),)
 
 class UserMessageGrade(Base):
     __tablename__ = "user_message_grades"
@@ -238,7 +237,7 @@ class UserMessageGrade(Base):
     message_id = Column(String, nullable=False, index=True)
     grade = Column(Integer, nullable=False, default=0)
     user = relationship("User", back_populates="message_grades")
-    __table__args__ = (UniqueConstraint('user_id', 'discussion_id', 'message_id', name='uq_user_message_grade'),)
+    __table_args__ = (UniqueConstraint('user_id', 'discussion_id', 'message_id', name='uq_user_message_grade'),)
 
 class Friendship(Base):
     __tablename__ = "friendships"
@@ -252,4 +251,4 @@ class Friendship(Base):
     user1 = relationship("User", foreign_keys=[user1_id], backref="sent_friend_requests_or_friendships")
     user2 = relationship("User", foreign_keys=[user2_id], backref="received_friend_requests_or_friendships")
     action_user = relationship("User", foreign_keys=[action_user_id])
-    __table__args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)
+    __table_args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)
