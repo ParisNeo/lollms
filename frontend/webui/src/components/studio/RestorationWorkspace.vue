@@ -123,30 +123,38 @@
                 </div>
 
                 <!-- Compare viewer -->
-                <div v-else class="relative max-w-full max-h-full rounded-2xl overflow-hidden shadow-2xl border-2 border-gray-300 dark:border-gray-700">
-                    <!-- AFTER (background / right side) -->
+                <!--
+                  `AuthenticatedImage` renders a `div.w-full.h-full` root whose
+                  internal <img> is `h-full w-full object-contain`. Its size is
+                  therefore dictated ONLY by its parent. So we give the viewer an
+                  explicit, image-driven box:
+                    - aspect-ratio = AFTER image natural ratio (measured on @load)
+                    - max-h: 70vh, max-w: 100%
+                  Both BEFORE and AFTER images are then placed ABSOLUTELY inside
+                  that one box, so their internal `<img object-contain>` produce
+                  pixel-identical renders. Clipping the BEFORE layer via clip-path
+                  reveals the two aligned images as a curtain slide.
+                -->
+                <div
+                    v-else
+                    ref="compareViewerRef"
+                    class="relative rounded-2xl overflow-hidden shadow-2xl border-2 border-gray-300 dark:border-gray-700 bg-white"
+                    :style="viewerBoxStyle"
+                >
+                    <!-- AFTER (underlay) — pinned to the box -->
                     <AuthenticatedImage
-                        v-if="resultImage"
-                        :src="`/api/image-studio/images/${resultImage.id}/file`"
-                        class="block max-w-full max-h-[70vh] object-contain bg-white"
-                    />
-                    <AuthenticatedImage
-                        v-else
-                        :src="`/api/image-studio/images/${sourceImage.id}/file`"
-                        class="block max-w-full max-h-[70vh] object-contain bg-white opacity-40"
+                        :src="resultImage ? `/api/image-studio/images/${resultImage.id}/file` : `/api/image-studio/images/${sourceImage.id}/file`"
+                        class="absolute inset-0 w-full h-full"
+                        :class="{ 'opacity-40': !resultImage }"
+                        @load="onAfterLoad"
                     />
 
-                    <!-- BEFORE (clipped overlay / left) with drag divider -->
-                    <div
-                        class="absolute inset-0 overflow-hidden"
-                        :style="{ width: `${splitPct}%` }"
-                    >
-                        <AuthenticatedImage
-                            :src="`/api/image-studio/images/${sourceImage.id}/file`"
-                            class="block max-w-full max-h-[70vh] object-contain bg-white"
-                            :style="{ width: containerWidth ? containerWidth + 'px' : '100%' }"
-                        />
-                    </div>
+                    <!-- BEFORE (overlay) — pinned to the SAME box, clipped via clip-path -->
+                    <AuthenticatedImage
+                        :src="`/api/image-studio/images/${sourceImage.id}/file`"
+                        class="absolute inset-0 w-full h-full"
+                        :style="{ clipPath: `inset(0 ${100 - splitPct}% 0 0)` }"
+                    />
 
                     <!-- Divider handle -->
                     <div
@@ -180,7 +188,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useImageStore } from '../../stores/images';
 import { useUiStore } from '../../stores/ui';
@@ -329,7 +337,29 @@ function waitForResult(beforeIds) {
 // ── Split viewer ──
 const splitPct = ref(50);
 const isDragging = ref(false);
-const containerWidth = ref(0);
+const compareViewerRef = ref(null);
+// Aspect ratio of the AFTER image (once loaded), so the viewer becomes a
+// concrete-sized box instead of a zero-height column. Defaults to 1:1 so
+// the container still renders while the image loads.
+const viewerAspect = ref('1 / 1');
+
+const viewerBoxStyle = computed(() => ({
+    // The box is a concrete size -> AuthenticatedImage's `w-full h-full`
+    // root and inner `object-contain` img both render into it properly.
+    aspectRatio: viewerAspect.value,
+    // Cap the rendered height, capped width, let it shrink gracefully.
+    maxHeight: '70vh',
+    width: 'min(100%, calc(70vh * (var(--viewer-ar, 1))))',
+}));
+
+function onAfterLoad(event) {
+    const img = event?.target;
+    if (!img || !img.naturalWidth || !img.naturalHeight) return;
+    viewerAspect.value = `${img.naturalWidth} / ${img.naturalHeight}`;
+    // Mirror the ratio on the wrapper so width can be locked to the height cap.
+    const root = compareViewerRef.value;
+    if (root) root.style.setProperty('--viewer-ar', String(img.naturalWidth / img.naturalHeight));
+}
 
 function startDrag(e) {
     isDragging.value = true;
@@ -338,9 +368,9 @@ function startDrag(e) {
 }
 function onDrag(e) {
     if (!isDragging.value) return;
-    const rect = e.currentTarget?.getBoundingClientRect?.() || { left: 0, width: window.innerWidth };
-    const target = document.querySelector('.relative.max-w-full') || { getBoundingClientRect: () => ({ left: 0, width: window.innerWidth }) };
-    const r = target.getBoundingClientRect();
+    const root = compareViewerRef.value;
+    if (!root) return;
+    const r = root.getBoundingClientRect();
     splitPct.value = Math.max(2, Math.min(98, ((e.clientX - r.left) / r.width) * 100));
 }
 function stopDrag() {
