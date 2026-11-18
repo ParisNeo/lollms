@@ -78,23 +78,13 @@ export function useDiscussionDataZones(state, stores, getActions) {
             // Hydrate from full discussion metadata first when RAG ids are unknown
             if (!Array.isArray(discussions.value[discussionId]?.rag_datastore_ids) || 
                 discussions.value[discussionId].rag_datastore_ids.length === 0) {
-                try {
-                    const fullRes = await apiClient.get(`/api/discussions/${discussionId}`);
-                    // Backend returns metadata AT TOP LEVEL: { id, title, rag_datastore_ids, active_tools, ... }
-                    const meta = fullRes.data;
-                    if (meta && discussions.value[discussionId]) {
-                        const serverRagIds = meta.rag_datastore_ids;
-                        if (serverRagIds && Array.isArray(serverRagIds) && serverRagIds.length > 0) {
-                            console.log("[HYDRATION][fetchDataZones] Hydrating rag_ids from full discussion fetch:", serverRagIds);
-                            discussions.value[discussionId].rag_datastore_ids = serverRagIds;
-                        }
-                        if (Array.isArray(meta?.active_tools) && meta.active_tools.length > 0) {
-                            discussions.value[discussionId].active_tools = meta.active_tools;
-                        }
-                    }
-                } catch (metaErr) {
-                    console.warn("Failed to hydrate metadata before data_zones:", metaErr);
-                }
+                // NOTE: we intentionally do NOT fetch `/api/discussions/{id}`
+                // here to hydrate metadata: that endpoint returns the message
+                // list, not the metadata object. Discussion metadata (including
+                // rag_datastore_ids) arrives with the `/api/discussions` list
+                // response and is kept by the store; the dedicated
+                // `/data_zones` payload below is the authoritative source for
+                // data-zone state.
             }
             
             const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);

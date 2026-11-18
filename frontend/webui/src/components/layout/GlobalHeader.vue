@@ -212,9 +212,11 @@ async function loadActivePersona() {
     try {
         const resp = await apiClient.get('/api/personalities/preference');
         activePersona.value = resp.data;
+        dataStore.setActivePersonalityPreference(resp.data);
     } catch (e) {
         if (e?.response?.status === 404) {
             activePersona.value = null;
+            dataStore.setActivePersonalityPreference(null);
         } else {
             console.warn('[GlobalHeader] preference load failed:', e);
             activePersona.value = null;
@@ -240,6 +242,11 @@ async function selectPersonalityHandbag(item) {
     try {
         const resp = await apiClient.put('/api/personalities/preference', body);
         activePersona.value = resp.data;
+        dataStore.setActivePersonalityPreference({
+            scope: item.scope,
+            handbag_name: item.handbag_name,
+            owner_id: item.scope === 'shared' ? item.owner_id : null,
+        });
         uiStore.addNotification(`Active persona: ${item.name}`, 'success');
     } catch (e) {
         const detail = e?.response?.data?.detail || e.message || 'Unknown error';

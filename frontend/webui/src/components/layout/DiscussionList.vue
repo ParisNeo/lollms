@@ -375,6 +375,15 @@ async function handleSelectPersonality(personality) {
         uiStore.addNotification('Failed to set active personality.', 'error');
         return;
     }
+    // Push the new preference into the shared reactive signal so the central
+    // UI (discussions.activePersonality AND the already-mounted studio)
+    // updates immediately. Without this, the studio only refreshes on a full
+    // navigation/mount, leaving the center panel showing the previous persona.
+    dataStore.setActivePersonalityPreference({
+        scope: personality.scope,
+        handbag_name: personality.handbag_name,
+        owner_id: personality.scope === 'shared' ? (personality.owner_id ?? null) : null,
+    });
     if (!route.path.startsWith('/personality-studio')) {
         router.push('/personality-studio');
     }

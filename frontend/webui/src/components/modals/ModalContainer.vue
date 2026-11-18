@@ -93,7 +93,12 @@ const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardMod
     <PasswordResetLinkModal v-if="activeModal === 'passwordResetLink'" />
     <PendingUsersModal v-if="activeModal === 'pendingUsers'" />
     <RenameDiscussionModal v-if="activeModal === 'renameDiscussion'" />
-    <PersonalityEditorModal v-if="activeModal === 'personalityEditor'" />
+    <PersonalityEditorModal
+      v-if="activeModal === 'personalityEditor'"
+      :personality="uiStore.modalData('personalityEditor')?.personality || null"
+      @close="uiStore.closeModal('personalityEditor')"
+      @saved="uiStore.closeModal('personalityEditor')"
+    />
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <ConfirmationModal v-if="activeModal === 'confirmation'" />

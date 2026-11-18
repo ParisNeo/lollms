@@ -22,6 +22,12 @@ export const useDataStore = defineStore('data', () => {
     const userPersonalities = ref([]);
     const publicPersonalities = ref([]);
     const sharedPersonalities = ref([]);
+    // Shared, reactive "active personality" preference. Populated by the
+    // selection handlers (GlobalHeader / DiscussionList) and by bootstrap
+    // hydration; consumed by `activePersonalityResolved` so the central UI
+    // reflects the selection immediately without depending on the legacy
+    // numeric `users.active_personality_id` column.
+    const activePersonalityPreference = ref(null);
     const userMcps = ref([]);
     const systemMcps = ref([]);
     const mcpTools = ref([]);
@@ -528,6 +534,7 @@ export const useDataStore = defineStore('data', () => {
                     handbag_name: hb.handbag_name,
                     scope,
                     owner: hb.owner ?? null,
+                    owner_id: hb.owner_id ?? hb.owner ?? null,
                     name: hb.name,
                     author: hb.author || (scope === 'global' ? 'LoLLMs' : 'Unknown'),
                     category: hb.category || (scope === 'global' ? 'General' : 'Custom'),
@@ -830,7 +837,8 @@ export const useDataStore = defineStore('data', () => {
             fetchApps(),
             fetchLanguages(),
             fetchApiKeys(),
-            promptsStore.fetchPrompts()
+            promptsStore.fetchPrompts(),
+            fetchActivePersonalityPreference()
         ]);
     }
 
@@ -917,6 +925,7 @@ export const useDataStore = defineStore('data', () => {
         userPersonalities.value = [];
         publicPersonalities.value = [];
         sharedPersonalities.value = [];
+        activePersonalityPreference.value = null;
         userMcps.value = [];
         systemMcps.value = [];
         mcpTools.value = [];
@@ -969,10 +978,52 @@ export const useDataStore = defineStore('data', () => {
     const availableTtvModelsGrouped = computed(() => _buildGroupedModels(availableTtvModels.value));
     const availableTtmModelsGrouped = computed(() => _buildGroupedModels(availableTtmModels.value));
 
-    const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
-    
+    const allPersonalities = computed(() => [
+        ...userPersonalities.value,
+        ...publicPersonalities.value,
+        ...sharedPersonalities.value,
+    ]);
+
     function getPersonalityById(id) {
         return allPersonalities.value.find(p => p.id === id);
+    }
+
+    function getPersonalityByHandbag(scope, handbagName, ownerId = null) {
+        if (!handbagName) return null;
+        const wantedScope = scope || null;
+        return allPersonalities.value.find(p => {
+            const nameMatches = p.handbag_name === handbagName || (!p.handbag_name && p.name === handbagName);
+            if (!nameMatches) return false;
+            if (wantedScope && (p.scope || 'personal') !== wantedScope) return false;
+            if (wantedScope === 'shared' && ownerId != null) {
+                return (p.owner ?? p.owner_id ?? null) === ownerId;
+            }
+            return true;
+        }) || null;
+    }
+
+    function setActivePersonalityPreference(pref) {
+        activePersonalityPreference.value = pref || null;
+    }
+
+    const activePersonalityResolved = computed(() => {
+        const pref = activePersonalityPreference.value;
+        if (!pref || !pref.handbag_name) return null;
+        return getPersonalityByHandbag(pref.scope, pref.handbag_name, pref.owner_id ?? null);
+    });
+
+    async function fetchActivePersonalityPreference() {
+        try {
+            const response = await apiClient.get('/api/personalities/preference');
+            const pref = response?.data || null;
+            setActivePersonalityPreference(pref);
+            return pref;
+        } catch (error) {
+            // 404 = no preference set (legitimate default); other errors are
+            // non-fatal for bootstrap. Either way the preference stays null and
+            // the legacy fallback in `discussions.activePersonality` handles it.
+            return null;
+        }
     }
 
     async function handleTaskCompletion(task) {
@@ -1004,7 +1055,9 @@ export const useDataStore = defineStore('data', () => {
         userApps, systemApps,
         isLoadingLollmsModels,
         availableRagStores, availableMcpToolsForSelector, availableLLMModelsGrouped,
-        allPersonalities, getPersonalityById,
+        allPersonalities, getPersonalityById, getPersonalityByHandbag,
+        activePersonalityPreference, setActivePersonalityPreference,
+        activePersonalityResolved, fetchActivePersonalityPreference,
         
         availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped,
         availableTtsModels, isLoadingTtsModels, availableTtsModelsGrouped,

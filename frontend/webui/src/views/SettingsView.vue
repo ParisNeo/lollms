@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import IconUserCircle from '../assets/icons/IconUserCircle.vue';
+import IconDashboard from '../assets/icons/IconDashboard.vue';
 import IconCog from '../assets/icons/IconCog.vue';
 import IconCpuChip from '../assets/icons/IconCpuChip.vue';
 import IconPhoto from '../assets/icons/IconPhoto.vue';
@@ -19,6 +20,7 @@ const route = useRoute();
 const router = useRouter();
 
 // Define components for async loading wrapped in markRaw
+const DashboardSettings = markRaw(defineAsyncComponent(() => import('../components/settings/DashboardSettings.vue')));
 const AccountSettings = markRaw(defineAsyncComponent(() => import('../components/settings/AccountSettings.vue')));
 const GeneralSettings = markRaw(defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue')));
 const UserContextSettings = markRaw(defineAsyncComponent(() => import('../components/settings/UserContextSettings.vue')));
@@ -35,6 +37,7 @@ const AppsSettings = markRaw(defineAsyncComponent(() => import('../components/se
 
 const sections = [
     { id: 'account', name: 'Account', icon: markRaw(IconUserCircle), component: AccountSettings },
+    { id: 'dashboard', name: 'Dashboard', icon: markRaw(IconDashboard), component: DashboardSettings },
     { id: 'general', name: 'General', icon: markRaw(IconCog), component: GeneralSettings },
     { id: 'context', name: 'User Tools & Context', icon: markRaw(IconFingerPrint), component: UserContextSettings },
     { type: 'divider' },

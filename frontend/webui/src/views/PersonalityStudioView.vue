@@ -169,6 +169,32 @@ function isActive(item) {
     (item.scope !== 'shared' || activePreference.value.owner_id === item.owner_id);
 }
 
+// A single source of truth: the local `activePreference` is ALWAYS a mirror
+// of the shared store signal. Every write to the store (GlobalHeader,
+// DiscussionList, this view's selectHandbag, or fetchCatalog hydration) flows
+// through this watcher, so `isActive()` and the studio's own re-hydration of
+// the center panel stay in lockstep without duplicated logic. Using `flush:
+// 'sync'` ensures the mirror is up to date BEFORE the deep watcher below
+// decides whether a detail reload is needed.
+watch(
+  () => dataStore.activePersonalityPreference,
+  (pref) => { activePreference.value = pref || null; },
+  { deep: true, immediate: true, flush: 'sync' }
+);
+
+// Resolve the shared global preference into a catalog item so an external
+// selection (GlobalHeader / DiscussionList) can drive the studio's center panel.
+function itemFromSharedPreference() {
+  const pref = dataStore.activePersonalityPreference;
+  if (!pref || !pref.handbag_name) return null;
+  const all = [...catalog.value.global, ...catalog.value.personal, ...catalog.value.shared];
+  return all.find(i =>
+    i.handbag_name === pref.handbag_name &&
+    (!pref.scope || i.scope === pref.scope) &&
+    (pref.scope !== 'shared' || (pref.owner_id ?? null) === (i.owner_id ?? null))
+  ) || null;
+}
+
 // Shared-scope endpoints require `owner_id` in the query string; personal/global do not.
 function detailParams(item, extra = {}) {
   const params = { ...extra };
@@ -198,6 +224,9 @@ async function fetchCatalog() {
     loadError.value = describeError(catRes.reason) || 'Failed to load catalog.';
   }
   activePreference.value = prefRes.status === 'fulfilled' ? (prefRes.value?.data ?? null) : null;
+  // Seed the shared store signal so the rest of the app agrees with the studio
+  // on first mount (no-op if GlobalHeader/bootstrap already set it).
+  if (activePreference.value) dataStore.setActivePersonalityPreference(activePreference.value);
   const sharesPayload = sharesRes.status === 'fulfilled' ? sharesRes.value?.data : null;
   receivedShares.value = Array.isArray(sharesPayload)
     ? sharesPayload.filter(l => l?.shared_with_user_id != null || l?.group_id != null)
@@ -271,6 +300,7 @@ async function selectHandbag(item) {
   try {
     await apiClient.put('/api/personalities/preference', payload);
     activePreference.value = payload;
+    dataStore.setActivePersonalityPreference(payload);
     // The global header consumes this event directly, so include the icon and
     // display name — otherwise the header avatar indicator loses the image on
     // selection.
@@ -286,11 +316,9 @@ async function selectHandbag(item) {
 }
 
 // ---------- Modals ----------
-function openEditor(item) {
-  editorHandbag.value = item;
-  showEditor.value = true;
-}
-
+// The studio canvas is the ONLY edit surface (SOUL / Skills / Tools / Metadata
+// tabs with their own Save buttons). The modal is retained for creation only —
+// there is no "edit" entry point that would duplicate the main editor.
 function openCreateEditor() {
   editorHandbag.value = null;
   showEditor.value = true;
@@ -666,6 +694,29 @@ watch(activeTab, (newTab) => {
     }
   }
 });
+
+// React to a personality selected elsewhere (GlobalHeader dropdown or the
+// DiscussionList PERS tab). The mirror watcher above already keeps
+// `activePreference` in sync, so this one only needs to (re)load the center
+// panel when the target persona differs from what is currently displayed.
+// Ignoring non-shared owner mismatches prevents shared-scope picks from
+// bouncing back to a personal one with the same handbag_name.
+watch(
+  () => dataStore.activePersonalityPreference,
+  (pref) => {
+    if (!pref || !pref.handbag_name) return;
+    const item = itemFromSharedPreference();
+    if (!item) return;
+    const current = selectedHandbag.value;
+    const same = current
+      && current.scope === item.scope
+      && current.handbag_name === item.handbag_name
+      && (item.scope !== 'shared' || (current.owner_id ?? null) === (item.owner_id ?? null));
+    if (same) return;
+    fetchHandbagDetail(item);
+  },
+  { deep: true }
+);
 
 onMounted(fetchCatalog);
 </script>

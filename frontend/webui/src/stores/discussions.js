@@ -115,9 +115,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
 
     const activePersonality = computed(() => {
+        // Prefer the shared handbag preference written by the selection
+        // handlers (GlobalHeader / DiscussionList) and hydrated on bootstrap.
+        const resolved = dataStore.activePersonalityResolved;
+        if (resolved) return resolved;
+        // Legacy fallback: numeric `active_personality_id` on the user row.
         const personalityId = authStore.user?.active_personality_id;
         if (!personalityId) return null;
-        return dataStore.getPersonalityById(personalityId);
+        return dataStore.getPersonalityById(personalityId) || null;
     });
 
     const loadedContextItems = computed(() => {
