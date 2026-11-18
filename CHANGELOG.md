@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-18 00:07]
+
+- feat: add per-field admin settings policy management
+
 ## [2026-11-16 16:17]
 
 - fix(webui): restore correct alignment and sizing for image comparison viewer
