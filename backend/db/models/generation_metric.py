@@ -26,6 +26,8 @@ class GenerationMetric(Base):
 
     __table_args__ = (
         Index('ix_generation_metrics_created_user', 'created_at', 'user_id'),
+        Index('ix_generation_metrics_user_id', 'user_id'),
+        Index('ix_generation_metrics_username', 'username'),
     )
 
 # Energy & Carbon conversion constants (0.0002 kWh / 1k tokens, 400g CO2 / kWh)

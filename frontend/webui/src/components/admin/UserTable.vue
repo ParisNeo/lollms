@@ -125,6 +125,45 @@ function formatLastSeen(dateString) {
     return date.toLocaleString();
 }
 
+// Compact count formatter (0 → "0", 1234 → "1.2K", 1234567 → "1.2M").
+// Keeps the admin table tight even when a user has burned millions of tokens.
+function formatTokenCount(count) {
+    const n = Number(count) || 0;
+    if (n < 1000) return String(n);
+    if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}K`;
+    if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    return `${(n / 1_000_000_000).toFixed(2)}B`;
+}
+
+// WebUI vs API split — mirrors the source_breakdown shown in the stats modal.
+function formatTokenSplit(user) {
+    const webui = user.webui_tokens || 0;
+    const api = user.api_tokens || 0;
+    if (webui === 0 && api === 0) return '';
+    if (api === 0) return `WebUI`;
+    if (webui === 0) return `API`;
+    const total = webui + api;
+    const webuiPct = Math.round((webui / total) * 100);
+    return `${webuiPct}% WebUI`;
+}
+
+// Full breakdown surfaced on hover so admins get the exact numbers without a modal.
+function tokenTooltip(user) {
+    const total = user.total_tokens || 0;
+    if (total === 0) return 'No tokens recorded yet';
+    const lines = [
+        `Total tokens: ${total.toLocaleString()}`,
+        `Prompt: ${(user.total_prompt_tokens || 0).toLocaleString()}`,
+        `Completion: ${(user.total_completion_tokens || 0).toLocaleString()}`,
+        `WebUI: ${(user.webui_tokens || 0).toLocaleString()}`,
+        `API: ${(user.api_tokens || 0).toLocaleString()}`,
+        `Generations: ${(user.generation_count || 0).toLocaleString()}`,
+    ];
+    if (user.total_energy_kwh) lines.push(`Energy: ${user.total_energy_kwh} kWh`);
+    if (user.total_co2_g) lines.push(`CO₂: ${user.total_co2_g} g`);
+    return lines.join('\n');
+}
+
 function openEditModal(user) {
     uiStore.openModal('adminUserEdit', { 
         user,
@@ -217,6 +256,9 @@ onMounted(() => {
                             <th scope="col" class="table-header">
                                 <button @click="handleSort('task_count')" class="flex items-center gap-1">Tasks <span v-if="sortKey === 'task_count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
+                            <th scope="col" class="table-header">
+                                <button @click="handleSort('total_tokens')" class="flex items-center gap-1" title="Total tokens consumed (lifetime)">Tokens <span v-if="sortKey === 'total_tokens'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
+                            </th>
                              <th scope="col" class="table-header">
                                 <button @click="handleSort('created_at')" class="flex items-center gap-1">Joined <span v-if="sortKey === 'created_at'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
@@ -258,6 +300,16 @@ onMounted(() => {
                             <td class="table-cell text-sm text-gray-500 dark:text-gray-400">{{ formatLastSeen(user.last_activity_at) }}</td>
                             <td class="table-cell text-sm text-center text-gray-500 dark:text-gray-400">{{ user.api_key_count }}</td>
                             <td class="table-cell text-sm text-center text-gray-500 dark:text-gray-400">{{ user.task_count }}</td>
+                            <td class="table-cell text-sm text-center text-gray-500 dark:text-gray-400" :title="tokenTooltip(user)">
+                                <div class="flex flex-col items-center gap-0.5">
+                                    <span class="font-mono font-bold" :class="(user.total_tokens || 0) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'opacity-50'">
+                                        {{ formatTokenCount(user.total_tokens) }}
+                                    </span>
+                                    <span v-if="(user.total_tokens || 0) > 0" class="text-[9px] font-mono text-gray-400 dark:text-gray-500 leading-none">
+                                        {{ formatTokenSplit(user) }}
+                                    </span>
+                                </div>
+                            </td>
                             <td class="table-cell text-sm text-gray-500 dark:text-gray-400">{{ new Date(user.created_at).toLocaleDateString() }}</td>
                             <td class="table-cell text-right text-sm font-medium">
                                 <div class="flex items-center justify-end space-x-2">

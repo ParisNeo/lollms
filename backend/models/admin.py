@@ -363,12 +363,22 @@ class UserForAdminPanel(BaseModel):
     status: str = "active"
     created_at: datetime.datetime
     last_activity_at: Optional[datetime.datetime] = None
-    
+
     is_online: bool = False
     connection_count: int = 0
     api_key_count: int = 0
     task_count: int = 0
     generation_count: int = 0
+
+    # Per-user token telemetry (aggregated from GenerationMetric).
+    # Defaults are zero so older clients / partial queries stay compatible.
+    total_tokens: int = 0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_energy_kwh: float = 0.0
+    total_co2_g: float = 0.0
+    webui_tokens: int = 0
+    api_tokens: int = 0
 
 class RequirementInfo(BaseModel):
     name: str

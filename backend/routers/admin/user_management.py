@@ -118,21 +118,57 @@ async def admin_get_all_users(
     filter_online: Optional[bool] = Query(None),
     filter_has_keys: Optional[bool] = Query(None),
     status_filter: Optional[str] = Query(None, description="Filter by user status"),
-    sort_by: str = Query('username', enum=['username', 'email', 'last_activity_at', 'created_at', 'task_count', 'api_key_count', 'connection_count', 'status']),
+    sort_by: str = Query(
+        'username',
+        enum=[
+            'username', 'email', 'last_activity_at', 'created_at',
+            'task_count', 'api_key_count', 'connection_count', 'status',
+            'total_tokens',
+        ],
+    ),
     sort_order: str = Query('asc', enum=['asc', 'desc']),
     db: Session = Depends(get_db)
 ):
+    from backend.db.models.generation_metric import (
+        GenerationMetric, KWH_PER_TOKEN, CO2_G_PER_KWH,
+    )
+
     online_users_subquery = select(WebSocketConnection.user_id).distinct()
-    
+
+    # Token usage is pre-aggregated in its own subquery so joining GenerationMetric
+    # does not multiply the outer task / api-key / connection row counts.
+    token_agg = db.query(
+        GenerationMetric.user_id.label('user_id'),
+        func.coalesce(func.sum(GenerationMetric.total_tokens), 0).label('total_tokens'),
+        func.coalesce(func.sum(GenerationMetric.prompt_tokens), 0).label('prompt_tokens'),
+        func.coalesce(func.sum(GenerationMetric.completion_tokens), 0).label('completion_tokens'),
+        func.count(GenerationMetric.id).label('generation_count'),
+        func.coalesce(
+            func.sum(case((GenerationMetric.source == 'chat', GenerationMetric.total_tokens), else_=0)),
+            0,
+        ).label('webui_tokens'),
+        func.coalesce(
+            func.sum(case((GenerationMetric.source != 'chat', GenerationMetric.total_tokens), else_=0)),
+            0,
+        ).label('api_tokens'),
+    ).filter(GenerationMetric.user_id.isnot(None)).group_by(GenerationMetric.user_id).subquery()
+
     query = db.query(
         DBUser,
         case((DBUser.id.in_(online_users_subquery), True), else_=False).label('is_online'),
         func.count(func.distinct(DBTask.id)).label('task_count'),
         func.count(func.distinct(OpenAIAPIKey.id)).label('api_key_count'),
-        func.count(func.distinct(WebSocketConnection.id)).label('connection_count')
+        func.count(func.distinct(WebSocketConnection.id)).label('connection_count'),
+        func.coalesce(token_agg.c.total_tokens, 0).label('total_tokens'),
+        func.coalesce(token_agg.c.prompt_tokens, 0).label('prompt_tokens'),
+        func.coalesce(token_agg.c.completion_tokens, 0).label('completion_tokens'),
+        func.coalesce(token_agg.c.generation_count, 0).label('generation_count'),
+        func.coalesce(token_agg.c.webui_tokens, 0).label('webui_tokens'),
+        func.coalesce(token_agg.c.api_tokens, 0).label('api_tokens'),
     ).outerjoin(DBTask, DBUser.id == DBTask.owner_user_id) \
      .outerjoin(OpenAIAPIKey, DBUser.id == OpenAIAPIKey.user_id) \
      .outerjoin(WebSocketConnection, DBUser.id == WebSocketConnection.user_id) \
+     .outerjoin(token_agg, DBUser.id == token_agg.c.user_id) \
      .group_by(DBUser.id)
 
     if filter_online is not None:
@@ -159,17 +195,28 @@ async def admin_get_all_users(
         else:
             query = query.filter(DBUser.status == status_filter)
 
-    sort_column = getattr(DBUser, sort_by) if hasattr(DBUser, sort_by) else literal_column(sort_by)
-    if sort_order == 'desc':
-        query = query.order_by(sort_column.desc())
+    # Sorting: total_tokens lives in the token subquery, so it needs its own branch.
+    if sort_by == 'total_tokens':
+        token_sort = func.coalesce(token_agg.c.total_tokens, 0)
+        query = query.order_by(token_sort.desc() if sort_order == 'desc' else token_sort.asc())
     else:
-        query = query.order_by(sort_column.asc())
+        sort_column = getattr(DBUser, sort_by) if hasattr(DBUser, sort_by) else literal_column(sort_by)
+        query = query.order_by(sort_column.desc() if sort_order == 'desc' else sort_column.asc())
 
     results = query.all()
-    
+
     users_for_panel = []
-    for user, is_online, task_count, api_key_count, connection_count in results:
+    for row in results:
+        (
+            user, is_online, task_count, api_key_count, connection_count,
+            total_tokens, prompt_tokens, completion_tokens,
+            generation_count, webui_tokens, api_tokens,
+        ) = row
         try:
+            total_tokens = int(total_tokens or 0)
+            energy_kwh = total_tokens * KWH_PER_TOKEN
+            co2_g = energy_kwh * CO2_G_PER_KWH
+
             user_data = {
                 "id": user.id,
                 "username": user.username,
@@ -186,7 +233,14 @@ async def admin_get_all_users(
                 "total_logins": getattr(user, "total_logins", 0),
                 "api_key_count": api_key_count,
                 "task_count": task_count,
-                "generation_count": 0
+                "generation_count": int(generation_count or 0),
+                "total_tokens": total_tokens,
+                "total_prompt_tokens": int(prompt_tokens or 0),
+                "total_completion_tokens": int(completion_tokens or 0),
+                "total_energy_kwh": round(energy_kwh, 4),
+                "total_co2_g": round(co2_g, 2),
+                "webui_tokens": int(webui_tokens or 0),
+                "api_tokens": int(api_tokens or 0),
             }
             users_for_panel.append(UserForAdminPanel.model_validate(user_data))
         except Exception as e:
@@ -318,6 +372,19 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
         for d_str, c in sorted(daily_tokens.items())
     ]
 
+    # Lifetime totals (unfiltered by the 30-day window) so the admin-list token
+    # column and this per-user detail view report the same underlying figure.
+    lifetime_totals = db.query(
+        func.coalesce(func.sum(GenerationMetric.total_tokens), 0),
+        func.coalesce(func.sum(GenerationMetric.prompt_tokens), 0),
+        func.coalesce(func.sum(GenerationMetric.completion_tokens), 0),
+        func.count(GenerationMetric.id),
+    ).filter(GenerationMetric.user_id == user_id).first()
+    lifetime_tokens = int(lifetime_totals[0] or 0) if lifetime_totals else 0
+    lifetime_prompt = int(lifetime_totals[1] or 0) if lifetime_totals else 0
+    lifetime_completion = int(lifetime_totals[2] or 0) if lifetime_totals else 0
+    lifetime_gen_count = int(lifetime_totals[3] or 0) if lifetime_totals else 0
+
     source_rows = db.query(
         GenerationMetric.source,
         func.count(GenerationMetric.id).label('req_count'),
@@ -364,6 +431,15 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
         webui_co2_g=round(webui_tokens * KWH_PER_TOKEN * CO2_G_PER_KWH, 2),
         api_co2_g=round(api_tokens * KWH_PER_TOKEN * CO2_G_PER_KWH, 2)
     )
+
+    # Prefer the lifetime metrics when available — the admin user list shows
+    # lifetime totals, so the detail modal must match to avoid a confusing
+    # discontinuity between the two views. Fall back to the 30-day window only
+    # when no generation metrics exist at all (e.g. brand-new account).
+    if lifetime_gen_count > 0:
+        sum_tokens = lifetime_tokens
+        total_prompt = lifetime_prompt
+        total_comp = lifetime_completion
 
     energy_kwh = sum_tokens * KWH_PER_TOKEN
     co2_g = energy_kwh * CO2_G_PER_KWH
