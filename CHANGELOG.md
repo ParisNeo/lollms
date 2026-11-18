@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-17 22:34]
+
+- `Fix client-side dependency version of ascii_colors to 0.13.10`
+
 ## [2026-11-18 00:07]
 
 - feat: add per-field admin settings policy management
