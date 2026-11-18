@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-18 16:14]
+
+- feat: add generation metrics and user stats functionality
+
+## [2026-11-18 09:55]
+
+- docs: add LoLLMS constitution values
+
 ## [2026-11-18 08:46]
 
 - feat: add generation metrics and online status to user management

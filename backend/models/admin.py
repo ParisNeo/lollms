@@ -325,6 +325,26 @@ class UserStats(BaseModel):
     tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
     webui_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
     api_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+
+    # Richer per-day series (all computed server-side so the modal does not
+    # have to reconstruct them client-side; defaults keep older clients safe).
+    generations_per_day: List[UserActivityStat] = Field(default_factory=list)
+    prompt_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    completion_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+
+    # Rolling-window rollups. Computed with their own aggregate queries because
+    # a client-side sum over the daily series would be wrong whenever the
+    # response window is truncated (e.g. when the endpoint is asked for 7 days).
+    tokens_last_7d: int = 0
+    tokens_last_30d: int = 0
+    generations_last_7d: int = 0
+    generations_last_30d: int = 0
+    total_generations_30d: int = 0
+
+    # Mean generation count per weekday across the 30-day window. Keys are
+    # "Monday".."Sunday" (English, matching the global dashboard's convention).
+    weekday_generation_mean: Dict[str, float] = Field(default_factory=dict)
+
     total_tokens: int = 0
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
@@ -363,6 +383,12 @@ class UserForAdminPanel(BaseModel):
     status: str = "active"
     created_at: datetime.datetime
     last_activity_at: Optional[datetime.datetime] = None
+    total_logins: int = 0
+
+    # Account hygiene flags: distinguishable from "has email" so admins can tell
+    # verified accounts from just-declared ones.
+    email_verified: bool = False
+    has_pending_password_reset: bool = False
 
     is_online: bool = False
     connection_count: int = 0

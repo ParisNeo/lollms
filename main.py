@@ -226,6 +226,32 @@ def scheduled_task_pruning_job():
     )
 
 
+def scheduled_admin_alert_scan_job():
+    """
+    Periodic scan for admin-alerting conditions (token overconsumption, platform
+    spikes). Runs inline (not as a task) because it is fast and must not be
+    queued behind long-running generation tasks.
+    """
+    try:
+        with db_scope() as db:
+            settings.load_from_db(db)
+            if not settings.get("admin_alerts_enabled", True):
+                return
+            from backend.admin_alerts import check_token_consumption
+            # check_token_consumption reads settings itself from backend.settings;
+            # it is called with just the db session.
+            counters = check_token_consumption(db) or {}
+            if counters.get("user_alerts") or counters.get("system_alerts"):
+                ASCIIColors.info(
+                    f"[admin-alerts] scan emitted "
+                    f"{counters.get('user_alerts', 0)} user / "
+                    f"{counters.get('system_alerts', 0)} system alert(s)."
+                )
+    except Exception as e:
+        ASCIIColors.warning(f"Admin alert scan failed: {e}")
+        trace_exception(e)
+
+
 def check_and_run_scheduled_posts():
     try:
         with db_scope() as db:
@@ -306,7 +332,13 @@ def _warm_agent_client():
         build_lollms_client_from_params(AGENT_USERNAME, load_llm=True)
         ASCIIColors.info(f"Agent client '{AGENT_USERNAME}' ready.")
     except Exception as e:
-        ASCIIColors.warning(f"Agent client '{AGENT_USERNAME}' warmup failed: {e}")
+        # Surface the true origin (file:line) of any warmup failure so that
+        # internal bugs (e.g. NameError inside build_lollms_client_from_params)
+        # are not mistaken for a binding/connectivity problem.
+        ASCIIColors.warning(
+            f"Agent client '{AGENT_USERNAME}' warmup failed: {type(e).__name__}: {e}"
+        )
+        trace_exception(e)
 
 
 # --------------------------------------------------------------------------- #
@@ -670,6 +702,20 @@ async def startup_event():
 
         rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1, **job_opts)
         rss_scheduler.add_job(scheduled_task_pruning_job, 'cron', hour=4, minute=0, **job_opts)
+
+        # Admin alerting: periodic token/incident scan. Runs only when enabled;
+        # interval is admin-configurable (defaults to 15 minutes).
+        try:
+            _alert_interval = int(settings.get("alert_scan_interval_minutes", 15) or 15)
+        except (TypeError, ValueError):
+            _alert_interval = 15
+        if settings.get("admin_alerts_enabled", True):
+            rss_scheduler.add_job(
+                scheduled_admin_alert_scan_job, 'interval',
+                minutes=max(1, _alert_interval),
+                next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=2),
+                **job_opts
+            )
 
         if settings.get("email_marketing_enabled", False):
             rss_scheduler.add_job(

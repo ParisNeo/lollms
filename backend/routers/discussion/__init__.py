@@ -328,7 +328,11 @@ def build_discussions_router():
         Retrieves messages for a specific branch of a discussion.
         Calculates sibling branches across the entire discussion history for navigation.
         """
+        messages_output = []
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        
+        if not discussion_obj:
+            return messages_output
 
         # 1. Determine which leaf node defines the branch we are viewing
         branch_tip_to_load = branch_id or discussion_obj.active_branch_id
@@ -353,7 +357,6 @@ def build_discussions_router():
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
 
-        messages_output = []
         for msg in messages_in_branch:
             images_list_raw = msg.images or []
             images_list = []

@@ -200,6 +200,17 @@ def _bootstrap_global_settings(connection):
 
         "maintenance_mode": { "value": False, "type": "boolean", "description": "Put the system in maintenance mode. Only admins can access.", "category": "System" },
         "maintenance_message": { "value": "We are performing scheduled maintenance. We'll be back shortly.", "type": "text", "description": "Message displayed to users during maintenance.", "category": "System" },
+
+        # ── Admin Alerting & Token Monitoring ──
+        # All thresholds are optional; 0 disables the corresponding check.
+        "admin_alerts_enabled": { "value": True, "type": "boolean", "description": "Master switch for the admin alerting system (token monitoring, incidents, security events).", "category": "Admin Alerts" },
+        "alert_token_user_daily_limit": { "value": 0, "type": "integer", "description": "Per-user 24h token total that raises a WARNING alert. 0 disables.", "category": "Admin Alerts" },
+        "alert_token_user_daily_critical": { "value": 0, "type": "integer", "description": "Per-user 24h token total that raises a CRITICAL alert. 0 disables.", "category": "Admin Alerts" },
+        "alert_token_recent_burst_tokens": { "value": 0, "type": "integer", "description": "Tokens consumed by one user within the burst window that raises an alert. 0 disables.", "category": "Admin Alerts" },
+        "alert_token_burst_window_minutes": { "value": 15, "type": "integer", "description": "Sliding window (minutes) for the per-user token burst detector.", "category": "Admin Alerts" },
+        "alert_token_system_daily_limit": { "value": 0, "type": "integer", "description": "Platform-wide 24h token total that raises a CRITICAL alert. 0 disables.", "category": "Admin Alerts" },
+        "alert_token_single_generation": { "value": 0, "type": "integer", "description": "A single generation exceeding this many tokens raises an alert immediately. 0 disables.", "category": "Admin Alerts" },
+        "alert_scan_interval_minutes": { "value": 15, "type": "integer", "description": "How often the scheduled token/incident scan runs (minutes).", "category": "Admin Alerts" },
     }
 
     select_keys_query = text("SELECT key FROM global_configs")
@@ -1538,6 +1549,19 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         from backend.db.models.generation_metric import GenerationMetric
         GenerationMetric.__table__.create(connection)
         connection.commit()
+
+    # --- Admin Alerts table (operational incident/overconsumption feed) ---
+    if not inspector.has_table("admin_alerts"):
+        from backend.db.models.admin_alert import AdminAlert
+        AdminAlert.__table__.create(connection)
+        connection.commit()
+        print("INFO: Created 'admin_alerts' table.")
+
+    if not inspector.has_table("admin_alerts"):
+        from backend.db.models.admin_alert import AdminAlert
+        AdminAlert.__table__.create(connection)
+        connection.commit()
+        print("INFO: Created 'admin_alerts' table.")
 
     # Backfill historical WebUI assistant messages into generation_metrics if table is empty
     try:

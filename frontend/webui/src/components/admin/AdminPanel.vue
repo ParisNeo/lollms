@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, onMounted } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
@@ -15,7 +15,7 @@ const emit = defineEmits(['navigate']);
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
-const { allUsers, isLoadingUsers } = storeToRefs(adminStore);
+const { allUsers, isLoadingUsers, alertSummary } = storeToRefs(adminStore);
 
 // Lazy Loaded Administration Components
 const Dashboard = defineAsyncComponent(() => import('./Dashboard.vue'));
@@ -45,6 +45,7 @@ const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
 const EmailMarketing = defineAsyncComponent(() => import('./EmailMarketing.vue'));
 const LogsAndAnalysis = defineAsyncComponent(() => import('./LogsAndAnalysis.vue'));
 const SettingsPolicyManagement = defineAsyncComponent(() => import('./SettingsPolicyManagement.vue'));
+const AdminAlertsPanel = defineAsyncComponent(() => import('./AdminAlertsPanel.vue'));
 
 // Zoos
 const PersonalityZoo = defineAsyncComponent(() => import('./zoos/PersonalitiesManagement.vue'));
@@ -62,8 +63,39 @@ const TTVBindingsSettings = defineAsyncComponent(() => import('./bindings/TTVBin
 const TTMBindingsSettings = defineAsyncComponent(() => import('./bindings/TTMBindingsSettings.vue'));
 const RAGBindingsSettings = defineAsyncComponent(() => import('./bindings/RAGBindingsSettings.vue'));
 
+// ── Alert banner ────────────────────────────────────────────────────────────
+// A persistent, always-visible strip surfaces critical/warning conditions even
+// when the admin is on an unrelated tab. Refreshed on a slow poll + WS push
+// (the auth store calls fetchAlertSummary on the live 'admin_alert' event).
+let alertPollTimer = null;
+
+// Hardened: the admin store may legitimately return `undefined` for a ref right
+// after a partial store instantiation (e.g. an unresolved import at module load
+// time) — never let a missing store slice take down the entire admin route.
+const alertBadgeCount = computed(() => Number(alertSummary?.value?.open || 0));
+const alertCriticalCount = computed(() => Number(alertSummary?.value?.critical || 0));
+
+function openAlertsTab() {
+    // Emit common payload shapes so the parent resolves the target regardless
+    // of which key it reads for navigation.
+    emit('navigate', { tab: 'alerts', id: 'alerts', section: 'alerts' });
+}
+
 onMounted(() => {
-    adminStore.fetchAllUsers();
+    // Guard store methods: if the store failed to initialise (missing import, etc.)
+    // we surface a console warning rather than throwing inside `onMounted` (which
+    // would cascade into render errors across every subsequent admin tab).
+    try {
+        adminStore.fetchAllUsers?.();
+        adminStore.fetchAlertSummary?.();
+        alertPollTimer = setInterval(() => adminStore.fetchAlertSummary?.(), 30000);
+    } catch (e) {
+        console.error('[AdminPanel] store bootstrap failed:', e);
+    }
+});
+
+onUnmounted(() => {
+    clearInterval(alertPollTimer);
 });
 
 function handleDashboardNavigation(payload) {
@@ -72,12 +104,49 @@ function handleDashboardNavigation(payload) {
 </script>
 
 <template>
-    <div class="h-full flex flex-col overflow-y-auto custom-scrollbar">
+    <div class="h-full flex flex-col overflow-hidden">
+        <!-- Always-visible admin alert banner -->
+        <div
+            v-if="alertBadgeCount > 0"
+            @click="openAlertsTab"
+            class="shrink-0 cursor-pointer flex items-center justify-between gap-3 px-4 py-2 border-b transition-colors"
+            :class="alertCriticalCount > 0
+                ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800'
+                : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800'"
+            title="Open the admin alert feed"
+        >
+            <div class="flex items-center gap-2 min-w-0">
+                <span
+                    class="w-2.5 h-2.5 rounded-full shrink-0 animate-pulse"
+                    :class="alertCriticalCount > 0 ? 'bg-red-500' : 'bg-amber-500'"
+                ></span>
+                <span
+                    class="text-xs font-bold truncate"
+                    :class="alertCriticalCount > 0 ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'"
+                >
+                    {{ alertBadgeCount }} open alert{{ alertBadgeCount > 1 ? 's' : '' }}
+                    <span v-if="alertCriticalCount > 0">— {{ alertCriticalCount }} critical</span>
+                </span>
+            </div>
+            <span
+                class="text-[10px] font-black uppercase tracking-wider shrink-0"
+                :class="alertCriticalCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'"
+            >
+                View &rsaquo;
+            </span>
+        </div>
+
+        <!-- Tab content region: bounded, scrollable on its own so pinned banner
+             stays visible and inner tables can also scroll within. -->
+        <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         <!-- 1. DASHBOARD -->
         <Dashboard 
             v-if="activeTab === 'dashboard'" 
             @navigate="handleDashboardNavigation" 
         />
+
+        <!-- 1b. ALERTS -->
+        <AdminAlertsPanel v-else-if="activeTab === 'alerts'" />
 
         <!-- 2. SYSTEM MONITORING -->
         <SystemLoad v-else-if="activeTab === 'system_load'" />
@@ -135,6 +204,7 @@ function handleDashboardNavigation(payload) {
             v-else 
             @navigate="handleDashboardNavigation" 
         />
+        </div>
     </div>
 </template>
 

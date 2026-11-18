@@ -31,4 +31,11 @@ from .prompt import SavedPrompt
 # Flow Studio Integration
 from .saved_artefact import SavedArtefact, SharedArtefactLink
 from .flow import Flow, FlowNodeDefinition
-from .generation_metric import GenerationMetric, record_generation_metric, calculate_co2_equivalents, KWH_PER_TOKEN, CO2_G_PER_KWH
+from .generation_metric import (
+    GenerationMetric,
+    record_generation_metric,
+    calculate_co2_equivalents,
+    KWH_PER_TOKEN,
+    CO2_G_PER_KWH,
+)
+from .admin_alert import AdminAlert

@@ -78,6 +78,23 @@ const copyMessage = (message) => {
   uiStore.copyToClipboard(message);
 };
 
+function navigateFromNotification(notification) {
+  const action = notification?.action;
+  if (action?.route) {
+    // Do not remove the alert notification — the underlying alert may still be
+    // open. Navigating is a shortcut, not an acknowledgement. The admin closes
+    // the toast explicitly, or acknowledges the alert from the panel.
+    const router = (window.__lollmsVueRouter || null);
+    if (router && typeof router.push === 'function') {
+      router.push(action.route);
+    } else {
+      // Fallback: hard navigation preserves the route in the URL, which the
+      // admin view reads on mount (`route.query.section`).
+      window.location.assign(action.route);
+    }
+  }
+}
+
 watch(notifications, (currentNotifications) => {
   const currentIds = new Set(currentNotifications.map((n) => n.id));
 
@@ -140,7 +157,17 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="ml-4 shrink-0 flex space-x-2">
+        <div class="ml-4 shrink-0 flex items-center space-x-2">
+          <!-- Optional deep-link action (e.g. "Open alerts"). Renders only when the
+               producer supplied one, so nothing changes for simple notifications. -->
+          <button
+            v-if="notification.action && notification.action.route"
+            @click="navigateFromNotification(notification)"
+            class="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-white/20 hover:bg-white/30 focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
+            :title="notification.action.label || 'Open'"
+          >
+            {{ notification.action.label || 'Open' }}
+          </button>
           <button
             class="p-1 rounded-full hover:bg-black/20 focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
             @click="copyMessage(notification.message)"

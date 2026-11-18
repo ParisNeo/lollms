@@ -45,6 +45,10 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingDashboardStats = ref(false);
     const allUsers = ref([]);
     const isLoadingUsers = ref(false);
+
+    // Admin operational alerts summary: { total, open, critical, warning, info, by_category }
+    const alertSummary = ref({ total: 0, open: 0, critical: 0, warning: 0, info: 0, by_category: {} });
+    const isLoadingAlertSummary = ref(false);
     
     // Services State
     const serviceStats = ref(null);
@@ -163,6 +167,27 @@ export const useAdminStore = defineStore('admin', () => {
         try { const response = await apiClient.get('/api/admin/stats'); dashboardStats.value = response.data; } 
         catch { dashboardStats.value = null; } 
         finally { isLoadingDashboardStats.value = false; } 
+    }
+
+    // Update the cached alert summary (called by the WS handler and the panel).
+    function setAlertSummary(summaryData) {
+        if (summaryData && typeof summaryData === 'object') {
+            alertSummary.value = summaryData;
+        }
+    }
+
+    // Fetch the alert summary; failures keep the previous snapshot (non-fatal).
+    async function fetchAlertSummary() {
+        if (isLoadingAlertSummary.value) return;
+        isLoadingAlertSummary.value = true;
+        try {
+            const { data } = await apiClient.get('/api/admin/alerts/summary');
+            if (data) alertSummary.value = data;
+        } catch (e) {
+            // Silent: the banner simply won't update on failure.
+        } finally {
+            isLoadingAlertSummary.value = false;
+        }
     }
 
     async function fetchConnectedUsers() { 
@@ -621,9 +646,47 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('User session terminated.', 'success'); 
         fetchAllUsers(); 
     }
+    // Bulk convenience wrappers over the /users/bulk-* endpoints. Each call
+    // refreshes the list once at the end so the poll/list stays in sync.
+    async function bulkActivateUsers(userIds) {
+        const r = await apiClient.post('/api/admin/users/bulk-activate', { user_ids: userIds });
+        uiStore.addNotification(`${r.data.count} user(s) activated.`, 'success');
+        await fetchAllUsers(); return r.data;
+    }
+    async function bulkDeactivateUsers(userIds) {
+        const r = await apiClient.post('/api/admin/users/bulk-deactivate', { user_ids: userIds });
+        if (r.data.skipped?.length) {
+            uiStore.addNotification(`${r.data.count} deactivated · ${r.data.skipped.length} skipped (protected).`, 'warning');
+        } else {
+            uiStore.addNotification(`${r.data.count} user(s) deactivated.`, 'success');
+        }
+        await fetchAllUsers(); return r.data;
+    }
+    async function bulkDisconnectUsers(userIds) {
+        const r = await apiClient.post('/api/admin/users/bulk-disconnect', { user_ids: userIds });
+        uiStore.addNotification(`${r.data.count} user session(s) terminated.`, 'success');
+        await fetchAllUsers(); return r.data;
+    }
+    async function bulkSetRole(userIds, role, grant) {
+        const r = await apiClient.post('/api/admin/users/bulk-set-role', { user_ids: userIds, role, grant });
+        await fetchAllUsers(); return r.data;
+    }
     async function fetchUserStats(userId) { try { const response = await apiClient.get(`/api/admin/users/${userId}/stats`); return response.data; } catch (error) { return null; } }    
     async function batchUpdateUsers(payload) { await apiClient.post('/api/admin/users/batch-update-settings', payload); await fetchAllUsers(); }
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) { const r = await apiClient.post('/api/admin/email-users', { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText }); tasksStore.addTask(r.data); return true; }
+    // Single-recipient convenience path — hits /users/{id}/email so callers do not
+    // need to build a user_ids array. Preserves the same EmailProposal audit trail.
+    async function sendEmailToUser(userId, subject, body, backgroundColor = null, sendAsText = false) {
+        const r = await apiClient.post(`/api/admin/users/${userId}/email`, {
+            subject, body,
+            background_color: backgroundColor,
+            send_as_text: sendAsText,
+            user_ids: [],
+            send_to_all: false,
+        });
+        tasksStore.addTask(r.data);
+        return true;
+    }
     async function enhanceEmail(subject, body, backgroundColor, prompt) { isEnhancingEmail.value = true; try { const response = await apiClient.post('/api/admin/enhance-email', { subject, body, background_color: backgroundColor, prompt }); return response.data; } finally { isEnhancingEmail.value = false; } }
     async function uploadWelcomeLogo(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/upload-logo', formData); await fetchGlobalSettings(true); uiStore.addNotification(response.data.message, 'success'); }
     async function removeWelcomeLogo() { await apiClient.delete('/api/admin/remove-logo'); await fetchGlobalSettings(true); uiStore.addNotification('Custom logo removed.', 'success'); }
@@ -781,6 +844,7 @@ export const useAdminStore = defineStore('admin', () => {
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
+        alertSummary, isLoadingAlertSummary,
         serviceStats, isLoadingServiceStats, 
         globalSettings, isLoadingSettings, aiBotSettings, isLoadingAiBotSettings,
         bindings, isLoadingBindings, availableBindingTypes,
@@ -804,10 +868,11 @@ export const useAdminStore = defineStore('admin', () => {
 
         // Actions
         forceAllUsersConfig, 
-        fetchDashboardStats, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
+        fetchDashboardStats, fetchAlertSummary, setAlertSummary, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
         fetchServiceDashboard, resetServiceUsage, 
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,
-        fetchAllUsers, activateUser, disconnectUser, fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
+        fetchAllUsers, activateUser, disconnectUser, bulkActivateUsers, bulkDeactivateUsers, bulkDisconnectUsers, bulkSetRole,
+        fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
         uploadWelcomeLogo, removeWelcomeLogo, uploadSslFile, importOpenWebUIData, fetchAdminAvailableLollmsModels, generateIconForModel,
         
@@ -838,7 +903,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact, createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, exportCategory, importFunFacts, importCategoryFromFile, generateFunFacts,
         fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles, fetchSystemLogs,
         
-        sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
+        sendEmailToUsers, sendEmailToUser, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
         fetchBindingZoo, installLlmFromZoo, fetchTtiBindingZoo, installTtiFromZoo, fetchTtsBindingZoo, installTtsFromZoo, fetchSttBindingZoo, installSttFromZoo,
         fetchTtvBindingZoo, installTtvFromZoo, fetchTtmBindingZoo, installTtmFromZoo,
 

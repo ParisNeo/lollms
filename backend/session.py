@@ -1252,12 +1252,20 @@ def build_lollms_client_from_params(
         active_ctx = forced_ctx
         if not active_ctx and active_prof:
             active_ctx = active_prof.get("forced_context_size") or active_prof.get("ctx_size")
-        if not active_ctx and primary_config.get("ctx_size"):
-            try:
-                parsed_c = int(primary_config["ctx_size"])
-                if parsed_c > 1: active_ctx = parsed_c
-            except (ValueError, TypeError):
-                pass
+        # Last-resort fallback: read ctx_size from the primary binding's raw
+        # connection config. The profile chain is authoritative (§3, §12);
+        # this branch only fires when neither a forced value nor a profile
+        # carried a ctx_size. `primary_binding` may legitimately be None when
+        # the target alias doesn't resolve to an active LLMBinding row.
+        if not active_ctx and primary_binding is not None:
+            primary_config = primary_binding.config or {}
+            if isinstance(primary_config, dict) and primary_config.get("ctx_size"):
+                try:
+                    parsed_c = int(primary_config["ctx_size"])
+                    if parsed_c > 1:
+                        active_ctx = parsed_c
+                except (ValueError, TypeError):
+                    pass
         if not active_ctx or active_ctx <= 1:
             active_ctx = 32000
 

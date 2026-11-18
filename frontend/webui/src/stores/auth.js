@@ -419,6 +419,37 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'dm_cleaned':
                     getSocialStore().then(social => social.handleDmCleaned(data.data));
                     break;
+                case 'admin_alert': {
+                    // Operational alert pushed by backend/admin_alerts.emit_alert.
+                    // Admins-only: the server also targets only admins, but we double-check
+                    // so a malformed payload can never leak to a regular user.
+                    if (!user.value?.is_admin) break;
+                    const alert = data.data || {};
+                    const sevMap = { critical: 'error', warning: 'warning', info: 'info' };
+                    const sev = sevMap[alert.severity] || 'warning';
+                    const label = alert.severity === 'critical' ? '🚨 Critical alert' : '⚠️ Admin alert';
+
+                    // Persistent notification keyed on the alert id. This is the durable
+                    // link between the Operational Alerts table and the UI notification
+                    // panel: re-deliveries of the same alert (retries, replay on login,
+                    // dedupe bursts) collapse into a single entry in the panel.
+                    uiStore.addNotification(
+                        `${label}: ${alert.title || 'Admin alert'}`,
+                        sev,
+                        0,                    // 0 = never auto-dismiss (persistent); see NotificationPanel
+                        true,                 // persistent
+                        alert.related_username || null,
+                        null,
+                        `admin-alert-${alert.id ?? alert.title ?? 'unknown'}`,
+                        { label: 'Open alerts', route: '/admin?section=alerts' }
+                    );
+                    // Refresh the cached summary and notify any live listener.
+                    import('./admin').then((m) => m.useAdminStore().fetchAlertSummary()).catch(() => {});
+                    import('../services/eventBus').then((m) => {
+                        try { m.default().emit('admin_alert', alert); } catch (e) { /* non-fatal */ }
+                    }).catch(() => {});
+                    break;
+                }
             }
         };
 

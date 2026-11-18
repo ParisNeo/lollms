@@ -31,6 +31,7 @@ import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue';
 import IconShieldCheck from '../assets/icons/IconCheckCircle.vue';
 import IconPower from '../assets/icons/IconStopCircle.vue';
 import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
+import IconError from '../assets/icons/IconError.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -44,6 +45,7 @@ const sections = [
   { type: 'link', id: 'dashboard', name: 'Dashboard', icon: markRaw(IconDashboard) },
 
   { type: 'divider', label: 'System Monitoring' },
+  { type: 'link', id: 'alerts', name: 'Alerts', icon: markRaw(IconError) },
   { type: 'link', id: 'system_load', name: 'System Load', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'gpu_load', name: 'GPU Load', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'logs_analysis', name: 'Logs & Analysis', icon: markRaw(IconFileText) },

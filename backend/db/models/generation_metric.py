@@ -43,6 +43,95 @@ def calculate_co2_equivalents(co2_grams: float) -> Dict[str, float]:
         "led_bulb_hours": round((co2_grams / 400.0) * 100.0, 1)
     }
 
+def _maybe_alert_single_generation(
+    *,
+    user_id: Optional[int],
+    username: str,
+    model_name: str,
+    total_tokens: int,
+) -> None:
+    """
+    Emit an admin alert when ONE generation is abnormally large.
+
+    Fail-safe: any error (config lookup, DB, missing settings) is swallowed so
+    token telemetry can never break the generation path. The threshold is read
+    from the ``alert_token_single_generation`` global setting (0 disables it).
+    """
+    if not total_tokens or total_tokens <= 0:
+        return
+    try:
+        from backend.settings import settings as _settings
+        try:
+            threshold = int(_settings.get("alert_token_single_generation", 0) or 0)
+        except (TypeError, ValueError):
+            threshold = 0
+        if threshold <= 0 or total_tokens < threshold:
+            return
+
+        from backend.db.session import SessionLocal
+        from backend.admin_alerts import emit_alert
+
+        alert_db = SessionLocal()
+        try:
+            emit_alert(
+                alert_db,
+                category="tokens",
+                severity="warning",
+                title=f"Unusually large generation by {username}",
+                message=(
+                    f"A single generation by '{username}' on model '{model_name}' "
+                    f"consumed {total_tokens:,} tokens (threshold {threshold:,})."
+                ),
+                details={
+                    "user_id": user_id,
+                    "username": username,
+                    "model_name": model_name,
+                    "total_tokens": total_tokens,
+                    "threshold": threshold,
+                },
+                source="token_monitor",
+                dedupe_key=f"token_single_{user_id or username}",
+                related_user_id=user_id,
+                related_username=username,
+            )
+        finally:
+            alert_db.close()
+    except Exception:
+        # Never surface telemetry failures into the caller.
+        pass
+
+
+def _maybe_alert_single_generation(db: Session, user_id: Optional[int], username: Optional[str],
+                                   total: int, model_name: str) -> None:
+    """
+    Raise an admin alert when a single generation exceeds the configured limit.
+
+    Fail-safe: any error is swallowed so telemetry recording is never disrupted.
+    """
+    try:
+        from backend.settings import settings as settings_obj
+        limit = int(settings_obj.get("alert_token_single_generation", 0) or 0)
+        if limit <= 0 or total < limit:
+            return
+        from backend.admin_alerts import emit_alert
+        emit_alert(
+            db,
+            dedupe_key=f"single_generation:{user_id}",
+            category="tokens",
+            severity="warning",
+            title=f"Very large single generation ({total:,} tokens)",
+            message=(
+                f"A single '{model_name}' generation consumed {total:,} tokens "
+                f"(threshold {limit:,})."
+            ),
+            related_user_id=user_id,
+            related_username=username,
+            metadata={"tokens": total, "limit": limit, "model": model_name},
+        )
+    except Exception:
+        pass
+
+
 def record_generation_metric(
     db: Optional[Session] = None,
     user_id: Optional[int] = None,
@@ -78,6 +167,7 @@ def record_generation_metric(
         )
         session.add(metric)
         session.commit()
+        _maybe_alert_single_generation(session, user_id, clean_username, total, clean_model)
 
     if db and hasattr(db, 'is_active') and db.is_active:
         try:

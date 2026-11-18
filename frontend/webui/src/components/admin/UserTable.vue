@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
@@ -14,6 +14,7 @@ import IconXCircle from '../../assets/icons/IconXCircle.vue';
 import IconLink from '../../assets/icons/IconLink.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconMail from '../../assets/icons/IconMail.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -25,24 +26,101 @@ const { allUsers, isLoadingUsers } = storeToRefs(adminStore);
 const searchQuery = ref('');
 const filterOnline = ref(null);
 const filterHasKeys = ref(null);
+const filterStatus = ref(null);
+const filterRole = ref('all'); // 'all' | 'admin' | 'moderator' | 'user'
 const sortKey = ref('username');
 const sortOrder = ref('asc');
 const selectedUserForStats = ref(null);
 const selectedUserIds = ref([]);
+// Density toggle: 'comfortable' (default) or 'compact'. Persisted.
+const density = ref(localStorage.getItem('lollms-user-table-density') || 'comfortable');
+watch(density, (v) => localStorage.setItem('lollms-user-table-density', v));
+// Extra KPI card fetch (new users 7d, active 24h). Separate from the users list
+// so a failure here never blocks rendering the table.
+const extraStats = ref({ new_users_7d: 0, active_users_24h: 0, pending_approval: 0, pending_password_resets: 0 });
+async function fetchExtraStats() {
+    try {
+        const r = await adminStore.fetchDashboardStats();
+        extraStats.value = adminStore.dashboardStats || extraStats.value;
+    } catch { /* non-fatal */ }
+}
+// Per-row sending state so the mail icon can spin during the dispatch, and so
+// multiple rows can be in flight without stepping on each other.
+const sendingEmail = ref({});
+
+// Aggregate counters derived from the currently loaded page of users. Kept
+// client-side because the admin endpoint already returns every field needed
+// (is_online, connection_count, status, total_tokens) — avoiding an extra
+// round-trip just to render four badges above the table.
+const userStats = computed(() => {
+    const list = allUsers.value || [];
+    let online = 0;
+    let active = 0;
+    let pending = 0;
+    let admins = 0;
+    let totalTokens = 0;
+    let totalConnections = 0;
+    for (const u of list) {
+        if (u.is_online || (u.connection_count || 0) > 0) online += 1;
+        if (u.is_active && u.status === 'active') active += 1;
+        else if (!u.is_active) pending += 1;
+        if (u.is_admin) admins += 1;
+        totalTokens += Number(u.total_tokens) || 0;
+        totalConnections += Number(u.connection_count) || 0;
+    }
+    return {
+        total: list.length,
+        online,
+        active,
+        pending,
+        admins,
+        totalTokens,
+        totalConnections,
+    };
+});
+
+function formatBigCount(count) {
+    const n = Number(count) || 0;
+    if (n < 1000) return String(n);
+    if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}K`;
+    if (n < 1_000_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    return `${(n / 1_000_000_000).toFixed(2)}B`;
+}
+// Single-user email composer state (independent of the bulk Email All Users modal).
+const directEmailOpen = ref(false);
+const directEmailTarget = ref(null);
+const directEmailSubject = ref('');
+const directEmailBody = ref('');
+const directEmailBackgroundColor = ref('#FFFFFF');
+const directEmailSendAsText = ref(false);
+const directEmailSubmitting = ref(false);
+const directEmailError = ref('');
 
 const filters = computed(() => ({
     filter_online: filterOnline.value,
     filter_has_keys: filterHasKeys.value,
+    status_filter: filterStatus.value || undefined,
     sort_by: sortKey.value,
     sort_order: sortOrder.value
 }));
 
 const filteredUsers = computed(() => {
-    if (!searchQuery.value) return allUsers.value;
-    const lowerCaseQuery = searchQuery.value.toLowerCase();
-    return allUsers.value.filter(user =>
-        user.username.toLowerCase().includes(lowerCaseQuery) ||
-        (user.email && user.email.toLowerCase().includes(lowerCaseQuery))
+    let list = allUsers.value || [];
+    // Client-side role filter (server-side filter on role is not exposed by the
+    // endpoint). Applies after any server-side status/activity filtering.
+    if (filterRole.value !== 'all') {
+        list = list.filter((u) => {
+            if (filterRole.value === 'admin') return !!u.is_admin;
+            if (filterRole.value === 'moderator') return !!u.is_moderator && !u.is_admin;
+            if (filterRole.value === 'user') return !u.is_admin && !u.is_moderator;
+            return true;
+        });
+    }
+    if (!searchQuery.value) return list;
+    const q = searchQuery.value.toLowerCase();
+    return list.filter((user) =>
+        user.username.toLowerCase().includes(q) ||
+        (user.email && user.email.toLowerCase().includes(q))
     );
 });
 
@@ -109,6 +187,104 @@ function handleSort(key) {
 function applyFilters() {
     adminStore.fetchAllUsers(filters.value);
 }
+
+// Inline role flip — a single click either grants admin or revokes it.
+// Moderator is implied by admin (the endpoint enforces this too).
+async function flipAdmin(user) {
+    const grant = !user.is_admin;
+    const label = grant ? 'Grant admin' : 'Revoke admin';
+    const confirmed = await uiStore.showConfirmation({
+        title: `${label} for ${user.username}?`,
+        message: grant
+            ? 'This user will gain full administrative privileges.'
+            : 'This user will lose administrative privileges. Moderator status will be revoked too.',
+        confirmText: label,
+        danger: !grant,
+    });
+    if (!confirmed.confirmed) return;
+    try {
+        await adminStore.bulkSetRole([user.id], 'admin', grant);
+        await adminStore.fetchAllUsers(filters.value);
+    } catch (e) {
+        uiStore.addNotification(e.response?.data?.detail || 'Failed to update role.', 'error');
+    }
+}
+
+// Activity heat colour derived from last_activity_at: green <1h, amber <24h,
+// grey everything else. Rendered as a small dot next to "Last Seen".
+function activityColorClass(dateString) {
+    if (!dateString) return 'bg-gray-400';
+    const diffMs = Date.now() - new Date(dateString).getTime();
+    const diffMin = diffMs / 60000;
+    if (diffMin < 60) return 'bg-emerald-500';
+    if (diffMin < 60 * 24) return 'bg-amber-500';
+    return 'bg-gray-400';
+}
+
+// Client-side CSV export — no backend endpoint needed for a snapshot of the
+// currently filtered list. Uses the same columns shown in the UI so a CSV
+// round trip is possible when combined with Import Tools.
+function exportUsersCsv() {
+    const rows = filteredUsers.value || [];
+    if (rows.length === 0) {
+        uiStore.addNotification('No users to export (current filters).', 'warning');
+        return;
+    }
+    const headers = [
+        'id', 'username', 'email', 'status', 'is_admin', 'is_moderator',
+        'is_active', 'is_online', 'connection_count', 'total_logins',
+        'api_key_count', 'task_count', 'generation_count', 'total_tokens',
+        'webui_tokens', 'api_tokens', 'total_energy_kwh', 'total_co2_g',
+        'email_verified', 'has_pending_password_reset',
+        'last_activity_at', 'created_at',
+    ];
+    const escape = (v) => {
+        if (v === null || v === undefined) return '';
+        const s = String(v);
+        return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.join(',')];
+    for (const u of rows) {
+        lines.push(headers.map((h) => escape(u[h])).join(','));
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `users_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    uiStore.addNotification(`Exported ${rows.length} user(s).`, 'success');
+}
+
+// ── Bulk actions bar ──────────────────────────────────────────────────────
+const isBulkBusy = ref(false);
+async function runBulk(label, action) {
+    if (selectedUserIds.value.length === 0) return;
+    const count = selectedUserIds.value.length;
+    const confirmed = await uiStore.showConfirmation({
+        title: `${label} ${count} user(s)?`,
+        message: `This will affect ${count} selected user(s).`,
+        confirmText: label,
+        danger: label.includes('Deactivate') || label.includes('Disconnect'),
+    });
+    if (!confirmed.confirmed) return;
+    isBulkBusy.value = true;
+    try {
+        await action([...selectedUserIds.value]);
+        selectedUserIds.value = [];
+        await adminStore.fetchAllUsers(filters.value);
+    } catch (e) {
+        uiStore.addNotification(e.response?.data?.detail || `Bulk ${label.toLowerCase()} failed.`, 'error');
+    } finally {
+        isBulkBusy.value = false;
+    }
+}
+function bulkActivate() { runBulk('Activate', (ids) => adminStore.bulkActivateUsers(ids)); }
+function bulkDeactivate() { runBulk('Deactivate', (ids) => adminStore.bulkDeactivateUsers(ids)); }
+function bulkDisconnect() { runBulk('Disconnect', (ids) => adminStore.bulkDisconnectUsers(ids)); }
+function bulkGrantAdmin() { runBulk('Grant admin', (ids) => adminStore.bulkSetRole(ids, 'admin', true)); }
+function bulkRevokeAdmin() { runBulk('Revoke admin', (ids) => adminStore.bulkSetRole(ids, 'admin', false)); }
 
 function formatLastSeen(dateString) {
     if (!dateString) return 'Never';
@@ -186,26 +362,149 @@ async function handleMessageUser(user) {
     });
 }
 
+// Open the per-row direct email composer. Shows why a send would be rejected
+// (no email / opted-out) up-front so the admin does not fill a subject line
+// for a message that cannot ship.
+function openDirectEmail(user) {
+    if (!user.email) {
+        uiStore.addNotification(`User '${user.username}' has no email address on file.`, 'warning');
+        return;
+    }
+    if (user.receive_notification_emails === false) {
+        uiStore.addNotification(
+            `User '${user.username}' has opted out of notification emails.`,
+            'warning'
+        );
+        return;
+    }
+    directEmailTarget.value = user;
+    directEmailSubject.value = '';
+    directEmailBody.value = '';
+    directEmailBackgroundColor.value = '#FFFFFF';
+    directEmailSendAsText.value = false;
+    directEmailError.value = '';
+    directEmailOpen.value = true;
+}
+
+function closeDirectEmail() {
+    if (directEmailSubmitting.value) return;
+    directEmailOpen.value = false;
+    directEmailTarget.value = null;
+}
+
+async function submitDirectEmail() {
+    if (!directEmailTarget.value) return;
+    if (!directEmailSubject.value.trim() || !directEmailBody.value.trim()) {
+        directEmailError.value = 'Subject and body are required.';
+        return;
+    }
+    const target = directEmailTarget.value;
+    directEmailSubmitting.value = true;
+    directEmailError.value = '';
+    sendingEmail.value[target.id] = true;
+    try {
+        await adminStore.sendEmailToUser(
+            target.id,
+            directEmailSubject.value.trim(),
+            directEmailBody.value,
+            directEmailBackgroundColor.value || null,
+            directEmailSendAsText.value,
+        );
+        uiStore.addNotification(
+            `Email queued for ${target.username}. Track progress in Background Tasks.`,
+            'success'
+        );
+        directEmailOpen.value = false;
+        directEmailTarget.value = null;
+    } catch (e) {
+        directEmailError.value = e.response?.data?.detail || 'Failed to queue email.';
+    } finally {
+        directEmailSubmitting.value = false;
+        sendingEmail.value[target.id] = false;
+    }
+}
+
 onMounted(() => {
     adminStore.fetchAllUsers(filters.value);
+    fetchExtraStats();
 });
 </script>
 
 <template>
-    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg overflow-hidden">
-        <div class="px-4 py-5 sm:p-6 space-y-4">
+    <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg overflow-hidden flex flex-col min-h-0 h-full">
+        <div class="px-4 py-5 sm:p-6 space-y-4 shrink-0">
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">All Users</h3>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                     <button @click="openCreateModal" class="btn btn-primary btn-sm flex items-center gap-1">
                         <IconPlus class="w-4 h-4" /> Add User
                     </button>
                     <button @click="openCopyEmailsModal" class="btn btn-secondary btn-sm" :disabled="selectedUserIds.length === 0">Copy Emails</button>
                     <button @click="openEmailModal" class="btn btn-secondary btn-sm" :disabled="selectedUserIds.length === 0">Email Selected</button>
+                    <button @click="exportUsersCsv" class="btn btn-secondary btn-sm" title="Export current filtered list to CSV">Export CSV</button>
+                    <div class="flex items-center rounded-lg border overflow-hidden" :style="{ borderColor: 'var(--border-main)' }">
+                        <button @click="density = 'comfortable'" class="px-2 py-1 text-[10px] font-bold uppercase"
+                                :class="density === 'comfortable' ? 'bg-indigo-600 text-white' : 'themed-btn-surface'">Cozy</button>
+                        <button @click="density = 'compact'" class="px-2 py-1 text-[10px] font-bold uppercase"
+                                :class="density === 'compact' ? 'bg-indigo-600 text-white' : 'themed-btn-surface'">Compact</button>
+                    </div>
                 </div>
             </div>
+
+            <!-- Bulk action bar: appears when at least one user is selected. -->
+            <div v-if="selectedUserIds.length > 0" class="flex items-center gap-2 flex-wrap px-3 py-2 rounded-xl border"
+                 :style="{ borderColor: 'var(--brand-primary)', backgroundColor: 'var(--bg-card)' }">
+                <span class="text-[11px] font-black uppercase tracking-widest" :style="{ color: 'var(--text-main)' }">
+                    {{ selectedUserIds.length }} selected
+                </span>
+                <button @click="bulkActivate" :disabled="isBulkBusy" class="btn btn-secondary btn-sm">Activate</button>
+                <button @click="bulkDeactivate" :disabled="isBulkBusy" class="btn btn-secondary btn-sm">Deactivate</button>
+                <button @click="bulkDisconnect" :disabled="isBulkBusy" class="btn btn-secondary btn-sm">Disconnect</button>
+                <button @click="bulkGrantAdmin" :disabled="isBulkBusy" class="btn btn-secondary btn-sm">Grant admin</button>
+                <button @click="bulkRevokeAdmin" :disabled="isBulkBusy" class="btn btn-secondary btn-sm">Revoke admin</button>
+                <div class="grow"></div>
+                <button @click="selectedUserIds = []" class="text-[10px] font-bold uppercase" :style="{ color: 'var(--text-dim)' }">Clear</button>
+            </div>
             
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Summary stats strip: at-a-glance counts above the search row. -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-2">
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Total users</div>
+                    <div class="mt-0.5 text-lg font-black font-mono" style="color: var(--text-main);">{{ userStats.total }}</div>
+                </div>
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest flex items-center gap-1" style="color: var(--text-dim);">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Online now
+                    </div>
+                    <div class="mt-0.5 text-lg font-black font-mono text-emerald-600 dark:text-emerald-400">{{ userStats.online }}</div>
+                </div>
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Active</div>
+                    <div class="mt-0.5 text-lg font-black font-mono" style="color: var(--text-main);">{{ userStats.active }}</div>
+                </div>
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Inactive</div>
+                    <div class="mt-0.5 text-lg font-black font-mono" :class="userStats.pending > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">{{ userStats.pending }}</div>
+                </div>
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Admins</div>
+                    <div class="mt-0.5 text-lg font-black font-mono" style="color: var(--text-main);">{{ userStats.admins }}</div>
+                </div>
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest" style="color: var(--text-dim);">New (7d)</div>
+                    <div class="mt-0.5 text-lg font-black font-mono text-sky-600 dark:text-sky-400">{{ extraStats.new_users_7d ?? 0 }}</div>
+                </div>
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Pending reset</div>
+                    <div class="mt-0.5 text-lg font-black font-mono" :class="(extraStats.pending_password_resets || 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'">{{ extraStats.pending_password_resets ?? 0 }}</div>
+                </div>
+                <div class="rounded-xl border px-3 py-2" style="border-color: var(--border-main); background-color: var(--bg-app);">
+                    <div class="text-[9px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Total tokens</div>
+                    <div class="mt-0.5 text-lg font-black font-mono text-indigo-600 dark:text-indigo-400" :title="`${userStats.totalTokens.toLocaleString()} tokens across all users`">{{ formatBigCount(userStats.totalTokens) }}</div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
                 <input 
                     type="text" 
                     v-model="searchQuery" 
@@ -222,18 +521,31 @@ onMounted(() => {
                     <option :value="true">Has Keys</option>
                     <option :value="false">No Keys</option>
                 </select>
+                <select v-model="filterStatus" @change="applyFilters" class="input-field">
+                    <option :value="null">All Statuses</option>
+                    <option value="active">Active</option>
+                    <option value="pending_admin_validation">Pending approval</option>
+                    <option value="inactivated_by_admin">Inactivated</option>
+                    <option value="blocked_by_lollms">Blocked</option>
+                </select>
+                <select v-model="filterRole" class="input-field">
+                    <option value="all">All Roles</option>
+                    <option value="admin">Admins</option>
+                    <option value="moderator">Moderators</option>
+                    <option value="user">Regular users</option>
+                </select>
             </div>
         </div>
-        <div class="border-t border-gray-200 dark:border-gray-700">
+        <div class="border-t border-gray-200 dark:border-gray-700 flex-1 min-h-0 flex flex-col">
             <div v-if="isLoadingUsers" class="p-6 text-center text-gray-500">
                 Loading users...
             </div>
             <div v-else-if="filteredUsers.length === 0" class="p-6 text-center text-gray-500">
                 No users found.
             </div>
-            <div v-else class="overflow-x-auto">
+            <div v-else class="overflow-x-auto overflow-y-auto flex-1 min-h-0">
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                    <thead class="bg-gray-50 dark:bg-gray-700/50">
+                    <thead class="bg-gray-50 dark:bg-gray-700/50 sticky top-0 z-10">
                         <tr>
                             <th scope="col" class="px-6 py-3">
                                 <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
@@ -244,6 +556,9 @@ onMounted(() => {
                             <th scope="col" class="table-header">
                                 <button @click="handleSort('status')" class="flex items-center gap-1">Status <span v-if="sortKey === 'status'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
+                            <th scope="col" class="table-header">
+                                <span>Role</span>
+                            </th>
                              <th scope="col" class="table-header">
                                 <button @click="handleSort('connection_count')" class="flex items-center gap-1">Connections<span v-if="sortKey === 'connection_count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
@@ -252,6 +567,9 @@ onMounted(() => {
                             </th>
                             <th scope="col" class="table-header">
                                 <button @click="handleSort('api_key_count')" class="flex items-center gap-1">API Keys <span v-if="sortKey === 'api_key_count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
+                            </th>
+                            <th scope="col" class="table-header">
+                                <button @click="handleSort('generation_count')" class="flex items-center gap-1" title="Number of generations (lifetime)">Gens <span v-if="sortKey === 'generation_count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
                             <th scope="col" class="table-header">
                                 <button @click="handleSort('task_count')" class="flex items-center gap-1">Tasks <span v-if="sortKey === 'task_count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
@@ -266,28 +584,44 @@ onMounted(() => {
                         </tr>
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                        <tr v-for="user in filteredUsers" :key="user.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                            <td class="px-6 py-4">
+                        <tr v-for="user in filteredUsers" :key="user.id"
+                            :class="[density === 'compact' ? 'leading-tight' : '', 'hover:bg-gray-50 dark:hover:bg-gray-700/50']">
+                            <td :class="density === 'compact' ? 'px-3 py-1.5' : 'px-6 py-4'">
                                 <input type="checkbox" :value="user.id" v-model="selectedUserIds" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                             </td>
-                            <td class="table-cell">
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs' : 'table-cell'">
                                 <div class="flex items-center">
-                                    <UserAvatar :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
-                                    <div class="ml-4">
-                                        <div class="text-sm font-medium text-gray-900 dark:text-white">{{ user.username }}</div>
-                                        <div class="text-sm text-gray-500 dark:text-gray-400">{{ user.email || 'No email' }}</div>
+                                    <UserAvatar :icon="user.icon" :username="user.username" :size-class="density === 'compact' ? 'h-6 w-6' : 'h-8 w-8'" />
+                                    <div class="ml-3">
+                                        <div class="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-1">
+                                            {{ user.username }}
+                                            <span v-if="user.email_verified" class="text-[9px] text-emerald-500" title="Email verified">✓</span>
+                                            <span v-else-if="user.email" class="text-[9px] text-amber-500" title="Email unverified">?</span>
+                                        </div>
+                                        <div class="text-xs text-gray-500 dark:text-gray-400">{{ user.email || 'No email' }}</div>
                                     </div>
                                 </div>
                             </td>
-                            <td class="table-cell">
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs' : 'table-cell'">
                                 <div class="flex items-center gap-2">
-                                    <span class="w-3 h-3 rounded-full" :class="user.connection_count > 0 ? 'bg-green-500' : 'bg-gray-400'" :title="user.connection_count > 0 ? 'Online' : 'Offline'"></span>
+                                    <span class="w-2.5 h-2.5 rounded-full" :class="user.connection_count > 0 ? 'bg-green-500' : 'bg-gray-400'" :title="user.connection_count > 0 ? 'Online' : 'Offline'"></span>
                                     <span :class="user.status === 'active' ? 'status-badge-green' : 'status-badge-red'" class="status-badge">
-                                        {{ user.status.replace('_', ' ') }}
+                                        {{ user.status.replace(/_/g, ' ') }}
                                     </span>
+                                    <span v-if="user.has_pending_password_reset" class="text-[9px] font-mono text-amber-500" title="Pending password reset">reset</span>
                                 </div>
                             </td>
-                            <td class="table-cell text-sm text-center font-mono text-gray-500 dark:text-gray-400">
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs' : 'table-cell'">
+                                <button @click.stop="flipAdmin(user)"
+                                        class="px-1.5 py-0.5 rounded text-[9px] font-black uppercase"
+                                        :class="user.is_admin ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300'
+                                                : user.is_moderator ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
+                                                : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'"
+                                        :title="user.is_admin ? 'Click to revoke admin' : 'Click to grant admin'">
+                                    {{ user.is_admin ? 'Admin' : (user.is_moderator ? 'Mod' : 'User') }}
+                                </button>
+                            </td>
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs text-center font-mono' : 'table-cell text-sm text-center font-mono text-gray-500 dark:text-gray-400'">
                                 <div class="flex flex-col items-center justify-center">
                                     <div class="flex items-center gap-1 font-bold text-blue-500" :title="`${user.connection_count} active connections`">
                                         <IconLink class="w-3.5 h-3.5"/> {{ user.connection_count }}
@@ -297,10 +631,18 @@ onMounted(() => {
                                     </div>
                                 </div>
                             </td>
-                            <td class="table-cell text-sm text-gray-500 dark:text-gray-400">{{ formatLastSeen(user.last_activity_at) }}</td>
-                            <td class="table-cell text-sm text-center text-gray-500 dark:text-gray-400">{{ user.api_key_count }}</td>
-                            <td class="table-cell text-sm text-center text-gray-500 dark:text-gray-400">{{ user.task_count }}</td>
-                            <td class="table-cell text-sm text-center text-gray-500 dark:text-gray-400" :title="tokenTooltip(user)">
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400' : 'table-cell text-sm text-gray-500 dark:text-gray-400'">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-2 h-2 rounded-full shrink-0" :class="activityColorClass(user.last_activity_at)" :title="user.last_activity_at ? new Date(user.last_activity_at).toLocaleString() : 'Never'"></span>
+                                    <span>{{ formatLastSeen(user.last_activity_at) }}</span>
+                                </div>
+                            </td>
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs text-center text-gray-500 dark:text-gray-400' : 'table-cell text-sm text-center text-gray-500 dark:text-gray-400'">{{ user.api_key_count }}</td>
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs text-center text-gray-500 dark:text-gray-400' : 'table-cell text-sm text-center text-gray-500 dark:text-gray-400'" :title="`${(user.generation_count || 0).toLocaleString()} generations`">
+                                {{ formatTokenCount(user.generation_count) }}
+                            </td>
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs text-center text-gray-500 dark:text-gray-400' : 'table-cell text-sm text-center text-gray-500 dark:text-gray-400'">{{ user.task_count }}</td>
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs text-center' : 'table-cell text-sm text-center text-gray-500 dark:text-gray-400'" :title="tokenTooltip(user)">
                                 <div class="flex flex-col items-center gap-0.5">
                                     <span class="font-mono font-bold" :class="(user.total_tokens || 0) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'opacity-50'">
                                         {{ formatTokenCount(user.total_tokens) }}
@@ -310,10 +652,13 @@ onMounted(() => {
                                     </span>
                                 </div>
                             </td>
-                            <td class="table-cell text-sm text-gray-500 dark:text-gray-400">{{ new Date(user.created_at).toLocaleDateString() }}</td>
-                            <td class="table-cell text-right text-sm font-medium">
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-xs text-gray-500 dark:text-gray-400' : 'table-cell text-sm text-gray-500 dark:text-gray-400'">{{ new Date(user.created_at).toLocaleDateString() }}</td>
+                            <td :class="density === 'compact' ? 'px-3 py-1.5 text-right text-sm font-medium' : 'table-cell text-right text-sm font-medium'">
                                 <div class="flex items-center justify-end space-x-2">
                                     <button @click="openStatsModal(user)" title="View Stats" class="action-icon"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg></button>
+                                    <button @click="openDirectEmail(user)" title="Send Email" :disabled="sendingEmail[user.id]" class="action-icon" :class="!user.email || user.receive_notification_emails === false ? 'opacity-40' : ''">
+                                        <IconMail class="w-5 h-5" />
+                                    </button>
                                     <button @click="handleMessageUser(user)" title="Send DM" class="action-icon"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg></button>
                                     <button @click="openEditModal(user)" title="Edit User" class="action-icon"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"></path></svg></button>
                                     <button v-if="user.connection_count > 0" @click="handleDisconnectUser(user)" title="Force Disconnect" class="action-icon text-orange-500 hover:text-orange-700">
@@ -330,5 +675,79 @@ onMounted(() => {
             </div>
         </div>
         <UserStatsModal v-if="selectedUserForStats" :userId="selectedUserForStats.id" :username="selectedUserForStats.username" />
+
+        <!-- Direct single-user email composer (independent of the bulk modal) -->
+        <Teleport to="body">
+            <div
+                v-if="directEmailOpen && directEmailTarget"
+                @click.self="closeDirectEmail"
+                class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            >
+                <div class="w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border"
+                     style="background-color: var(--bg-card); border-color: var(--border-main);">
+                    <div class="px-5 py-3 border-b flex items-center justify-between"
+                         style="border-color: var(--border-main);">
+                        <div class="min-w-0">
+                            <h3 class="text-sm font-black uppercase tracking-wider flex items-center gap-2" style="color: var(--text-main);">
+                                <IconMail class="w-4 h-4 text-blue-500" />
+                                Send Email
+                            </h3>
+                            <p class="text-[11px] mt-0.5 truncate" style="color: var(--text-dim);">
+                                To <strong>{{ directEmailTarget.username }}</strong>
+                                <span v-if="directEmailTarget.email"> &lt;{{ directEmailTarget.email }}&gt;</span>
+                            </p>
+                        </div>
+                        <button @click="closeDirectEmail" class="p-1.5 rounded-lg themed-btn-surface" title="Close">
+                            <IconXCircle class="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    <div class="p-5 space-y-3">
+                        <div>
+                            <label class="label">Subject</label>
+                            <input v-model="directEmailSubject" type="text" class="input-field w-full"
+                                   placeholder="Short, clear subject line" :disabled="directEmailSubmitting" />
+                        </div>
+                        <div>
+                            <label class="label">Body</label>
+                            <textarea v-model="directEmailBody" rows="8" class="input-field w-full font-mono text-xs"
+                                      placeholder="Write your message. HTML is allowed when Rich (HTML) mode is off below."
+                                      :disabled="directEmailSubmitting"></textarea>
+                        </div>
+                        <div class="flex items-center gap-4 flex-wrap">
+                            <div>
+                                <label class="label">Background color</label>
+                                <input v-model="directEmailBackgroundColor" type="color"
+                                       class="w-16 h-9 rounded border cursor-pointer" :disabled="directEmailSubmitting" />
+                            </div>
+                            <label class="flex items-center gap-2 cursor-pointer select-none text-xs">
+                                <input v-model="directEmailSendAsText" type="checkbox" class="checkbox"
+                                       :disabled="directEmailSubmitting" />
+                                <span style="color: var(--text-main);">Send as plain text</span>
+                            </label>
+                        </div>
+                        <p v-if="directEmailError" class="text-[11px] font-bold text-red-500">{{ directEmailError }}</p>
+                    </div>
+
+                    <div class="px-5 py-3 border-t flex items-center justify-end gap-2"
+                         style="border-color: var(--border-main); background-color: var(--bg-app);">
+                        <button @click="closeDirectEmail" class="btn btn-secondary btn-sm" :disabled="directEmailSubmitting">
+                            Cancel
+                        </button>
+                        <button @click="submitDirectEmail" class="btn btn-primary btn-sm flex items-center gap-2"
+                                :disabled="directEmailSubmitting">
+                            <IconMail class="w-4 h-4" />
+                            <span>{{ directEmailSubmitting ? 'Queuing…' : 'Queue Email' }}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </div>
 </template>
+
+<style scoped>
+@reference "tailwindcss";
+.themed-btn-surface { background-color: var(--brand-bg-elevated); border-color: var(--brand-border-main); color: var(--brand-text-dim); }
+.themed-btn-surface:hover { background-color: var(--brand-bg-hover); color: var(--brand-text-main); }
+</style>

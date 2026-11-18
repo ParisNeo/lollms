@@ -184,15 +184,38 @@ async function handleSubmit() {
         uiStore.addNotification('Username and password are required.', 'warning');
         return;
     }
-    
+
+    // Backend's `email` is typed ``Optional[EmailStr]`` — an empty string is NOT
+    // a valid email and triggers a 422. Normalize on the way out.
+    const payload = { ...formData.value };
+    if (typeof payload.email === 'string' && payload.email.trim() === '') {
+        payload.email = null;
+    } else if (typeof payload.email === 'string') {
+        payload.email = payload.email.trim();
+    }
+
     isLoading.value = true;
     try {
-        await adminStore.createUser(formData.value);
+        await adminStore.createUser(payload);
         uiStore.closeModal('adminCreateUser');
         uiStore.addNotification('User created successfully.', 'success');
     } catch (error) {
         console.error('Create user failed:', error);
-        const message = error.response?.data?.detail || 'Failed to create user.';
+        // FastAPI's 422 returns ``detail`` as an ARRAY of {loc, msg, type} objects.
+        // A raw template interpolation shows "[object Object]"; format it so the
+        // real field + reason is visible.
+        const detail = error.response?.data?.detail;
+        let message = 'Failed to create user.';
+        if (typeof detail === 'string') {
+            message = detail;
+        } else if (Array.isArray(detail) && detail.length > 0) {
+            message = detail
+                .map((e) => {
+                    const loc = Array.isArray(e?.loc) ? e.loc.filter((p) => p !== 'body').join('.') : '';
+                    return loc ? `${loc}: ${e.msg}` : (e.msg || 'Invalid input');
+                })
+                .join(' • ');
+        }
         uiStore.addNotification(message, 'error');
     } finally {
         isLoading.value = false;

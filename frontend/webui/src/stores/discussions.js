@@ -285,6 +285,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     // --- HELPER METHODS ---
+
+    /**
+     * Encode a path segment exactly once. Some callers already carry a
+     * percent-encoded title (from an earlier round-trip whose X-Artefact-Title
+     * header was itself encoded); re-encoding produced URLs like
+     * ``VALUES%252Emd``. Decoding a bounded number of times before encoding
+     * makes the operation idempotent without encouraging further encoding.
+     */
+    function encodePathSegment(rawValue) {
+        let value = String(rawValue ?? '');
+        // Peel up to two layers of percent-encoding defensively.
+        for (let i = 0; i < 2; i += 1) {
+            if (/%[0-9A-Fa-f]{2}/.test(value)) {
+                try {
+                    value = decodeURIComponent(value);
+                } catch (_e) {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+        return encodeURIComponent(value);
+    }
+
     async function generateTTSRaw(text) {
         const response = await apiClient.post('/api/discussions/generate_tts', 
             { text },

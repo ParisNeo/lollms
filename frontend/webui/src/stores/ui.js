@@ -15,7 +15,6 @@ export const useUiStore = defineStore('ui', {
     currentCustomTheme: JSON.parse(localStorage.getItem('lollms-custom-theme') || 'null'),
     currentLanguage: localStorage.getItem('lollms-language') || 'en',
     uiScale: parseFloat(localStorage.getItem('lollms-ui-scale')) || 1.0,
-    uiScale: parseFloat(localStorage.getItem('lollms-ui-scale')) || 1.0,
     message_font_size: 14,
     imageViewer: {
       isOpen: false,
@@ -188,10 +187,60 @@ export const useUiStore = defineStore('ui', {
         }
     },
 
-    addNotification(message, type = 'info', duration = 3000, persistent = false, sender = null, icon = null) {
-        const id = Date.now() + Math.random();
-        this.notifications.push({ id, message, type, duration, persistent, sender, icon });
-        
+    /**
+     * Push a notification into the panel.
+     *
+     * @param {string} message
+     * @param {string} [type='info']       'info' | 'success' | 'error' | 'warning' | 'broadcast'
+     * @param {number} [duration=3000]     auto-dismiss ms; ignored when `persistent` is true
+     * @param {boolean} [persistent=false] skip auto-dismiss
+     * @param {string|null} [sender=null]  shown as "from <sender>" for broadcasts
+     * @param {string|null} [icon=null]    reserved
+     * @param {string|number|null} [stableId=null]  dedupe key. Repeated calls with the same
+     *        stableId REPLACE the existing entry in-place instead of pushing a duplicate.
+     *        Defaults to a randomly-generated id (i.e. no dedupe).
+     * @param {{label?: string, route?: string}|null} [action=null]  optional deep-link action
+     *        rendered as a pill in the notification body (e.g. "Open alerts").
+     */
+    addNotification(
+        message,
+        type = 'info',
+        duration = 3000,
+        persistent = false,
+        sender = null,
+        icon = null,
+        stableId = null,
+        action = null,
+    ) {
+        const id = stableId !== null && stableId !== undefined
+            ? String(stableId)
+            : Date.now() + Math.random();
+
+        // Dedupe by stableId: replace the existing entry (bump it back to the
+        // top of the stack) rather than stacking N identical alerts. This is
+        // what collapses live WS deliveries, replays-on-login and retry bursts
+        // into one durable panel entry.
+        const existingIndex = this.notifications.findIndex((n) => n.id === id);
+        if (existingIndex !== -1) {
+            const existing = this.notifications[existingIndex];
+            // Preserve the most actionable view of the alert: keep the newest
+            // message/severity, keep the presence of action, but never drop a
+            // previously-set persistent flag.
+            this.notifications.splice(existingIndex, 1);
+            this.notifications.push({
+                ...existing,
+                message,
+                type,
+                duration,
+                persistent: persistent || existing.persistent,
+                sender: sender ?? existing.sender,
+                icon: icon ?? existing.icon,
+                action: action ?? existing.action,
+            });
+        } else {
+            this.notifications.push({ id, message, type, duration, persistent, sender, icon, action });
+        }
+
         if (!persistent && duration > 0) {
             setTimeout(() => {
                 this.removeNotification(id);

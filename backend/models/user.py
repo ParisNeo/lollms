@@ -19,6 +19,11 @@ class UserCreatePublic(BaseModel):
     email: Optional[EmailStr] = None
 
 class UserCreateAdmin(BaseModel):
+    # Tolerate extra fields the admin create-user modal sends (herd config,
+    # studio params, future additions) so a frontend↔backend drift can never
+    # surface as an opaque ``422 Unprocessable Content``.
+    model_config = ConfigDict(extra="ignore")
+
     username: str
     password: str
     email: Optional[EmailStr] = None

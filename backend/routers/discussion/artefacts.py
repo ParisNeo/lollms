@@ -1085,6 +1085,41 @@ def build_artefacts_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to create manual artefact: {e}")
 
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/save", response_model=ArtefactInfo)
+    async def save_artefact_content(
+        discussion_id: str,
+        artefact_title: str,
+        payload: ArtefactUpdate,
+        version: Optional[int] = Query(None, description="Target version; defaults to the newest."),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ):
+        """
+        Persistent save/commit of an artefact's body.
+
+        This is a thin wrapper around ``update_manual_artefact`` so callers that
+        post to ``.../save`` (with a trailing version query param) do not need
+        to be rewritten. Body, payload shape, ownership check, and the
+        versioning semantics are all inherited from the canonical PUT handler:
+        ``payload.update_in_place`` controls whether a new version is created,
+        and ``version`` (query, injected here) is forwarded to the payload so
+        callers that pass ``?version=N`` get the behaviour they expect.
+        """
+        # The PUT handler reads ``payload.version`` when deciding to commit in
+        # place. If the caller passed a version via the query string, prefer it.
+        if version is not None and payload.version is None:
+            try:
+                payload.version = int(version)
+            except (TypeError, ValueError):
+                pass
+        return await update_manual_artefact(
+            discussion_id=discussion_id,
+            artefact_title=artefact_title,
+            payload=payload,
+            current_user=current_user,
+            db=db,
+        )
+
     @router.put("/{discussion_id}/artefacts/{artefact_title}", response_model=ArtefactInfo)
     async def update_manual_artefact(
         discussion_id: str,
@@ -1093,7 +1128,11 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        decoded_title = unquote(artefact_title)
+        # Title normalization: callers occasionally send a double-encoded title
+        # (e.g. "VALUES%252Emd" instead of "VALUES.md"). Peel percent-encoding
+        # layers until stable, so both PUT (this handler) and POST .../save agree
+        # with the GET handler which already unquotes.
+        decoded_title = unquote(unquote(artefact_title))
 
         if discussion_id == "saved":
             owner_id = current_user.id
@@ -1158,7 +1197,7 @@ def build_artefacts_router(router: APIRouter):
 
         try:
             artefact_info = discussion.artefacts.update(
-                title=decoded_title, 
+                title=decoded_title,
                 new_content=payload.new_content, 
                 new_type=payload.artefact_type,
                 new_images=payload.kept_images_b64 + payload.new_images_b64,
