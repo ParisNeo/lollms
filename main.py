@@ -96,6 +96,9 @@ from backend.settings import settings
 
 from backend.routers.auth import auth_router
 from backend.routers.admin import admin_router
+from backend.routers.admin.settings_policy import (
+    public_router as settings_policy_public_router,
+)
 from backend.routers.languages import languages_router
 from backend.routers.personalities import personalities_router
 from backend.routers.friends import friends_router
@@ -785,7 +788,9 @@ async def global_unhandled_exception_handler(request: Request, exc: Exception):
 # Routers
 # --------------------------------------------------------------------------- #
 for _router in (
-    auth_router, admin_router, languages_router, personalities_router, friends_router,
+    auth_router, admin_router,
+    settings_policy_public_router,
+    languages_router, personalities_router, friends_router,
     groups_router, dm_router, store_files_router, datastore_router, apps_router, mcp_router,
     discussion_tools_router, social_router, users_router, dm_ws_router, api_keys_router,
     openai_v1_router, ollama_v1_router, lollms_config_router, files_router, ui_router,

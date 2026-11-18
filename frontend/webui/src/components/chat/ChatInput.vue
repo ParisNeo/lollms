@@ -68,6 +68,7 @@ import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 import IconCog from '../../assets/icons/IconCog.vue';
 import IconAdjustmentsHorizontal from '../../assets/icons/IconAdjustmentsHorizontal.vue';
+import IconLock from '../../assets/icons/IconLock.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -872,6 +873,18 @@ async function toggleWebSearch() {
 async function toggleUserPref(key) {
     if (!authStore.user) return;
 
+    // Admin policy enforcement (client-side guard; the server also rejects these).
+    if (authStore.isFieldLocked(key)) {
+        const forcedVal = authStore.fieldPolicy(key)?.forced_value;
+        uiStore.addNotification(
+            authStore.isFieldForced(key)
+                ? `This setting is managed by an administrator (pinned to: ${forcedVal}).`
+                : 'This setting is locked by an administrator.',
+            'warning'
+        );
+        return;
+    }
+
     const currentValue = !!authStore.user[key];
     const newValue = !currentValue;
 
@@ -896,30 +909,128 @@ async function toggleUserPref(key) {
 // ─── Capabilities Toggles (Misc / Feature Hub inside Generation Controls) ───
 const isCapabilitiesOpen = ref(false);
 
+// Comprehensive lollms_client discussion.chat() flag registry.
+// Each `key` maps 1:1 to a `users.*` column and is toggled via toggleUserPref().
+// Entries are grouped by section header (see `capabilityGroups` below) for readability.
 const capabilityFlags = [
-    { key: 'form_building_enabled',      label: 'Interactive Forms',    emoji: '📋', description: 'Let the AI deploy interactive forms with fields, selects, sliders.' },
-    { key: 'inline_widgets_enabled',     label: 'Inline Widgets',       emoji: '🧩', description: 'Render live sandbox HTML mini-apps inline in the message stream.' },
-    { key: 'artefacts_enabled',          label: 'Workspace Artefacts',  emoji: '📦', description: 'Create versioned files, documents & code inside the discussion workspace.' },
-    { key: 'note_generation_enabled',    label: 'AI Notes',             emoji: '📝', description: 'The AI can emit structured <note> blocks saved to your library.' },
-    { key: 'skills_building_enabled',    label: 'Skill Building',       emoji: '✨', description: 'The AI captures useful patterns as reusable skills.' },
-    { key: 'skills_library_enabled',     label: 'Skill Auto-Search',    emoji: '🔎', description: 'Inject the most relevant saved skill automatically per turn.' },
-    { key: 'image_generation_enabled',   label: 'Image Generation',     emoji: '🎨', description: '<generate_image> tag renders via the active TTI binding.' },
-    { key: 'image_editing_enabled',      label: 'Image Editing',        emoji: '🖌️', description: 'Modify previously generated images via <edit_image>.' },
-    { key: 'powerpoint_enabled',         label: 'PowerPoint',           emoji: '📊', description: 'Generate .pptx presentation slides when needed.' },
-    { key: 'word_enabled',               label: 'Word',                 emoji: '📄', description: 'Generate .docx Word documents when needed.' },
-    { key: 'excel_enabled',              label: 'Excel',                emoji: '📈', description: 'Generate .xlsx Excel spreadsheets when needed.' },
-    { key: 'memory_enabled',             label: 'Long-Term Memory',     emoji: '🐘', description: 'Deep recall and new memory recording on every turn.' },
-    { key: 'auto_memory_enabled',        label: 'Auto-Dream Cycle',     emoji: '💤', description: 'Auto-consolidate, reinforce & decay memories in background.' },
-    { key: 'scheduler_enabled',          label: 'Task Scheduler',       emoji: '⏰', description: 'Schedule recurring prompts using cron syntax.' },
-    { key: 'street_view_enabled',        label: 'Street View',          emoji: '🗺️', description: 'Fetch Google Street View images for a location.' },
-    { key: 'herd_mode_enabled',          label: 'Herd Mode',            emoji: '🐺', description: 'Multiple AI agents debate & critique before answering (multi-agent).' },
+    // ── Conversation & Artefacts ──
+    { key: 'artefacts_enabled',          label: 'Workspace Artefacts',  emoji: '📦', group: 'conversation', description: 'Create versioned files, documents & code inside the discussion workspace.' },
+    { key: 'auto_activate_artefacts',    label: 'Auto-Activate Files',  emoji: '📂', group: 'conversation', description: 'Newly created files become immediately visible to the AI between rounds.' },
+    { key: 'note_generation_enabled',    label: 'AI Notes',             emoji: '📝', group: 'conversation', description: 'The AI can emit structured <note> blocks saved to your library.' },
+    { key: 'inline_widgets_enabled',     label: 'Inline Widgets',       emoji: '🧩', group: 'conversation', description: 'Render live sandbox HTML mini-apps inline in the message stream.' },
+    { key: 'form_building_enabled',      label: 'Interactive Forms',    emoji: '📋', group: 'conversation', description: 'Let the AI deploy interactive forms with fields, selects, sliders.' },
+    { key: 'enable_books',               label: 'Book Building',        emoji: '📚', group: 'conversation', description: 'The AI can write book chapters as document artefacts (keyword-gated).' },
+
+    // ── Skills ──
+    { key: 'skills_building_enabled',    label: 'Skill Building',       emoji: '✨', group: 'skills', description: 'The AI captures useful patterns as reusable skills.' },
+    { key: 'skills_library_enabled',     label: 'Skill Auto-Search',    emoji: '🔎', group: 'skills', description: 'Inject the most relevant saved skill automatically per turn.' },
+    { key: 'enable_skill_editing',       label: 'Skill Editing',        emoji: '🔧', group: 'skills', description: 'AI can read/patch/test SKILL.md files in-place (requires LCP binding).' },
+    { key: 'enable_skillmaker',          label: 'Skill Maker (RSI)',    emoji: '🌟', group: 'skills', description: 'Enables the heavy child-agent + auto-commit cycle for skill creation.' },
+
+    // ── Memory ──
+    { key: 'memory_enabled',             label: 'Long-Term Memory',     emoji: '🐘', group: 'memory', description: 'Deep recall and new memory recording on every turn.' },
+    { key: 'auto_memory_enabled',        label: 'Auto-Dream Cycle',     emoji: '💤', group: 'memory', description: 'Auto-consolidate, reinforce & decay memories in background.' },
+    { key: 'enable_episodic_memory',     label: 'Episodic Memory',      emoji: '📖', group: 'memory', description: 'Persist meaningful conversation turns as episodic memories.' },
+    { key: 'enable_deep_memory_pulling', label: 'Deep Memory Pull',     emoji: '🔮', group: 'memory', description: 'Pre-retrieve relevant deep memories into working memory per turn.' },
+
+    // ── Knowledge & RAG ──
+    { key: 'prehydrate_rag',             label: 'Pre-Hydrate RAG',      emoji: '🧽', group: 'knowledge', description: 'Query RAG before generation and inject context (50k char cap).' },
+    { key: 'enable_data_tools',          label: 'Data Tools',           emoji: '📊', group: 'knowledge', description: 'Auto-mount SQL/pandas tools when data files exist in workspace.' },
+
+    // ── Images ──
+    { key: 'image_generation_enabled',   label: 'Image Generation',     emoji: '🎨', group: 'images', description: '<generate_image> tag renders via the active TTI binding.' },
+    { key: 'image_editing_enabled',      label: 'Image Editing',        emoji: '🖌️', group: 'images', description: 'Modify previously generated images via <edit_image>.' },
+
+    // ── Office ──
+    { key: 'powerpoint_enabled',         label: 'PowerPoint',           emoji: '📊', group: 'office', description: 'Generate .pptx presentation slides when needed.' },
+    { key: 'word_enabled',               label: 'Word',                 emoji: '📄', group: 'office', description: 'Generate .docx Word documents when needed.' },
+    { key: 'excel_enabled',              label: 'Excel',                emoji: '📈', group: 'office', description: 'Generate .xlsx Excel spreadsheets when needed.' },
+    { key: 'enable_pdf',                 label: 'PDF Tools',            emoji: '📕', group: 'office', description: 'Read/inspect/annotate PDFs (auto-mounts if a PDF is present).' },
+
+    // ── Media ──
+    { key: 'enable_generate_video',      label: 'Video Generation',     emoji: '🎬', group: 'media', description: '<generate_video> via TTV binding.' },
+    { key: 'enable_edit_video',          label: 'Video Editing',        emoji: '📽️', group: 'media', description: '<edit_video> via TTV binding.' },
+    { key: 'enable_generate_music',      label: 'Music Generation',     emoji: '🎵', group: 'media', description: '<generate_music> via TTM binding.' },
+    { key: 'enable_edit_music',          label: 'Music Editing',        emoji: '🎶', group: 'media', description: '<edit_music> via TTM binding.' },
+    { key: 'enable_synthesize_speech',   label: 'Text-to-Speech',       emoji: '🗣️', group: 'media', description: '<synthesize_speech> via TTS binding.' },
+
+    // ── Vision ──
+    { key: 'suppress_images',            label: 'Suppress Vision',      emoji: '🚫', group: 'vision', description: 'Withhold ALL image pixels from model context this turn (negative polarity).' },
+    { key: 'enable_vlm_query',           label: 'VLM Query Fallback',   emoji: '👁️', group: 'vision', description: 'Mount tool_vlm_query as vision fallback when active model is blind.' },
+    { key: 'enable_computer_use',        label: 'Computer Use',         emoji: '🖱️', group: 'vision', description: 'Desktop automation (screenshots, clicks, typing). Requires vision model.' },
+
+    // ── Code & Tools ──
+    { key: 'enable_code_execution',      label: 'Code Execution',       emoji: '⚡', group: 'tools', description: 'Python execution toolset (workspace CWD). Security-sensitive.' },
+    { key: 'auto_approve_python',        label: 'Auto-Approve Python',  emoji: '🔓', group: 'tools', description: 'Run Python without confirmation prompts. ONLY in trusted sandboxes.' },
+    { key: 'allow_dynamic_tools',        label: 'Dynamic Tools',        emoji: '🛠️', group: 'tools', description: 'Register model-authored .py artefacts as executable LCP tools. Security-sensitive.' },
+    { key: 'enable_toolset_editing',     label: 'Toolset Editing',      emoji: '🧰', group: 'tools', description: 'AI can stage/patch/test LCP toolsets in-place (requires LCP binding).' },
+    { key: 'enable_toolsmith',           label: 'Toolsmith (RSI)',      emoji: '⚒️', group: 'tools', description: 'Enables the heavy child-agent + auto-commit cycle for tool creation.' },
+    { key: 'compact_workspace_tree',     label: 'Compact Workspace Tree', emoji: '🌲', group: 'tools', description: 'Just-in-time workspace discovery via tool_show_workspace_tree (for big repos).' },
+
+    // ── Orchestration & Advanced ──
+    { key: 'orchestrator_mode',          label: 'Orchestrator Mode',    emoji: '🎭', group: 'advanced', description: 'Route turn through AgenticRunner sub-agents with sealed reports.' },
+    { key: 'dynamic_effort',             label: 'Dynamic Effort',       emoji: '🎚️', group: 'advanced', description: 'Model adjusts its own reasoning effort between rounds via <effort>.' },
+    { key: 'list_available_models',      label: 'Model Discovery',      emoji: '🗂️', group: 'advanced', description: 'Allow the AI to list loaded models/bindings and propose switches.' },
+
+    // ── Streaming & Diagnostics ──
+    { key: 'forward_artefact_chunks',    label: 'Stream Artefact Chunks', emoji: '📡', group: 'diagnostics', description: 'Forward live artefact body chunks to the UI while streaming.' },
+    { key: 'enable_in_message_status',   label: 'In-Message Status',    emoji: '💬', group: 'diagnostics', description: 'Emit progress lines inside <processing> blocks while working.' },
+    { key: 'clean_reasoning_at_save',    label: 'Clean Reasoning',      emoji: '🧹', group: 'diagnostics', description: 'Strip reasoning markup from saved assistant message content.' },
+    { key: 'verbose',                    label: 'Verbose Telemetry',    emoji: '📈', group: 'diagnostics', description: 'Per-round timing, TTFT, and token-fill telemetry in console.' },
+    { key: 'debug',                      label: 'Debug Toolset',        emoji: '🐛', group: 'diagnostics', description: 'Mount debug_toolset and dump the active tool registry.' },
+    { key: 'debug_export',               label: 'Debug Export',         emoji: '💾', group: 'diagnostics', description: 'Write per-round prompt dumps to workspace/_debug_dumps/.' },
+
+    // ── Lifestyle ──
+    { key: 'herd_mode_enabled',          label: 'Herd Mode',            emoji: '🐺', group: 'lifestyle', description: 'Multiple AI agents debate & critique before answering (multi-agent).' },
+    { key: 'scheduler_enabled',          label: 'Task Scheduler',       emoji: '⏰', group: 'lifestyle', description: 'Schedule recurring prompts using cron syntax.' },
+    { key: 'street_view_enabled',        label: 'Street View',          emoji: '🗺️', group: 'lifestyle', description: 'Fetch Google Street View images for a location.' },
 ];
+
+// Section headers used by the Capabilities hub and the AI Character Sheet.
+const capabilityGroupMeta = [
+    { id: 'conversation', label: '💬 Conversation & Artefacts' },
+    { id: 'skills',       label: '✨ Skills' },
+    { id: 'memory',       label: '🐘 Memory' },
+    { id: 'knowledge',    label: '🧽 Knowledge & RAG' },
+    { id: 'images',       label: '🎨 Images' },
+    { id: 'office',       label: '📊 Office Documents' },
+    { id: 'media',        label: '🎬 Media Generation' },
+    { id: 'vision',       label: '👁️ Vision & Automation' },
+    { id: 'tools',        label: '⚡ Code & Tools' },
+    { id: 'advanced',     label: '🎭 Orchestration' },
+    { id: 'diagnostics',  label: '📡 Streaming & Diagnostics' },
+    { id: 'lifestyle',    label: '🌟 Lifestyle' },
+];
+
+// Grouped view of capability flags consumed by the two UIs (Generation Controls popover + Character Sheet).
+const capabilityGroups = computed(() =>
+    capabilityGroupMeta
+        .map(g => ({ ...g, items: capabilityFlags.filter(c => c.group === g.id) }))
+        .filter(g => g.items.length > 0)
+);
 
 function isCapabilityOn(cap) {
     return Boolean(user.value?.[cap.key]);
 }
 
+// True when an admin has locked or pinned this capability — the user cannot change it.
+function isCapabilityLocked(cap) {
+    return authStore.isFieldLocked(cap.key);
+}
+
+function capabilityLockTitle(cap) {
+    const policy = authStore.fieldPolicy(cap.key);
+    if (!policy) return '';
+    if (policy.forced) return `Managed by administrator (pinned to: ${policy.forced_value})`;
+    if (policy.locked) return 'Locked by administrator';
+    return '';
+}
+
 function toggleCapability(cap) {
+    if (isCapabilityLocked(cap)) {
+        uiStore.addNotification('This capability is managed by an administrator and cannot be changed.', 'warning');
+        return;
+    }
     toggleUserPref(cap.key);
 }
 
@@ -933,6 +1044,14 @@ const capabilitiesForModal = computed(() => capabilityFlags.map(c => ({
     ...c,
     active: isCapabilityOn(c)
 })));
+const groupedCapabilitiesForModal = computed(() =>
+    capabilityGroups.value
+        .map(grp => ({
+            ...grp,
+            items: grp.items.map(c => ({ ...c, active: isCapabilityOn(c) }))
+        }))
+        .filter(grp => grp.items.length > 0)
+);
 
 function handleOpenCreateDatastoreModal() {
     uiStore.openModal('createDataStoreFromArtefacts', {
@@ -2558,26 +2677,39 @@ onUnmounted(() => {
                                         leave-from-class="opacity-100 translate-y-0"
                                         leave-to-class="opacity-0 -translate-y-1"
                                     >
-                                        <div v-if="isCapabilitiesOpen" class="space-y-1.5 max-h-[260px] overflow-y-auto custom-scrollbar -mx-1 px-1">
-                                            <div
-                                                v-for="cap in capabilityFlags"
-                                                :key="cap.key"
-                                                class="flex items-center justify-between gap-2 p-2 rounded-xl border transition-colors group/cap capability-row"
-                                                :title="cap.description"
-                                            >
-                                                <div class="flex items-center gap-2 min-w-0">
-                                                    <span class="text-sm shrink-0">{{ cap.emoji }}</span>
-                                                    <span class="text-[11px] font-semibold truncate" style="color: var(--brand-text-main);">{{ cap.label }}</span>
+                                        <div v-if="isCapabilitiesOpen" class="space-y-3 max-h-[340px] overflow-y-auto custom-scrollbar -mx-1 px-1">
+                                            <template v-for="grp in capabilityGroups" :key="grp.id">
+                                                <div class="space-y-1.5">
+                                                    <div class="text-[9px] font-black uppercase tracking-widest px-1 pt-1" style="color: var(--brand-text-dim);">{{ grp.label }}</div>
+                                                    <div
+                                                        v-for="cap in grp.items"
+                                                        :key="cap.key"
+                                                        class="flex items-center justify-between gap-2 p-2 rounded-xl border transition-colors group/cap capability-row"
+                                                        :title="cap.description"
+                                                    >
+                                                        <div class="flex items-center gap-2 min-w-0">
+                                                            <span class="text-sm shrink-0">{{ cap.emoji }}</span>
+                                                            <span class="text-[11px] font-semibold truncate" style="color: var(--brand-text-main);">{{ cap.label }}</span>
+                                                        </div>
+                                                        <button
+                                                            type="button"
+                                                            @click="toggleCapability(cap)"
+                                                            :disabled="isCapabilityLocked(cap)"
+                                                            :class="[
+                                                                isCapabilityOn(cap) ? 'bg-purple-600' : 'bg-bg-hover',
+                                                                isCapabilityLocked(cap) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+                                                                'relative inline-flex h-4.5 w-8 shrink-0 rounded-full transition-colors duration-200 h-[18px]'
+                                                            ]"
+                                                            :title="isCapabilityLocked(cap)
+                                                                ? (authStore.isFieldForced(cap.key) ? `Managed by admin (pinned: ${authStore.fieldPolicy(cap.key)?.forced_value})` : 'Locked by admin')
+                                                                : (isCapabilityOn(cap) ? `Disable ${cap.label}` : `Enable ${cap.label}`)"
+                                                        >
+                                                            <span :class="[isCapabilityOn(cap) ? 'translate-x-3.5' : 'translate-x-0', 'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 my-[1px]']"></span>
+                                                        </button>
+                                                        <IconLock v-if="isCapabilityLocked(cap)" class="w-3 h-3 shrink-0 text-amber-500" />
+                                                    </div>
                                                 </div>
-                                                <button
-                                                    type="button"
-                                                    @click="toggleCapability(cap)"
-                                                    :class="[isCapabilityOn(cap) ? 'bg-purple-600' : 'bg-bg-hover', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
-                                                    :title="isCapabilityOn(cap) ? `Disable ${cap.label}` : `Enable ${cap.label}`"
-                                                >
-                                                    <span :class="[isCapabilityOn(cap) ? 'translate-x-3.5' : 'translate-x-0', 'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 my-[1px]']"></span>
-                                                </button>
-                                            </div>
+                                            </template>
 
                                             <!-- Internet Search Capability Row -->
                                             <div
@@ -2585,14 +2717,18 @@ onUnmounted(() => {
                                                 :title="'Live web search via Google/DDG/Wiki. Configure API keys under Settings > User Context.'"
                                             >
                                                 <div class="flex items-center gap-2 min-w-0">
-                                                    <span class="text-sm shrink-0">🛰️</span>
-                                                    <span class="text-[11px] font-semibold truncate" style="color: var(--brand-text-main);">Internet Search <span class="opacity-60 font-mono">({{ currentProviderName }})</span></span>
+                                                    <span class="text-sm shrink-0">🌐</span>
+                                                    <span class="text-[11px] font-semibold truncate" style="color: var(--brand-text-main);">Internet Search</span>
+                                                    <span class="text-[9px] font-mono uppercase px-1 py-0.2 rounded" style="background-color: var(--bg-hover); color: var(--text-dim);">{{ currentProviderName }}</span>
                                                 </div>
                                                 <button
                                                     type="button"
                                                     @click="toggleWebSearch()"
-                                                    :class="[isWebSearchActive ? 'bg-blue-600' : 'bg-bg-hover', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
-                                                    :title="isWebSearchActive ? 'Disable Internet Search' : 'Enable Internet Search'"
+                                                    :class="[
+                                                        isWebSearchActive ? 'bg-blue-600' : 'bg-bg-hover',
+                                                        'relative inline-flex h-4.5 w-8 shrink-0 rounded-full transition-colors duration-200 h-[18px] cursor-pointer'
+                                                    ]"
+                                                    :title="isWebSearchActive ? 'Disable web search' : 'Enable web search'"
                                                 >
                                                     <span :class="[isWebSearchActive ? 'translate-x-3.5' : 'translate-x-0', 'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 my-[1px]']"></span>
                                                 </button>
@@ -2752,25 +2888,37 @@ onUnmounted(() => {
                                 Manage →
                             </button>
                         </div>
-                        <div class="grid grid-cols-2 gap-1.5">
-                            <div
-                                v-for="cap in capabilitiesForModal"
-                                :key="`modal-cap-${cap.key}`"
-                                @click="toggleCapability(cap)"
-                                class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border transition-all cursor-pointer group/modalcap select-none"
-                                :class="cap.active 
-                                    ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 dark:border-purple-700 shadow-2xs' 
-                                    : 'themed-zone border-border-muted opacity-60 hover:opacity-100'"
-                                :title="cap.description"
-                            >
-                                <div class="flex items-center gap-2 min-w-0">
-                                    <span class="text-sm shrink-0">{{ cap.emoji }}</span>
-                                    <span class="text-[10px] font-bold truncate" :class="cap.active ? 'text-purple-900 dark:text-purple-200' : ''" :style="!cap.active ? 'color: var(--brand-text-dim);' : ''">{{ cap.label }}</span>
+                        <div class="space-y-3">
+                            <div v-for="grp in groupedCapabilitiesForModal" :key="`modal-grp-${grp.id}`" class="space-y-1">
+                                <div class="text-[9px] font-black uppercase tracking-widest px-1" style="color: var(--brand-text-dim);">{{ grp.label }}</div>
+                                <div class="grid grid-cols-2 gap-1.5">
+                                    <div
+                                        v-for="cap in grp.items"
+                                        :key="`modal-cap-${cap.key}`"
+                                        @click="toggleCapability(cap)"
+                                        class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border transition-all group/modalcap select-none"
+                                        :class="[
+                                            cap.active
+                                                ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 dark:border-purple-700 shadow-2xs'
+                                                : 'themed-zone border-border-muted opacity-60 hover:opacity-100',
+                                            isCapabilityLocked(cap) ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                        ]"
+                                        :title="isCapabilityLocked(cap)
+                                            ? (authStore.isFieldForced(cap.key) ? `Managed by admin (pinned: ${authStore.fieldPolicy(cap.key)?.forced_value})` : 'Locked by admin')
+                                            : cap.description"
+                                    >
+                                        <div class="flex items-center gap-2 min-w-0">
+                                            <span class="text-sm shrink-0">{{ cap.emoji }}</span>
+                                            <span class="text-[10px] font-bold truncate" :class="cap.active ? 'text-purple-900 dark:text-purple-200' : ''" :style="!cap.active ? 'color: var(--brand-text-dim);' : ''">{{ cap.label }}</span>
+                                        </div>
+                                        <IconLock v-if="isCapabilityLocked(cap)" class="w-3 h-3 shrink-0 text-amber-500" />
+                                        <span
+                                            v-else
+                                            class="w-1.5 h-1.5 rounded-full shrink-0 transition-colors"
+                                            :class="cap.active ? 'bg-purple-500 animate-pulse' : 'bg-bg-hover'"
+                                        ></span>
+                                    </div>
                                 </div>
-                                <span 
-                                    class="w-1.5 h-1.5 rounded-full shrink-0 transition-colors" 
-                                    :class="cap.active ? 'bg-purple-500 animate-pulse' : 'bg-bg-hover'"
-                                ></span>
                             </div>
                         </div>
                         <p class="text-[9px] italic px-1" style="color: var(--text-dim);">

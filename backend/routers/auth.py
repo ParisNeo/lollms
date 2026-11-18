@@ -576,8 +576,15 @@ async def logout(
 
 
 @auth_router.get("/me", response_model=UserAuthDetails)
-async def get_my_details(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails: 
+async def get_my_details(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> UserAuthDetails:
+    # Overlay admin forced values so the UI always reflects the pinned state.
+    from backend.routers.admin.settings_policy import apply_forced_values_to_user
+    apply_forced_values_to_user(db, current_user)
     return current_user
+
 
 
 @auth_router.put("/me", response_model=UserAuthDetails)
@@ -587,7 +594,14 @@ async def update_my_details(
     db: Session = Depends(get_db)
 ) -> UserAuthDetails:
     updated_fields = user_update_data.model_dump(exclude_unset=True)
-    
+
+    # --- Admin settings-policy enforcement ---
+    # Locked fields are silently dropped; forced fields are rewritten with the
+    # admin-pinned value. Applied before validation so an attempted email change
+    # on a locked field never trips the uniqueness check below.
+    from backend.routers.admin.settings_policy import apply_policies_to_update
+    updated_fields = apply_policies_to_update(db, updated_fields)
+
     if 'email' in updated_fields and updated_fields['email'] != db_user.email:
         if db.query(DBUser).filter(DBUser.email == updated_fields['email'], DBUser.id != db_user.id).first():
             raise HTTPException(status_code=400, detail="This email address is already in use by another account.")
@@ -600,6 +614,12 @@ async def update_my_details(
         if hasattr(db_user, field):
             setattr(db_user, field, value)
     
+    # Forced values are authoritative on the persisted row, not just the
+    # response. Re-apply them so a first-time update on a user who never had
+    # the admin pin written yet ends up consistent with the policy.
+    from backend.routers.admin.settings_policy import apply_forced_values_to_user as _reassert_forced
+    _reassert_forced(db, db_user)
+
     try:
         db.commit()
         db.refresh(db_user)
@@ -639,7 +659,10 @@ async def update_my_details(
                 user_sessions[username].pop("lollms_clients_cache", None)
                 print(f"INFO: Invalidated LollmsClient cache for user '{username}'.")
 
-    return get_current_active_user(db_user)
+    result = get_current_active_user(db_user)
+    from backend.routers.admin.settings_policy import apply_forced_values_to_user
+    apply_forced_values_to_user(db, result)
+    return result
 
 @auth_router.post("/change-password", response_model=Dict[str, str])
 async def change_user_password(

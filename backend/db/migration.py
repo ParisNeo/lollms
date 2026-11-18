@@ -966,7 +966,43 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "google_gmail_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "google_client_secret_json": "TEXT",
             "scheduler_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
-            "mcp_access_info": "JSON"
+            "mcp_access_info": "JSON",
+            # --- Extended LollmsDiscussion.chat() capability flags ---
+            # Added to the model in backend/db/models/user.py. Existing DBs must be
+            # ALTERed here because Base.metadata.create_all only creates missing
+            # TABLES, never adds columns to an existing table.
+            "auto_activate_artefacts": "BOOLEAN DEFAULT 1 NOT NULL",
+            "enable_books": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_episodic_memory": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_deep_memory_pulling": "BOOLEAN DEFAULT 0 NOT NULL",
+            "prehydrate_rag": "BOOLEAN DEFAULT 1 NOT NULL",
+            "enable_data_tools": "BOOLEAN DEFAULT 1 NOT NULL",
+            "compact_workspace_tree": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_code_execution": "BOOLEAN DEFAULT 0 NOT NULL",
+            "auto_approve_python": "BOOLEAN DEFAULT 0 NOT NULL",
+            "allow_dynamic_tools": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_vlm_query": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_computer_use": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_pdf": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_toolset_editing": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_skill_editing": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_toolsmith": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_skillmaker": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_generate_video": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_edit_video": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_generate_music": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_edit_music": "BOOLEAN DEFAULT 0 NOT NULL",
+            "enable_synthesize_speech": "BOOLEAN DEFAULT 0 NOT NULL",
+            "suppress_images": "BOOLEAN DEFAULT 0 NOT NULL",
+            "orchestrator_mode": "BOOLEAN DEFAULT 0 NOT NULL",
+            "dynamic_effort": "BOOLEAN DEFAULT 0 NOT NULL",
+            "list_available_models": "BOOLEAN DEFAULT 0 NOT NULL",
+            "forward_artefact_chunks": "BOOLEAN DEFAULT 1 NOT NULL",
+            "enable_in_message_status": "BOOLEAN DEFAULT 1 NOT NULL",
+            "clean_reasoning_at_save": "BOOLEAN DEFAULT 1 NOT NULL",
+            "verbose": "BOOLEAN DEFAULT 0 NOT NULL",
+            "debug": "BOOLEAN DEFAULT 0 NOT NULL",
+            "debug_export": "BOOLEAN DEFAULT 0 NOT NULL"
         }
         
         added_cols = []
@@ -1369,6 +1405,19 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("websocket_connections"):
         WebSocketConnection.__table__.create(connection)
         connection.commit()
+
+    # --- Admin Settings Policy table (governs which user fields are locked/forced) ---
+    if not inspector.has_table("user_setting_policies"):
+        from backend.db.models.settings_policy import UserSettingPolicy
+        UserSettingPolicy.__table__.create(connection)
+        connection.commit()
+        print("INFO: Created 'user_setting_policies' table.")
+
+    if not inspector.has_table("user_setting_policies"):
+        from backend.db.models.settings_policy import UserSettingPolicy
+        UserSettingPolicy.__table__.create(connection)
+        connection.commit()
+        print("INFO: Created 'user_setting_policies' table.")
 
 
     if inspector.has_table("fun_fact_categories"):

@@ -2457,7 +2457,7 @@ def build_llm_generation_router(router: APIRouter):
                             tools=agentic_tools,
                             enable_image_generation=owner_db_user.image_generation_enabled,
                             enable_image_editing=owner_db_user.image_editing_enabled,
-                            auto_activate_artefacts=True,
+                            auto_activate_artefacts=owner_db_user.auto_activate_artefacts,
                             enable_show_tools=True,
                             enable_extract_artefact=True,
                             enable_final_answer=True,
@@ -2473,19 +2473,57 @@ def build_llm_generation_router(router: APIRouter):
                             
                             enable_silent_artefact_explanation=True,
                             enable_artefacts=owner_db_user.artefacts_enabled,
+                            enable_books=owner_db_user.enable_books,
+
+                            # Memory subsystem
                             memory_manager=mm_instance,
                             enable_memory=owner_db_user.memory_enabled,
                             enable_auto_dream=owner_db_user.auto_memory_enabled,
-                            enable_deep_memory_pulling=owner_db_user.memory_enabled,
-                            enable_episodic_memory=False,
-                            prehydrate_rag=True,
-                            enable_in_message_status=True,
-                            enable_specialized_events_stream=True,
-                            forward_artefact_chunks=True,
-                            suppress_images=not model_supports_vision,
-                            event_mode=EventMode.PROCESSING_TAG_MODE,
+                            enable_deep_memory_pulling=bool(owner_db_user.enable_deep_memory_pulling and owner_db_user.memory_enabled),
+                            enable_episodic_memory=bool(owner_db_user.enable_episodic_memory and owner_db_user.memory_enabled),
 
-                            enable_data_tools=True,
+                            # Knowledge / context hydration
+                            prehydrate_rag=owner_db_user.prehydrate_rag,
+                            enable_data_tools=owner_db_user.enable_data_tools,
+                            compact_workspace_tree=owner_db_user.compact_workspace_tree,
+
+                            # Code / tools (security-sensitive — gated with confirm handler where relevant)
+                            enable_code_execution=owner_db_user.enable_code_execution,
+                            auto_approve_python=owner_db_user.auto_approve_python,
+                            allow_dynamic_tools=owner_db_user.allow_dynamic_tools,
+                            enable_vlm_query=owner_db_user.enable_vlm_query,
+                            enable_computer_use=owner_db_user.enable_computer_use,
+                            enable_pdf=owner_db_user.enable_pdf,
+                            enable_toolset_editing=owner_db_user.enable_toolset_editing,
+                            enable_skill_editing=owner_db_user.enable_skill_editing,
+                            enable_toolsmith=owner_db_user.enable_toolsmith,
+                            enable_skillmaker=owner_db_user.enable_skillmaker,
+
+                            # Media generation (TTV / TTM / TTS-gated)
+                            enable_generate_video=owner_db_user.enable_generate_video,
+                            enable_edit_video=owner_db_user.enable_edit_video,
+                            enable_generate_music=owner_db_user.enable_generate_music,
+                            enable_edit_music=owner_db_user.enable_edit_music,
+                            enable_synthesize_speech=owner_db_user.enable_synthesize_speech,
+
+                            # Vision
+                            suppress_images=bool((not model_supports_vision) or owner_db_user.suppress_images),
+
+                            # Orchestration / advanced
+                            orchestrator_mode=owner_db_user.orchestrator_mode,
+                            dynamic_effort=owner_db_user.dynamic_effort,
+                            list_available_models=owner_db_user.list_available_models,
+
+                            # Diagnostics / streaming verbosity
+                            enable_in_message_status=owner_db_user.enable_in_message_status,
+                            enable_specialized_events_stream=True,
+                            forward_artefact_chunks=owner_db_user.forward_artefact_chunks,
+                            clean_reasoning_at_save=owner_db_user.clean_reasoning_at_save,
+                            verbose=owner_db_user.verbose,
+                            debug=owner_db_user.debug,
+                            debug_export=owner_db_user.debug_export,
+
+                            event_mode=EventMode.PROCESSING_TAG_MODE,
                             enforce_end_tag=True,
                             
                             **chat_extra_kwargs

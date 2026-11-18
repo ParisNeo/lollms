@@ -106,6 +106,50 @@ class User(Base):
     herd_dynamic_mode = Column(Boolean, default=False, nullable=False, server_default='0')
     herd_model_pool = Column(JSON, nullable=True) # List of {model: str, description: str}
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Extended Lollms Discussion.chat() flags (exposed via ChatInput > Capabilities)
+    # ──────────────────────────────────────────────────────────────────────
+    # Artefacts
+    auto_activate_artefacts = Column(Boolean, default=True, nullable=False, server_default='1')
+    enable_books = Column(Boolean, default=False, nullable=False, server_default='0')
+    # Memory
+    enable_episodic_memory = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_deep_memory_pulling = Column(Boolean, default=False, nullable=False, server_default='0')
+    # Knowledge
+    prehydrate_rag = Column(Boolean, default=True, nullable=False, server_default='1')
+    enable_data_tools = Column(Boolean, default=True, nullable=False, server_default='1')
+    compact_workspace_tree = Column(Boolean, default=False, nullable=False, server_default='0')
+    # Code / Tools (security-sensitive)
+    enable_code_execution = Column(Boolean, default=False, nullable=False, server_default='0')
+    auto_approve_python = Column(Boolean, default=False, nullable=False, server_default='0')
+    allow_dynamic_tools = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_vlm_query = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_computer_use = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_pdf = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_toolset_editing = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_skill_editing = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_toolsmith = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_skillmaker = Column(Boolean, default=False, nullable=False, server_default='0')
+    # Media generation
+    enable_generate_video = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_edit_video = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_generate_music = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_edit_music = Column(Boolean, default=False, nullable=False, server_default='0')
+    enable_synthesize_speech = Column(Boolean, default=False, nullable=False, server_default='0')
+    # Vision
+    suppress_images = Column(Boolean, default=False, nullable=False, server_default='0')
+    # Orchestration / advanced
+    orchestrator_mode = Column(Boolean, default=False, nullable=False, server_default='0')
+    dynamic_effort = Column(Boolean, default=False, nullable=False, server_default='0')
+    list_available_models = Column(Boolean, default=False, nullable=False, server_default='0')
+    # Diagnostics / streaming verbosity
+    forward_artefact_chunks = Column(Boolean, default=True, nullable=False, server_default='1')
+    enable_in_message_status = Column(Boolean, default=True, nullable=False, server_default='1')
+    clean_reasoning_at_save = Column(Boolean, default=True, nullable=False, server_default='1')
+    verbose = Column(Boolean, default=False, nullable=False, server_default='0')
+    debug = Column(Boolean, default=False, nullable=False, server_default='0')
+    debug_export = Column(Boolean, default=False, nullable=False, server_default='0')
+
 
     max_image_width = Column(Integer, default=-1, nullable=True, server_default='-1')
     max_image_height = Column(Integer, default=-1, nullable=True, server_default='-1')

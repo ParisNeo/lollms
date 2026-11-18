@@ -30,6 +30,7 @@ import IconVideoCamera from '../assets/icons/IconVideoCamera.vue';
 import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue';
 import IconShieldCheck from '../assets/icons/IconCheckCircle.vue';
 import IconPower from '../assets/icons/IconStopCircle.vue';
+import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -58,6 +59,7 @@ const sections = [
   { type: 'link', id: 'services_mgmt', name: 'API Usage Stats', icon: markRaw(IconServer) },
   { type: 'link', id: 'email_marketing', name: 'Email Campaigns', icon: markRaw(IconSend) },
   { type: 'link', id: 'tasks', name: 'Background Tasks', icon: markRaw(IconTasks) },
+  { type: 'link', id: 'settings_policy', name: 'Settings Policy', icon: markRaw(IconAdjustmentsHorizontal) },
 
   { type: 'divider', label: 'Zoos' },
   { type: 'link', id: 'personalities', name: 'Personality Zoo', icon: markRaw(IconUserCircle) },

@@ -2,7 +2,6 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
-// Removed specialized static store imports to fix Effective Dynamic Import warnings
 
 export const useAuthStore = defineStore('auth', () => {
     // --- State ---
@@ -18,7 +17,7 @@ export const useAuthStore = defineStore('auth', () => {
     const welcome_fun_fact_color = ref('#3B82F6');
     const welcome_fun_fact_category = ref(null);
     const isFetchingFunFact = ref(false);
-    
+
     // System-wide permissions from config
     const latex_builder_enabled = ref(false);
     const export_to_txt_enabled = ref(true);
@@ -33,10 +32,14 @@ export const useAuthStore = defineStore('auth', () => {
     const default_chunk_overlap = ref(256);
     const ssoClientConfig = ref({ enabled: false, display_name: 'Login with SSO', icon_url: '' });
 
+    // Admin Settings Policy map for the current user: { field: { locked, forced, forced_value } }.
+    // Populated from GET /api/settings-policy/me. Empty => nothing is restricted.
+    const settingsPolicy = ref({});
+
     // --- WebSocket State ---
     const ws = ref(null);
     const wsConnected = ref(false);
-    const hasConnectedOnce = ref(false); 
+    const hasConnectedOnce = ref(false);
     let heartbeatInterval = null;
     let reconnectTimeout = null;
 
@@ -44,13 +47,49 @@ export const useAuthStore = defineStore('auth', () => {
     const audioChime = new Audio('/audio/chime_aud.wav');
     const audioLost = new Audio('/audio/connection_lost.wav');
     const audioRecovered = new Audio('/audio/connection_recovered.wav');
-    
-    // Throttling for connection lost sound to prevent "Ai Ai Ai" spam loop
+
+    // Throttling for connection lost sound to prevent spam loops
     let lastConnectionLostTime = 0;
 
     // --- Getters ---
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
+
+    // ── Admin Settings Policy helpers ──────────────────────────────────────
+    /** Raw policy entry for a field, or null when the field is unrestricted. */
+    function fieldPolicy(fieldName) {
+        return settingsPolicy.value?.[fieldName] || null;
+    }
+
+    /** True when the current user cannot edit the field (locked OR forced). */
+    function isFieldLocked(fieldName) {
+        const p = fieldPolicy(fieldName);
+        return !!p && (p.locked === true || p.forced === true || p.user_editable === false);
+    }
+
+    /** True when an admin pinned a concrete value for the field. */
+    function isFieldForced(fieldName) {
+        return !!fieldPolicy(fieldName)?.forced;
+    }
+
+    /**
+     * Fetch the admin Settings Policy for the current user.
+     * Backend returns { policies: { field: { locked, forced, forced_value } } }.
+     * Failures are non-fatal: treat as "nothing restricted".
+     */
+    async function fetchSettingsPolicy() {
+        if (!token.value) {
+            settingsPolicy.value = {};
+            return;
+        }
+        try {
+            const response = await apiClient.get('/api/settings-policy/me');
+            settingsPolicy.value = response.data?.policies || {};
+        } catch (error) {
+            console.warn('Could not fetch settings policy.', error);
+            settingsPolicy.value = {};
+        }
+    }
 
     // --- Actions ---
 
@@ -88,7 +127,7 @@ export const useAuthStore = defineStore('auth', () => {
             isFetchingFunFact.value = false;
         }
     }
-    
+
     async function refreshUser() {
         if (!token.value) return;
         try {
@@ -111,38 +150,13 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     // --- WebSocket Connection Management ---
-    /**
-     * Checks if the JWT token is expired locally.
-     * Prevents backend bombardment with dead tokens.
-     */
     function isTokenExpired(tokenStr) {
         if (!tokenStr) return true;
         try {
             const base64Url = tokenStr.split('.')[1];
             const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
             const payload = JSON.parse(window.atob(base64));
-
             if (!payload.exp) return false;
-            // Add a 60-second grace period for clock skew
-            return (Date.now() / 1000) > (payload.exp - 60);
-        } catch (e) {
-            return true;
-        }
-    }
-    // --- WebSocket Connection Management ---
-    /**
-     * Checks if the JWT token is expired locally.
-     * Prevents backend bombardment with dead tokens.
-     */
-    function isTokenExpired(tokenStr) {
-        if (!tokenStr) return true;
-        try {
-            const base64Url = tokenStr.split('.')[1];
-            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-            const payload = JSON.parse(window.atob(base64));
-            
-            if (!payload.exp) return false;
-            // Add a 60-second grace period for clock skew
             return (Date.now() / 1000) > (payload.exp - 60);
         } catch (e) {
             return true;
@@ -152,7 +166,6 @@ export const useAuthStore = defineStore('auth', () => {
     function connectWebSocket() {
         const path = window.location.pathname || '';
         if (path.startsWith('/reset-password') || window.location.hash.includes('reset-password')) {
-            // Never open WebSocket on reset password page
             return;
         }
 
@@ -171,7 +184,7 @@ export const useAuthStore = defineStore('auth', () => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = import.meta.env.DEV ? 'localhost:9642' : window.location.host;
         const wsUrl = `${protocol}//${host}/ws/dm/${token.value}`;
-        
+
         console.log(`[WebSocket] Connecting to ${wsUrl}...`);
         ws.value = new WebSocket(wsUrl);
 
@@ -187,11 +200,11 @@ export const useAuthStore = defineStore('auth', () => {
             wsConnected.value = true;
             hasConnectedOnce.value = true;
             clearTimeout(reconnectTimeout);
-            
+
             if (heartbeatInterval) clearInterval(heartbeatInterval);
             heartbeatInterval = setInterval(() => {
                 if (ws.value && ws.value.readyState === WebSocket.OPEN) ws.value.send("ping");
-            }, 30000); 
+            }, 30000);
         };
 
         ws.value.onmessage = (event) => {
@@ -200,32 +213,21 @@ export const useAuthStore = defineStore('auth', () => {
 
             let data;
             try { data = JSON.parse(event.data); } catch (e) { return; }
-            
-            // Move store resolution inside an immediate scope to avoid async gaps
-            // during high-frequency updates
+
             const uiStore = useUiStore();
-            
-            // Helper to get stores without async imports in the loop
             const getSocialStore = () => import('./social').then(m => m.useSocialStore());
             const getTasksStore = () => import('./tasks').then(m => m.useTasksStore());
             const getDataStore = () => import('./data').then(m => m.useDataStore());
             const getDiscussionsStore = () => import('./discussions').then(m => m.useDiscussionsStore());
 
-            // Process message type
             switch (data.type) {
                 case 'init_progress':
-                    // Update splash screen in real-time
                     loadingMessage.value = data.data.message;
-                    // Increment progress bar: we add a bit for every step until it hits 100
-                    if (loadingProgress.value < 95) {
-                        loadingProgress.value += 5;
-                    }
-                    if (data.data.is_error) {
-                        uiStore.addNotification(data.data.message, 'error');
-                    }
+                    if (loadingProgress.value < 95) loadingProgress.value += 5;
+                    if (data.data.is_error) uiStore.addNotification(data.data.message, 'error');
                     break;
-                case 'notification': 
-                    uiStore.addNotification(data.data.message, data.data.type || 'info', data.data.duration || 3000); 
+                case 'notification':
+                    uiStore.addNotification(data.data.message, data.data.type || 'info', data.data.duration || 3000);
                     break;
                 case 'new_post':
                     getSocialStore().then(s => s.handleNewPost(data.data));
@@ -240,35 +242,33 @@ export const useAuthStore = defineStore('auth', () => {
                         }
                     });
                     break;
-                case 'new_dm': 
+                case 'new_dm':
                     getSocialStore().then(s => s.handleNewDm(data.data));
                     if (user.value && data.data.sender_id !== user.value.id) {
                         audioChime.play().catch(() => {});
                         if ("Notification" in window && Notification.permission === "granted") {
-                             new Notification(`Message from ${data.data.sender_username}`, { body: data.data.content, icon: data.data.sender_icon || '/favicon.ico' });
+                            new Notification(`Message from ${data.data.sender_username}`, { body: data.data.content, icon: data.data.sender_icon || '/favicon.ico' });
                         }
                     }
                     break;
-                case 'new_comment': 
-                    getSocialStore().then(s => s.handleNewComment(data.data)); 
+                case 'new_comment':
+                    getSocialStore().then(s => s.handleNewComment(data.data));
                     break;
-                case 'new_friend_request': 
-                    getSocialStore().then(s => s.handleIncomingFriendRequest(data.data)); 
+                case 'new_friend_request':
+                    getSocialStore().then(s => s.handleIncomingFriendRequest(data.data));
                     break;
-                case 'friend_online': 
-                    uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon); 
+                case 'friend_online':
+                    uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon);
                     break;
-                case 'new_shared_discussion': 
+                case 'new_shared_discussion':
                     audioChime.play().catch(() => {});
                     getDiscussionsStore().then(async (s) => {
-                        await s.fetchSharedWithMe(); 
+                        await s.fetchSharedWithMe();
                         const isUpdate = data.data.update_type === 'permission_change';
                         const verb = isUpdate ? 'updated permissions for' : 'shared discussion';
                         uiStore.addNotification(
-                            `🎁 ${data.data.sender_username || data.data.from_user} ${verb}: '${data.data.discussion_title}'`, 
-                            'success',
-                            7000,
-                            false,
+                            `🎁 ${data.data.sender_username || data.data.from_user} ${verb}: '${data.data.discussion_title}'`,
+                            'success', 7000, false,
                             data.data.sender_username || data.data.from_user,
                             data.data.sender_icon
                         );
@@ -281,11 +281,7 @@ export const useAuthStore = defineStore('auth', () => {
                         if (s.currentDiscussionId) await s.fetchArtefacts(s.currentDiscussionId);
                         uiStore.addNotification(
                             data.data.message || `🎁 ${data.data.sender_username} shared an artefact: ${data.data.artefact_title}`,
-                            'success',
-                            7000,
-                            false,
-                            data.data.sender_username,
-                            data.data.sender_icon
+                            'success', 7000, false, data.data.sender_username, data.data.sender_icon
                         );
                     });
                     break;
@@ -296,11 +292,7 @@ export const useAuthStore = defineStore('auth', () => {
                         await m.useNotesStore().fetchNotes();
                         uiStore.addNotification(
                             data.data.message || `🎁 Research note received: ${data.data.title}`,
-                            'success',
-                            7000,
-                            false,
-                            data.data.sender_username,
-                            data.data.sender_icon
+                            'success', 7000, false, data.data.sender_username, data.data.sender_icon
                         );
                     });
                     break;
@@ -310,11 +302,7 @@ export const useAuthStore = defineStore('auth', () => {
                         await m.useSkillsStore().fetchSkills();
                         uiStore.addNotification(
                             data.data.message || `🎁 AI Skill received: ${data.data.title}`,
-                            'success',
-                            7000,
-                            false,
-                            data.data.sender_username,
-                            data.data.sender_icon
+                            'success', 7000, false, data.data.sender_username, data.data.sender_icon
                         );
                     });
                     break;
@@ -324,11 +312,7 @@ export const useAuthStore = defineStore('auth', () => {
                         await ds.fetchDataStores();
                         uiStore.addNotification(
                             data.data.message || `🎁 Data Store shared: ${data.data.datastore_name}`,
-                            'success',
-                            7000,
-                            false,
-                            data.data.sender_username,
-                            data.data.sender_icon
+                            'success', 7000, false, data.data.sender_username, data.data.sender_icon
                         );
                     });
                     break;
@@ -339,11 +323,7 @@ export const useAuthStore = defineStore('auth', () => {
                         await ds.fetchPersonalities();
                         uiStore.addNotification(
                             data.data.message || `🎁 AI Persona received: ${data.data.name}`,
-                            'success',
-                            7000,
-                            false,
-                            data.data.sender_username,
-                            data.data.sender_icon
+                            'success', 7000, false, data.data.sender_username, data.data.sender_icon
                         );
                     });
                     break;
@@ -361,8 +341,8 @@ export const useAuthStore = defineStore('auth', () => {
                         s.fetchAllUserArtefacts();
                     });
                     break;
-                case 'data_zone_processed': 
-                    getDiscussionsStore().then(s => s.handleDataZoneUpdate(data.data)); 
+                case 'data_zone_processed':
+                    getDiscussionsStore().then(s => s.handleDataZoneUpdate(data.data));
                     break;
                 case 'skill_saved':
                     import('./skills').then(s => s.useSkillsStore().fetchSkills());
@@ -374,19 +354,19 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'discussion_images_updated':
                     getDiscussionsStore().then(s => s.handleDiscussionImagesUpdated(data.data));
                     break;
-                case 'new_message_from_task': 
-                    getDiscussionsStore().then(s => s.handleNewMessageFromTask(data.data)); 
+                case 'new_message_from_task':
+                    getDiscussionsStore().then(s => s.handleNewMessageFromTask(data.data));
                     break;
                 case 'binding_setup_status':
                     import('./admin').then(m => {
                         m.useAdminStore().ttmSetupStatusMessage = data.data.message || '';
                     });
                     break;
-                case 'admin_broadcast': 
-                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); 
+                case 'admin_broadcast':
+                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender);
                     break;
-                case 'task_update': 
-                    getTasksStore().then(s => s.addTask(data.data)); 
+                case 'task_update':
+                    getTasksStore().then(s => s.addTask(data.data));
                     break;
                 case 'task_end': {
                     getTasksStore().then(ts => {
@@ -402,16 +382,16 @@ export const useAuthStore = defineStore('auth', () => {
                     });
                     break;
                 }
-                case 'settings_updated': 
-                    Promise.all([refreshUser(), fetchWelcomeInfo()]); 
+                case 'settings_updated':
+                    Promise.all([refreshUser(), fetchWelcomeInfo(), fetchSettingsPolicy()]);
                     break;
-                case 'bindings_updated': 
+                case 'bindings_updated':
                     getDataStore().then(ds => {
                         Promise.all([
-                            ds.fetchAvailableLollmsModels(), 
-                            ds.fetchAvailableTtiModels(), 
-                            ds.fetchAvailableTtsModels(), 
-                            ds.fetchAvailableSttModels(), 
+                            ds.fetchAvailableLollmsModels(),
+                            ds.fetchAvailableTtiModels(),
+                            ds.fetchAvailableTtsModels(),
+                            ds.fetchAvailableSttModels(),
                             refreshUser()
                         ]);
                     });
@@ -424,9 +404,7 @@ export const useAuthStore = defineStore('auth', () => {
                                 social.activeConversations[targetId].messages = (social.activeConversations[targetId].messages || []).filter(m => m.id !== data.data.message_id);
                             }
                         }
-                        if (typeof social.fetchConversations === 'function') {
-                            social.fetchConversations();
-                        }
+                        if (typeof social.fetchConversations === 'function') social.fetchConversations();
                     });
                     break;
                 case 'dm_reaction':
@@ -450,7 +428,6 @@ export const useAuthStore = defineStore('auth', () => {
             ws.value = null;
             if (heartbeatInterval) clearInterval(heartbeatInterval);
 
-            // Handle abnormal closures
             if (wasConnected) {
                 const now = Date.now();
                 if (now - lastConnectionLostTime > 10000) {
@@ -460,18 +437,14 @@ export const useAuthStore = defineStore('auth', () => {
                 useUiStore().addNotification('Connection lost', 'error');
             }
 
-            // Stop retrying if the closure implies an authentication failure (1008 Policy Violation)
-            // or if the token is already expired.
             if (event.code === 1008 || event.code === 4003 || isTokenExpired(token.value)) {
                 console.error("[WebSocket] Permanent Auth Failure (Code " + event.code + "). Clearing session.");
                 useUiStore().addNotification('Your session has expired or the security key changed. Please log in again.', 'error', 10000);
-                clearAuthData(); // Force logout so user can re-authenticate
+                clearAuthData();
                 return;
             }
 
-            // Normal close (1000) doesn't need retry
             if (event.code !== 1000) {
-                // Implementation of jittered/incremental backoff to prevent bombardment
                 const retryDelay = wasConnected ? 5000 : 15000;
                 reconnectTimeout = setTimeout(connectWebSocket, retryDelay);
             }
@@ -490,6 +463,7 @@ export const useAuthStore = defineStore('auth', () => {
             loadingProgress.value = 10;
             loadingMessage.value = 'Verifying session...';
             await refreshUser();
+            await fetchSettingsPolicy();
 
             if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
 
@@ -497,7 +471,6 @@ export const useAuthStore = defineStore('auth', () => {
             loadingMessage.value = 'Establishing connection...';
             connectWebSocket();
 
-            // Access stores lazily to prevent initial bundle bloat
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
             const { useSocialStore } = await import('./social');
@@ -508,7 +481,6 @@ export const useAuthStore = defineStore('auth', () => {
             const socialStore = useSocialStore();
             const memoriesStore = useMemoriesStore();
 
-            // 1. Discussions
             loadingProgress.value = 30;
             loadingMessage.value = 'Syncing your conversations...';
             await Promise.all([
@@ -517,17 +489,14 @@ export const useAuthStore = defineStore('auth', () => {
                 discussionsStore.fetchDiscussionGroups()
             ]);
 
-            // 2. AI Engines & Models (The heavy part)
             loadingProgress.value = 50;
             loadingMessage.value = 'Loading AI Models & Personalities...';
             await dataStore.loadAllInitialData();
 
-            // 3. Personal Knowledge & Memory
             loadingProgress.value = 75;
             loadingMessage.value = 'Restoring long-term memory...';
             await memoriesStore.fetchMemories();
 
-            // 4. Social & Connections
             loadingProgress.value = 85;
             loadingMessage.value = 'Connecting with friends...';
             await Promise.allSettled([
@@ -542,7 +511,6 @@ export const useAuthStore = defineStore('auth', () => {
                 const uiStore = useUiStore();
                 const currentPath = window.location.pathname;
 
-                // Only redirect/create discussion if the user is on the root path '/'
                 if (currentPath === '/' || currentPath === '') {
                     let targetView = user.value.first_page;
                     uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
@@ -560,8 +528,6 @@ export const useAuthStore = defineStore('auth', () => {
                         await discussionsStore.createNewDiscussion();
                     }
                 } else {
-                    // When on a specific studio route (e.g. /image-studio, /notebooks, /settings),
-                    // quietly sync the last active discussion ID in the store without hijacking the route
                     const lastId = user.value.last_discussion_id;
                     if (lastId && discussionsStore.discussions[lastId]) {
                         discussionsStore.currentDiscussionId = lastId;
@@ -583,7 +549,6 @@ export const useAuthStore = defineStore('auth', () => {
         const isAppSso = path.startsWith('/app/');
 
         if (isResetPassword) {
-            // Isolate reset password page: clear any stale token and exit immediately without network calls
             user.value = null;
             token.value = null;
             localStorage.removeItem('lollms-token');
@@ -602,7 +567,7 @@ export const useAuthStore = defineStore('auth', () => {
         loadingMessage.value = 'Waking up the hamsters...';
 
         await Promise.all([fetchWelcomeInfo(), fetchSsoClientConfig()]);
-        
+
         loadingProgress.value = 10;
         loadingMessage.value = 'Checking credentials...';
 
@@ -620,40 +585,38 @@ export const useAuthStore = defineStore('auth', () => {
 
     async function login(username, password) {
         try {
-          const params = new URLSearchParams();
-          params.append('username', username);
-          params.append('password', password);
+            const params = new URLSearchParams();
+            params.append('username', username);
+            params.append('password', password);
 
-          const response = await apiClient.post(
-            '/api/auth/token',
-            params,
-            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-          );
+            const response = await apiClient.post(
+                '/api/auth/token',
+                params,
+                { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+            );
 
-          // Check for 2FA / Email Verification Requirement
-          if (response.data.email_verification_required) {
-              return {
-                  email_verification_required: true,
-                  temp_token: response.data.temp_token,
-                  email_hint: response.data.email_hint
-              };
-          }
+            if (response.data.email_verification_required) {
+                return {
+                    email_verification_required: true,
+                    temp_token: response.data.temp_token,
+                    email_hint: response.data.email_hint
+                };
+            }
 
-          token.value = response.data.access_token;
-          localStorage.setItem('lollms-token', token.value);
+            token.value = response.data.access_token;
+            localStorage.setItem('lollms-token', token.value);
 
-          useUiStore().closeModal();
-          isAuthenticating.value = true;
-          await fetchUserAndInitialData();
-          isAuthenticating.value = false;
+            useUiStore().closeModal();
+            isAuthenticating.value = true;
+            await fetchUserAndInitialData();
+            isAuthenticating.value = false;
 
-          return { email_verification_required: false };
-
+            return { email_verification_required: false };
         } catch (error) {
-          isAuthenticating.value = false;
-          const msg = error.response?.data?.detail || 'Login failed.';
-          useUiStore().addNotification(msg, 'error');
-          throw error;
+            isAuthenticating.value = false;
+            const msg = error.response?.data?.detail || 'Login failed.';
+            useUiStore().addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -691,9 +654,11 @@ export const useAuthStore = defineStore('auth', () => {
             throw error;
         }
     }
+
     function clearAuthData() {
         user.value = null;
         token.value = null;
+        settingsPolicy.value = {};
         localStorage.removeItem('lollms-token');
         disconnectWebSocket();
     }
@@ -703,6 +668,13 @@ export const useAuthStore = defineStore('auth', () => {
 
         await apiClient.post('/api/auth/logout').catch(() => {});
         clearAuthData();
+
+        const { useDiscussionsStore } = await import('./discussions');
+        const { useDataStore } = await import('./data');
+        const { useSocialStore } = await import('./social');
+        const { useTasksStore } = await import('./tasks');
+        const { useMemoriesStore } = await import('./memories');
+        const { useSkillsStore } = await import('./skills');
 
         useDiscussionsStore().$reset();
         useDataStore().$reset();
@@ -714,7 +686,7 @@ export const useAuthStore = defineStore('auth', () => {
         useUiStore().closeModal();
         window.location.href = '/';
     }
-    
+
     async function ssoLoginWithPassword(clientId, username, password) {
         await login(username, password);
         return await ssoAuthorizeApplication(clientId);
@@ -726,13 +698,13 @@ export const useAuthStore = defineStore('auth', () => {
         const response = await apiClient.post('/api/sso/authorize', formData);
         return { access_token: response.data.access_token, redirect_uri: response.data.sso_redirect_uri };
     }
-    
+
     async function register(registrationData) {
         try {
             const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
             const isAdminExists = adminStatusResponse.data.admin_exists;
             const endpoint = isAdminExists ? '/api/auth/register' : '/api/auth/create_first_admin';
-            const response = await apiClient.post(endpoint, registrationData);
+            await apiClient.post(endpoint, registrationData);
 
             if (!isAdminExists) await login(registrationData.username, registrationData.password);
             else {
@@ -748,26 +720,21 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = { ...user.value, ...response.data };
         useUiStore().addNotification('Profile updated.', 'success');
     }
-    
-    // --- Helper to map option key to preference key ---
-    function optionToPrefKey(opt) {
-        const map = {
-            'image_generation': 'image_generation_enabled',
-            'image_editing': 'image_editing_enabled',
-            'slide_maker': 'office_tools_enabled',
-            'memory': 'memory_enabled',
-            'note_generation': 'note_generation_enabled',
-            'skills_building': 'skills_building_enabled',
-            'skills_library': 'skills_library_enabled',
-            'web_search': 'web_search_enabled',
-            'inline_widgets': 'inline_widgets_enabled',
-            'form_building': 'form_building_enabled',
-            'artefacts': 'artefacts_enabled'
-        };
-        return map[opt];
-    }
 
     async function updateUserPreferences(preferences, notify = true) {
+        // Admin Settings Policy guard: strip any locked/forced field so a stale
+        // client can never overwrite an admin pin. Warn once if an attempt was blocked.
+        const uiStoreGuard = useUiStore();
+        const blocked = Object.keys(preferences).filter((k) => isFieldLocked(k));
+        if (blocked.length > 0) {
+            for (const key of blocked) delete preferences[key];
+            uiStoreGuard.addNotification(
+                `This setting is managed by an administrator and cannot be changed: ${blocked.join(', ')}`,
+                'warning'
+            );
+            if (Object.keys(preferences).length === 0) return;
+        }
+
         if (user.value) {
             let isActualChange = false;
             for (const [key, value] of Object.entries(preferences)) {
@@ -779,7 +746,7 @@ export const useAuthStore = defineStore('auth', () => {
                             break;
                         }
                     } catch (e) { isActualChange = true; break; }
-                } 
+                }
                 else if (currentVal !== value) {
                     isActualChange = true;
                     break;
@@ -798,26 +765,16 @@ export const useAuthStore = defineStore('auth', () => {
         try {
             const response = await apiClient.put('/api/auth/me', preferences);
             if (user.value) {
-                // Field-wise merge: the server response is authoritative for the
-                // fields it returns, but an explicitly-set client value must
-                // never be silently clobbered by a response that omits the
-                // field, returns null, or re-defaults it. This protects
-                // *string* preferences (e.g. `ttv_binding_model_name`) from
-                // being reverted to null by an intermediate backend that
-                // doesn't yet persist the field for the just-written row.
                 const merged = { ...user.value, ...response.data };
                 for (const [key, value] of Object.entries(preferences)) {
                     const serverVal = response.data?.[key];
                     if (serverVal === undefined || serverVal === null) {
-                        // Server didn't echo the value we just wrote — keep ours.
                         merged[key] = value;
                     } else if (
                         serverVal !== value &&
                         typeof value !== 'object' &&
                         value !== null
                     ) {
-                        // Server returned a concrete but different scalar value.
-                        // Trust the client (matches the boolean-drift policy).
                         console.warn('[auth] preference drift:', key, 'sent', value, 'server returned', serverVal);
                         merged[key] = value;
                     }
@@ -856,6 +813,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     return {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
+        settingsPolicy, fieldPolicy, isFieldLocked, isFieldForced, fetchSettingsPolicy,
         loadingMessage, loadingProgress, funFact, welcomeText, welcomeSlogan, welcome_logo_url, welcome_fun_fact_color, welcome_fun_fact_category, wsConnected,
         ssoClientConfig, isFetchingFunFact,
         latex_builder_enabled, export_to_txt_enabled, export_to_markdown_enabled, export_to_html_enabled, export_to_pdf_enabled, export_to_docx_enabled, export_to_xlsx_enabled, export_to_pptx_enabled,

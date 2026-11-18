@@ -44,6 +44,7 @@ const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
 const EmailMarketing = defineAsyncComponent(() => import('./EmailMarketing.vue'));
 const LogsAndAnalysis = defineAsyncComponent(() => import('./LogsAndAnalysis.vue'));
+const SettingsPolicyManagement = defineAsyncComponent(() => import('./SettingsPolicyManagement.vue'));
 
 // Zoos
 const PersonalityZoo = defineAsyncComponent(() => import('./zoos/PersonalitiesManagement.vue'));
@@ -118,6 +119,7 @@ function handleDashboardNavigation(payload) {
         <AiBotSettings v-else-if="activeTab === 'ai_bot'" />
 
         <!-- 7. GLOBAL SETTINGS -->
+        <SettingsPolicyManagement v-else-if="activeTab === 'settings_policy'" />
         <HttpsSettings v-else-if="activeTab === 'https_settings' || activeTab === 'https'" />
         <WelcomeSettings v-else-if="activeTab === 'welcome_settings' || activeTab === 'welcome'" />
         <EmailSettings v-else-if="activeTab === 'email' || activeTab === 'email_settings'" />

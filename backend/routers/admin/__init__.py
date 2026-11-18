@@ -15,6 +15,7 @@ from .moderation_management import router as moderation_router
 from .services_management import router as services_management_router
 from .email_marketing import router as email_marketing_router
 from .security_management import router as security_router # ENSURED
+from .settings_policy import router as settings_policy_router
 
 # This is the main router that will be imported by the main application.
 # It aggregates all the theme-based admin routers.
@@ -38,3 +39,4 @@ admin_router.include_router(moderation_router)
 admin_router.include_router(services_management_router)
 admin_router.include_router(email_marketing_router)
 admin_router.include_router(security_router)
+admin_router.include_router(settings_policy_router)
