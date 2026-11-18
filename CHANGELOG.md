@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-18 17:29]
+
+- Fixes missing UI components and optimizes frontend assets.
+
 ## [2026-11-18 16:14]
 
 - feat: add generation metrics and user stats functionality
