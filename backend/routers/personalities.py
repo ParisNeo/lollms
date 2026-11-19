@@ -335,36 +335,114 @@ Return ONLY the newly revised, high-fidelity system prompt text. Do not wrap in 
         trace_exception(e)
         raise HTTPException(status_code=500, detail=str(e))
 
+def _extract_icon_bytes(raw) -> bytes:
+    """Normalize any TTI client return shape into raw image bytes.
+
+    Mirrors the extraction used by the working image-studio pipeline: the TTI
+    binding may return ``bytes``, a base64 ``str`` (with or without a
+    ``data:`` prefix), a ``list`` (take the first), or a ``dict`` carrying the
+    image under ``image`` / ``images`` / ``b64_json`` / ``data``. Handling only
+    ``str``/``list`` (the previous behaviour) left dict returns unconverted and
+    produced corrupted output.
+    """
+    if raw is None:
+        raise ValueError("Image generation returned no data.")
+    # Unwrap lists (some TTI clients return a list of results).
+    if isinstance(raw, (list, tuple)):
+        if not raw:
+            raise ValueError("Image generation returned an empty list.")
+        return _extract_icon_bytes(raw[0])
+    # Unwrap dicts (OpenAI-style / lollms-style payloads).
+    if isinstance(raw, dict):
+        for key in ("image", "images", "b64_json", "data", "image_base64"):
+            if key in raw and raw[key]:
+                value = raw[key]
+                if isinstance(value, (list, tuple)):
+                    value = value[0] if value else None
+                if isinstance(value, dict):
+                    for sub in ("b64_json", "image", "data"):
+                        if value.get(sub):
+                            return _extract_icon_bytes(value[sub])
+                    raise ValueError("Unrecognized nested image payload.")
+                return _extract_icon_bytes(value)
+        raise ValueError("Unrecognized image payload structure.")
+    if isinstance(raw, str):
+        if raw.startswith("data:"):
+            raw = raw.split(",", 1)[1]
+        try:
+            return base64.b64decode(raw)
+        except Exception as exc:
+            raise ValueError(f"Could not decode base64 image: {exc}") from exc
+    if isinstance(raw, (bytes, bytearray)):
+        return bytes(raw)
+    raise ValueError(f"Unsupported image data type: {type(raw).__name__}")
+
+
 @personalities_router.post("/generate_icon", status_code=status.HTTP_200_OK)
 async def generate_icon(
     payload: GenerateIconRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
+    """Generate a crisp 128px persona icon, matching the image-studio quality path.
+
+    The image studio refines the user prompt with the LLM before rendering and
+    passes a negative prompt to the TTI binding. The old icon endpoint skipped
+    both, sending a terse persona phrase straight to the diffusion model — the
+    root cause of the "messed up" icons.
+    """
     try:
-        lc = build_lollms_client_from_params(username=current_user.username, load_llm=False, load_tti=True)
+        lc = build_lollms_client_from_params(username=current_user.username, load_llm=True, load_tti=True)
         if not lc.tti:
             raise HTTPException(status_code=400, detail="TTI binding is not configured.")
-            
-        img_bytes = lc.tti.generate_image(payload.prompt, width=512, height=512)
-        if not img_bytes:
-            raise HTTPException(status_code=500, detail="Image generation returned empty data.")
-            
-        if isinstance(img_bytes, list):
-            img_bytes = img_bytes[0]
-            
-        if isinstance(img_bytes, str):
-            if img_bytes.startswith("data:"):
-                img_bytes = img_bytes.split(",", 1)[1]
-            img_bytes = base64.b64decode(img_bytes)
 
+        # 1) Refine the terse persona phrase into a detailed icon prompt.
+        refined_prompt = payload.prompt
+        if lc.llm:
+            refine_system = (
+                "You are an expert prompt engineer for text-to-image models. "
+                "Convert the user's description into a single detailed, high-quality "
+                "prompt for a clean profile icon / avatar: a centered subject, "
+                "simple uncluttered background, professional digital art, crisp "
+                "details, good lighting. Output ONLY the prompt, no quotes, no extra text."
+            )
+            try:
+                refined = lc.generate_text(
+                    f"Persona description: {payload.prompt}\n\nIcon prompt:",
+                    system_prompt=refine_system,
+                    max_new_tokens=160,
+                )
+                if isinstance(refined, str) and refined.strip():
+                    refined_prompt = refined.strip().strip('"').strip()
+            except Exception as refine_err:
+                # Non-fatal: fall back to the raw prompt rather than failing.
+                trace_exception(refine_err)
+
+        # 2) Render. A negative prompt steers away from the common bad outputs
+        #    (text, watermarks, cluttered scenes) that make icons look broken.
+        negative_prompt = "text, watermark, logo, blurry, low quality, deformed, cluttered background, multiple subjects"
+        img_bytes = lc.tti.generate_image(
+            refined_prompt, width=512, height=512, negative_prompt=negative_prompt
+        )
+
+        # 3) Robust extraction (bytes / base64 / list / dict).
+        img_bytes = _extract_icon_bytes(img_bytes)
+
+        # 4) Square-crop then downscale to a tight 128px PNG icon.
         with Image.open(io.BytesIO(img_bytes)) as img:
             if img.mode not in ("RGB", "RGBA"):
-                img = img.convert("RGBA")
+                img = img.convert("RGB")
+            width, height = img.size
+            side = min(width, height)
+            left = (width - side) // 2
+            top = (height - side) // 2
+            img = img.crop((left, top, left + side, top + side))
             img.thumbnail((128, 128))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             icon_base64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
             return {"icon_base64": icon_base64}
+    except HTTPException:
+        raise
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -631,6 +709,23 @@ def revoke_share(link_id: int,
     db.commit()
 
 
+def _enforce_capability(name: str, message: str) -> None:
+    """Raise 403 when an admin-disabled capability is off. Missing policy module
+    or missing capability key means 'not restricted' (fail-open), matching the
+    pre-policy behaviour so this remains backward compatible on older installs.
+    """
+    try:
+        from backend.user_setting_policies import get_capability
+    except Exception:
+        return
+    try:
+        allowed = bool(get_capability(name, default=True))
+    except Exception:
+        return
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
+
+
 def _studio_write_path(scope: str, handbag_name: str, db_user: DBUser,
                        db: Session) -> Path:
     """Resolve a handbag for mutation: personal = own folder, global = admin only."""
@@ -763,6 +858,10 @@ def update_handbag_tool(
     db: Session = Depends(get_db)
 ):
     path = _studio_write_path(scope, handbag_name, db_user, db)
+    _enforce_capability(
+        "personality_tools_editable",
+        "Editing personality tools is disabled by the administrator.",
+    )
     write_handbag_tool(path, filename, payload.content)
     return {"status": "ok", "filename": filename}
 
@@ -791,8 +890,162 @@ def create_handbag_skill(
     db: Session = Depends(get_db)
 ):
     path = _studio_write_path(scope, handbag_name, db_user, db)
+    _enforce_capability(
+        "personality_skills_editable",
+        "Editing personality skills is disabled by the administrator.",
+    )
     write_handbag_skill(path, payload.name, payload.content)
     return {"status": "ok", "name": payload.name}
+
+
+@personalities_router.get("/studio/skills-library")
+def list_skills_library(
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """List installable skills from the shared skills library.
+
+    The library is the UNION of two sources so the "From Library" picker never
+    shows empty while the user actually has skills:
+
+      * **DB skills** the caller can see (own + system), served by
+        ``GET /api/skills`` and stored in the ``skills`` table. ``source`` is
+        ``"db"``; ``name`` is the display name and ``stem`` is a filesystem-safe
+        slug derived from it.
+      * **Filesystem skills** under ``<data_root>/skills`` (``.md`` only),
+        ``source`` is ``"file"``.
+
+    Entries are de-duplicated by their resolved output filename (``stem``) so
+    importing the same skill from either source targets one file. The DB wins
+    on collision because it usually carries richer content.
+    """
+    from backend.db.models.skill import Skill as DBSkill
+    from sqlalchemy import or_
+
+    items: List[Dict[str, Any]] = []
+    seen_stems = set()
+
+    def _slug_stem(raw: str) -> str:
+        s = re.sub(r"[^A-Za-z0-9_\-]+", "_", str(raw or "")).strip("_ ")
+        return s or "skill"
+
+    # 1) DB-backed skills visible to this user (own + system).
+    try:
+        rows = (
+            db.query(DBSkill)
+            .filter(or_(DBSkill.owner_user_id == db_user.id,
+                        DBSkill.owner_user_id.is_(None)))
+            .order_by(DBSkill.name)
+            .all()
+        )
+        for row in rows:
+            stem = _slug_stem(row.name)
+            if stem in seen_stems:
+                continue
+            seen_stems.add(stem)
+            items.append({
+                "name": row.name,
+                "stem": stem,
+                "source": "db",
+                "description": row.description or "",
+                "category": row.category or "",
+            })
+    except Exception as exc:
+        trace_exception(exc)
+
+    # 2) Filesystem skills under <data_root>/skills.
+    lib_root = _data_root() / "skills"
+    try:
+        if lib_root.is_dir():
+            for p in sorted(lib_root.iterdir(), key=lambda x: x.name.lower()):
+                if not (p.is_file() and p.suffix.lower() == ".md"):
+                    continue
+                if p.stem in seen_stems:
+                    continue
+                seen_stems.add(p.stem)
+                items.append({
+                    "name": p.name,
+                    "stem": p.stem,
+                    "source": "file",
+                    "description": "",
+                    "category": "",
+                })
+    except Exception as exc:
+        trace_exception(exc)
+
+    items.sort(key=lambda x: (x.get("name") or "").lower())
+    return {"skills": items}
+
+
+@personalities_router.post("/studio/handbags/{scope}/{handbag_name}/skills/import")
+async def import_skill_file(
+    scope: str,
+    handbag_name: str,
+    file: UploadFile = File(...),
+    name: Optional[str] = Query(None),
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """Import a single ``SKILL.md`` into a handbag's ``skills/`` folder.
+
+    * Markdown only (rejects anything else) — skill bodies are prose+code and
+      must never be an executable or opaque binary.
+    * The skill name is inferred from YAML frontmatter ``name:`` when present;
+      if absent we fall back to the frontend-supplied ``name``, then to the
+      uploaded filename stem. The caller is expected to have prompted the user
+      for a name when frontmatter had none.
+    * Refuses to overwrite an existing skill with the same resolved name.
+    """
+    if not (file.filename or "").lower().endswith(".md"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Only Markdown (.md) skill files are allowed")
+    path = _studio_write_path(scope, handbag_name, db_user, db)
+    _enforce_capability(
+        "personality_skills_editable",
+        "Editing personality skills is disabled by the administrator.",
+    )
+
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Skill file must be UTF-8 text")
+
+    resolved = None
+    body = text
+    # Parse simple YAML frontmatter (--- ... ---) for a `name:` key.
+    if text.lstrip().startswith("---"):
+        stripped = text.lstrip()
+        end = stripped.find("\n---", 3)
+        if end != -1:
+            frontmatter = stripped[3:end]
+            body = stripped[end + 4:].lstrip("\n")
+            for line in frontmatter.splitlines():
+                if line.strip().lower().startswith("name:"):
+                    resolved = line.split(":", 1)[1].strip().strip("\"'")
+                    break
+    if not resolved and name:
+        resolved = name.strip()
+    if not resolved:
+        resolved = Path(file.filename).stem
+
+    # Force a .md suffix and strip path separators to prevent traversal.
+    safe = re.sub(r"[^A-Za-z0-9_\-\. ]", "_", resolved).strip().replace("/", "_")
+    if not safe:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Could not determine a valid skill name")
+    if not safe.lower().endswith(".md"):
+        safe += ".md"
+
+    skills_dir = path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    target = skills_dir / safe
+    if target.exists():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=f"A skill named '{safe}' already exists")
+    target.write_text(body, encoding="utf-8")
+    return {"status": "ok", "name": safe}
 
 
 @personalities_router.post("/studio/handbags/{scope}/{handbag_name}/skills/from-library")
@@ -801,13 +1054,57 @@ def add_skill_from_library(
     db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
+    """Copy a library skill into this handbag's ``skills/`` folder.
+
+    Resolution order (first hit wins) so the picker works whether the skill
+    lives on disk or only in the DB:
+
+      1. Filesystem ``<data_root>/skills/<name>`` (legacy export path).
+      2. DB skill by exact case-insensitive ``name`` visible to the caller
+         (own + system) — written to ``skills/<slug(name)>.md``.
+    """
+    from backend.db.models.skill import Skill as DBSkill
+    from sqlalchemy import func, or_
+
     path = _studio_write_path(scope, handbag_name, db_user, db)
+    _enforce_capability(
+        "personality_skills_editable",
+        "Editing personality skills is disabled by the administrator.",
+    )
     lib_root = _data_root() / "skills"
+
+    # 1) Filesystem copy
     try:
         copy_skill_from_library(path, payload.name, lib_root)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    return {"status": "ok", "name": payload.name}
+        return {"status": "ok", "name": payload.name, "source": "file"}
+    except ValueError:
+        pass  # fall through to DB lookup
+
+    # 2) DB fallback
+    row = (
+        db.query(DBSkill)
+        .filter(
+            func.lower(DBSkill.name) == func.lower(payload.name),
+            or_(DBSkill.owner_user_id == db_user.id,
+                DBSkill.owner_user_id.is_(None)),
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404,
+                            detail=f"Skill '{payload.name}' not found in library")
+
+    safe = re.sub(r"[^A-Za-z0-9_\-]+", "_", row.name).strip("_ ") or "skill"
+    if not safe.lower().endswith(".md"):
+        safe += ".md"
+    skills_dir = path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    target = skills_dir / safe
+    if target.exists():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail=f"A skill named '{safe}' already exists")
+    target.write_text(row.content or "", encoding="utf-8")
+    return {"status": "ok", "name": safe, "source": "db"}
 
 
 @personalities_router.post("/studio/handbags/{scope}/{handbag_name}/skills/{skill_name}/to-library")
@@ -863,6 +1160,53 @@ def generate_tool_endpoint(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@personalities_router.get("/studio/handbags/{scope}/{handbag_name}/export")
+def export_handbag_zip(
+    scope: str, handbag_name: str,
+    owner_id: Optional[int] = None,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """Stream a handbag (persona) as a self-contained ZIP archive.
+
+    Reads through ``resolve_handbag_path`` so ACL is enforced (personal = own,
+    global = any reader, shared = owner/recipient). The archive keeps the
+    handbag directory layout intact (``handbag.yaml``, ``SOUL.md``, ``skills/``,
+    ``tools/``, ``databases/``, ``icon.*`` …) so the same file round-trips via
+    ``POST /studio/upload`` on any LoLLMs instance — including one where the
+    persona has skills/tools the current user cannot edit.
+    """
+    path = resolve_handbag_path(scope, handbag_name, db_user,
+                                owner_id=owner_id, db=db)
+    if path is None or not path.is_dir():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="Handbag not found or access denied")
+
+    archive_root = re.sub(r"[^A-Za-z0-9_\-\. ]", "_", path.name).strip() or "personality"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for entry in path.rglob("*"):
+            if not entry.is_file():
+                continue
+            # Path traversal guard: rglob can only return children of `path`,
+            # but keep an explicit check so a symlink never escapes the tree.
+            try:
+                rel = entry.relative_to(path)
+            except ValueError:
+                continue
+            if any(part in ("..", "") for part in rel.parts):
+                continue
+            zf.write(entry, arcname=str(Path(archive_root) / rel))
+    buffer.seek(0)
+
+    filename = f"personality_{archive_root}.zip"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @personalities_router.post("/studio/upload", status_code=status.HTTP_201_CREATED)

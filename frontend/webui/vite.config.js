@@ -41,6 +41,13 @@ export default defineConfig({
         warn(warning);
       },
       output: {
+        // Stable (non-hashed) filenames so `git pull` overwrites the same
+        // files instead of piling up a new `*-<hash>.js` chunk per release.
+        // The trade-off (a stale browser cache after an upgrade) is handled
+        // by the `no-cache` Cache-Control middleware in `backend/routers/ui.py`.
+        entryFileNames: 'assets/[name].js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/[name].[ext]',
         // Advanced manual chunking to isolate heavy libraries
         manualChunks(id) {
           if (id.includes('node_modules')) {

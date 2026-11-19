@@ -45,6 +45,17 @@ logger = logging.getLogger(__name__)
 POLICY_CONFIG_KEY = "user_setting_policies"
 POLICY_CATEGORY = "User Settings Policy"
 
+# Capability flags that are NOT backed by a ``User`` ORM column but are still
+# governable by administrators. These are enforced in router code (e.g.
+# ``backend/routers/personalities.py`` gates the persona skill/tool editors on
+# them) rather than being stored per-user, so they must be injected into the
+# registry explicitly — otherwise ``save_policies`` silently drops them (the
+# admin toggle would appear to work but never take effect).
+_INJECTED_BOOLEAN_FLAGS = frozenset({
+    "personality_skills_editable",
+    "personality_tools_editable",
+})
+
 # Columns that are NEVER part of the user-settings policy matrix.
 # These are identity, credentials, security tokens, secrets, or system-managed
 # bookkeeping that must only be changed by dedicated flows.
@@ -68,6 +79,17 @@ _NON_MANAGED_COLUMNS = frozenset({
     "ttv_binding_model_name", "ttv_models_config",
     "safe_store_vectorizer", "active_personality_id", "active_voice_id",
     "last_discussion_id",
+})
+
+# Capability flags that are NOT backed by a ``User`` ORM column but are still
+# governable by administrators. These are enforced in router code (e.g.
+# ``backend/routers/personalities.py`` gates the persona skill/tool editors on
+# them) rather than being stored per-user, so they must be injected into the
+# registry explicitly — otherwise ``save_policies`` silently drops them (the
+# admin toggle would appear to work but never take effect).
+_INJECTED_BOOLEAN_FLAGS = frozenset({
+    "personality_skills_editable",
+    "personality_tools_editable",
 })
 
 # Columns whose values are lists/objects (JSON columns) — surfaced separately in
@@ -216,6 +238,9 @@ _GROUP_MEMBERSHIP: Dict[str, str] = {
     "discussion_sorting_order": "appearance",
     "first_page": "appearance",
     "auto_title": "appearance",
+    # personality studio capabilities (not User columns — injected explicitly)
+    "personality_skills_editable": "skills",
+    "personality_tools_editable": "tools",
     # misc / profile-adjacent but safe to expose
     "preferred_name": "misc",
     "data_zone": "misc",
@@ -296,6 +321,20 @@ def get_manageable_settings() -> Dict[str, Dict[str, Any]]:
             "group": group,
             "group_label": group_labels.get(group, group.title()),
             "nullable": bool(column.nullable),
+        }
+
+    # Inject non-column capability flags so they are governable + persisted.
+    for key in _INJECTED_BOOLEAN_FLAGS:
+        if key in registry:
+            continue
+        group = _GROUP_MEMBERSHIP.get(key, "misc")
+        registry[key] = {
+            "key": key,
+            "label": key.replace("_", " ").replace("enable ", "").strip().title(),
+            "type": "boolean",
+            "group": group,
+            "group_label": group_labels.get(group, group.title()),
+            "nullable": False,
         }
 
     return registry

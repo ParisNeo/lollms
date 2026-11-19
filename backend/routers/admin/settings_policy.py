@@ -145,6 +145,9 @@ _FIELD_LABELS = {
     "herd_mode_enabled": "Herd Mode",
     "scheduler_enabled": "Task Scheduler",
     "street_view_enabled": "Street View",
+    # Personality Studio capabilities (injected registry flags, not User columns).
+    "personality_skills_editable": "Personality Skills Editable",
+    "personality_tools_editable": "Personality Tools Editable",
 }
 
 _TYPE_OVERRIDES = {
@@ -166,6 +169,14 @@ _ENUM_CHOICES = {
 }
 
 
+# Capability flags that live outside the User ORM columns but are still governed
+# by admins (enforced in router code, not stored per-user, hence not a column).
+_INJECTED_ADMIN_FLAGS = (
+    "personality_skills_editable",
+    "personality_tools_editable",
+)
+
+
 def _infer_category(name: str) -> str:
     """Group related fields by prefix for a cleaner UI."""
     if name.startswith(("image_", "tti_", "iti_")):
@@ -176,6 +187,8 @@ def _infer_category(name: str) -> str:
         return "Web & Workspace"
     if name.startswith(("memory", "enable_episodic", "enable_deep_memory")):
         return "Memory"
+    if name.startswith("personality_"):
+        return "Personality Studio"
     if name.startswith(("skills_", "enable_skill", "enable_toolsmith", "enable_code", "allow_dynamic")):
         return "Skills & Tools"
     if name.startswith(("enable_", "auto_", "artefacts_", "inline_widgets", "form_building", "note_generation")):
@@ -289,6 +302,20 @@ def _build_field_catalog() -> List[PolicyField]:
                 choices=_ENUM_CHOICES.get(name),
                 description=field_info.description or "",
             )
+
+    # Inject non-column capability flags (mirror of user_setting_policies).
+    # Without this the admin matrix never shows them, so they can't be toggled.
+    for injected in _INJECTED_ADMIN_FLAGS:
+        if injected in catalog_by_name:
+            continue
+        catalog_by_name[injected] = PolicyField(
+            field_name=injected,
+            label=_FIELD_LABELS.get(injected, injected.replace("_", " ").title()),
+            category="Personality Studio",
+            type="boolean",
+            choices=None,
+            description="",
+        )
 
     catalog = list(catalog_by_name.values())
     catalog.sort(key=lambda f: (f.category, f.label))

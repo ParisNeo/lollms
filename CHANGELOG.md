@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-19 21:38]
+
+- feat: add field labels for settings policies and personality refinement features
+
 ## [2026-11-18 23:03]
 
 - refactor(frontend): update discussion layout, settings, and modals

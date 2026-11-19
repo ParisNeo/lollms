@@ -117,6 +117,7 @@ const isRefreshingTab = ref(false);
 const uploadingMessage = ref('Processing files...');
 const artefactFileInput = ref(null);
 const bundleFileInput = ref(null);
+const personalityImportInput = ref(null);
 const currentUploadPdfMode = ref('text_images');
 
 async function handleRefresh() {
@@ -392,6 +393,71 @@ async function handleSelectPersonality(personality) {
 
 function handleEditPersonality(personality) {
     uiStore.openModal('personalityEditor', { personality });
+}
+
+function triggerPersonalityImport() {
+    personalityImportInput.value?.click();
+}
+
+async function handlePersonalityImport(event) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+        uiStore.addNotification('Only ZIP personality archives are supported.', 'warning');
+        return;
+    }
+    const form = new FormData();
+    form.append('file', file);
+    try {
+        const res = await apiClient.post('/api/personalities/studio/upload', form, {
+            params: { scope: 'personal' },
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        const installedName = res?.data?.handbag_name;
+        await dataStore.fetchPersonalities();
+        uiStore.addNotification(
+            installedName ? `Personality "${installedName}" imported.` : 'Personality imported.',
+            'success'
+        );
+    } catch (e) {
+        uiStore.addNotification(e?.response?.data?.detail || 'Import failed.', 'error');
+    }
+}
+
+async function handleExportPersonality(personality) {
+    if (!personality) return;
+    const scope = personality.scope || 'personal';
+    const handbagName = personality.handbag_name;
+    if (!handbagName) {
+        uiStore.addNotification('Cannot export: missing personality identifier.', 'warning');
+        return;
+    }
+    const params = {};
+    if (scope === 'shared' && personality.owner_id != null) params.owner_id = personality.owner_id;
+    try {
+        const response = await apiClient.get(
+            `/api/personalities/studio/handbags/${scope}/${encodeURIComponent(handbagName)}/export`,
+            { params, responseType: 'blob' }
+        );
+        const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/zip' }));
+        const link = document.createElement('a');
+        link.href = url;
+        let filename = `personality_${handbagName}.zip`;
+        const cd = response.headers?.['content-disposition'];
+        if (cd) {
+            const m = cd.match(/filename="?([^"]+)"?/);
+            if (m) filename = m[1];
+        }
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        uiStore.addNotification(`"${personality.name}" exported.`, 'success');
+    } catch (e) {
+        uiStore.addNotification(e?.response?.data?.detail || 'Export failed.', 'error');
+    }
 }
 
 const filteredNewsArticles = computed(() => {
@@ -700,6 +766,7 @@ function handleCopyDiscussionMarkdown() {
     >
         <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
         <input type="file" ref="bundleFileInput" @change="handleBundleImport" accept=".json" class="hidden">
+        <input type="file" ref="personalityImportInput" @change="handlePersonalityImport" accept=".zip,application/zip" class="hidden">
 
         <div class="p-2.5 border-b border-slate-200 dark:border-gray-700 shrink-0 space-y-2">
             <!-- Studio Tab Switcher (Directly at top of sidebar - zero wasted space) -->
@@ -1191,6 +1258,10 @@ function handleCopyDiscussionMarkdown() {
                         <IconPlus class="w-4 h-4 shrink-0" />
                         <span>New Personality</span>
                     </button>
+                    <button @click="triggerPersonalityImport" class="w-full flex items-center space-x-3 text-left px-3 py-2 rounded-lg text-xs font-bold text-gray-700 dark:text-gray-300 bg-gray-100/70 hover:bg-gray-200 dark:bg-gray-800/60 dark:hover:bg-gray-700/60 transition-colors">
+                        <IconArrowDownTray class="w-4 h-4 shrink-0" />
+                        <span>Import Personality (.zip)</span>
+                    </button>
                 </div>
 
                 <div v-if="filteredUserPersonalities.length === 0 && filteredPublicPersonalities.length === 0" class="empty-state-flat">
@@ -1225,8 +1296,8 @@ function handleCopyDiscussionMarkdown() {
                                 </div>
                                 <div class="flex items-center gap-1 shrink-0">
                                     <IconCheckCircle v-if="user?.active_personality_id === p.id" class="w-4 h-4 text-emerald-500" />
-                                    <button @click.stop="handleEditPersonality(p)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-500 transition-opacity" title="Edit Personality">
-                                        <IconPencil class="w-3.5 h-3.5" />
+                                    <button @click.stop="handleExportPersonality(p)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-emerald-500 transition-opacity" title="Export Personality (.zip)">
+                                        <IconArrowDownTray class="w-3.5 h-3.5" />
                                     </button>
                                 </div>
                             </div>
@@ -1255,8 +1326,8 @@ function handleCopyDiscussionMarkdown() {
                                 </div>
                                 <div class="flex items-center gap-1 shrink-0">
                                     <IconCheckCircle v-if="user?.active_personality_id === p.id" class="w-4 h-4 text-emerald-500" />
-                                    <button @click.stop="handleEditPersonality(p)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-500 transition-opacity" title="Inspect Personality">
-                                        <IconEye class="w-3.5 h-3.5" />
+                                    <button @click.stop="handleExportPersonality(p)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-emerald-500 transition-opacity" title="Export Personality (.zip)">
+                                        <IconArrowDownTray class="w-3.5 h-3.5" />
                                     </button>
                                 </div>
                             </div>
