@@ -39,6 +39,61 @@ const showNewPassword = ref(false);
 const isUploadingIcon = ref(false);
 const fileInput = ref(null);
 
+// ── Token usage & quota ────────────────────────────────────────────────────
+// Pulled from GET /api/auth/me/token-quota. When quotas are disabled (or the
+// user is exempt) we MUST tell the user explicitly that they have no limits,
+// rather than showing empty/zeroed progress bars.
+const quota = computed(() => authStore.myTokenQuota);
+const isLoadingQuota = computed(() => authStore.isLoadingMyTokenQuota);
+
+const quotaIsUnlimited = computed(() => {
+    const q = quota.value;
+    if (!q) return true;
+    // Not enforced at all, or exempt => no hard limits apply.
+    if (!q.enforced || q.exempt) return true;
+    // Enforced but both directions unlimited (max <= 0) => effectively no limit.
+    return (Number(q.input_max) <= 0) && (Number(q.output_max) <= 0);
+});
+
+const quotaStatusLabel = computed(() => {
+    const q = quota.value;
+    if (!q) return null;
+    if (q.exempt) return 'Exempt — no limits apply to your account';
+    if (!q.enforced) return 'Quotas are disabled by the administrator — you have no limits';
+    if (quotaIsUnlimited.value) return 'No token limits configured';
+    if (q.exhausted) return 'Quota exhausted — generation is paused until reset';
+    return 'Quota active';
+});
+
+const quotaStatusTone = computed(() => {
+    const q = quota.value;
+    if (!q) return 'neutral';
+    if (q.exempt || !q.enforced || quotaIsUnlimited.value) return 'ok';
+    if (q.exhausted) return 'danger';
+    return 'active';
+});
+
+function quotaPct(used, max) {
+    if (!max || Number(max) <= 0) return 0;
+    return Math.min(100, Math.round((Number(used || 0) / Number(max)) * 100));
+}
+const inputPct = computed(() => quotaPct(quota.value?.input_used, quota.value?.input_max));
+const outputPct = computed(() => quotaPct(quota.value?.output_used, quota.value?.output_max));
+
+const quotaResetLabel = computed(() => {
+    const r = quota.value?.reset_at;
+    if (!r) return null;
+    try {
+        return new Date(r).toLocaleString();
+    } catch {
+        return String(r);
+    }
+});
+
+function formatInt(n) {
+    return (Number(n) || 0).toLocaleString();
+}
+
 const isAdmin = computed(() => authStore.isAdmin);
 const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
 const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
@@ -58,6 +113,7 @@ function populateProfileForm() {
 
 onMounted(() => {
     populateProfileForm();
+    authStore.fetchMyTokenQuota();
 });
 
 watch(user, populateProfileForm, { deep: true });
@@ -269,6 +325,97 @@ async function handleGenerateAvatar() {
                         </div>
                     </div>
                 </form>
+            </div>
+        </div>
+
+        <!-- Token Usage & Quota Section -->
+        <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
+            <div class="p-4 sm:p-6">
+                <div class="flex items-start justify-between gap-3 flex-wrap">
+                    <div>
+                        <h2 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">Token Usage &amp; Quota</h2>
+                        <p class="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
+                            Your input (prompt) and output (completion) token consumption for the current quota period.
+                        </p>
+                    </div>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="authStore.fetchMyTokenQuota()" :disabled="isLoadingQuota">
+                        {{ isLoadingQuota ? 'Refreshing...' : 'Refresh' }}
+                    </button>
+                </div>
+            </div>
+            <div class="border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
+                <div v-if="isLoadingQuota && !quota" class="text-sm text-gray-500 dark:text-gray-400">Loading your token usage…</div>
+                <div v-else-if="!quota" class="text-sm text-gray-500 dark:text-gray-400">
+                    Token usage information is unavailable right now.
+                </div>
+                <div v-else class="space-y-5">
+                    <!-- Status banner: explicit about "no limits" vs "active quota" -->
+                    <div
+                        class="rounded-lg px-4 py-3 text-sm font-medium border"
+                        :class="{
+                            'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-200': quotaStatusTone === 'ok',
+                            'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-200': quotaStatusTone === 'active',
+                            'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-900/30 dark:border-rose-700 dark:text-rose-200': quotaStatusTone === 'danger',
+                            'bg-gray-50 border-gray-200 text-gray-700 dark:bg-gray-900/30 dark:border-gray-700 dark:text-gray-300': quotaStatusTone === 'neutral'
+                        }"
+                    >
+                        {{ quotaStatusLabel }}
+                        <span v-if="quotaStatusTone !== 'ok' && quotaResetLabel" class="block mt-1 text-xs font-normal opacity-80">
+                            Next reset: {{ quotaResetLabel }}
+                        </span>
+                        <span v-if="quotaStatusTone === 'danger' && quota.message" class="block mt-1 text-xs font-normal opacity-90">
+                            {{ quota.message }}
+                        </span>
+                    </div>
+
+                    <!-- Usage meters — only shown when at least one direction
+                         actually has a limit. When quotas are disabled/exempt or
+                         fully unlimited, the banner above already says so, and
+                         empty meters would only add confusion. -->
+                    <div v-if="!quotaIsUnlimited" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        <div>
+                            <div class="flex justify-between text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">
+                                <span>Input (prompt) tokens</span>
+                                <span class="font-mono">
+                                    {{ formatInt(quota.input_used) }}
+                                    <template v-if="Number(quota.input_max) > 0"> / {{ formatInt(quota.input_max) }}</template>
+                                    <template v-else> · unlimited</template>
+                                </span>
+                            </div>
+                            <div class="h-2 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
+                                <div
+                                    class="h-full transition-all"
+                                    :class="Number(quota.input_max) > 0 && quota.input_exhausted ? 'bg-rose-500' : 'bg-sky-500'"
+                                    :style="{ width: Number(quota.input_max) > 0 ? inputPct + '%' : '0%' }"
+                                ></div>
+                            </div>
+                            <p v-if="Number(quota.input_max) <= 0" class="mt-1 text-[11px] text-gray-400 dark:text-gray-500">No input limit</p>
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">
+                                <span>Output (completion) tokens</span>
+                                <span class="font-mono">
+                                    {{ formatInt(quota.output_used) }}
+                                    <template v-if="Number(quota.output_max) > 0"> / {{ formatInt(quota.output_max) }}</template>
+                                    <template v-else> · unlimited</template>
+                                </span>
+                            </div>
+                            <div class="h-2 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
+                                <div
+                                    class="h-full transition-all"
+                                    :class="Number(quota.output_max) > 0 && quota.output_exhausted ? 'bg-rose-500' : 'bg-rose-400'"
+                                    :style="{ width: Number(quota.output_max) > 0 ? outputPct + '%' : '0%' }"
+                                ></div>
+                            </div>
+                            <p v-if="Number(quota.output_max) <= 0" class="mt-1 text-[11px] text-gray-400 dark:text-gray-500">No output limit</p>
+                        </div>
+                    </div>
+
+                    <p class="text-[11px] text-gray-400 dark:text-gray-500">
+                        Period: <span class="font-mono uppercase">{{ quota.period }}</span>
+                        <template v-if="quotaResetLabel && !quotaIsUnlimited"> · Resets {{ quotaResetLabel }}</template>
+                    </p>
+                </div>
             </div>
         </div>
 

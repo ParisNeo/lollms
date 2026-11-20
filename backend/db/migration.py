@@ -211,6 +211,14 @@ def _bootstrap_global_settings(connection):
         "alert_token_system_daily_limit": { "value": 0, "type": "integer", "description": "Platform-wide 24h token total that raises a CRITICAL alert. 0 disables.", "category": "Admin Alerts" },
         "alert_token_single_generation": { "value": 0, "type": "integer", "description": "A single generation exceeding this many tokens raises an alert immediately. 0 disables.", "category": "Admin Alerts" },
         "alert_scan_interval_minutes": { "value": 15, "type": "integer", "description": "How often the scheduled token/incident scan runs (minutes).", "category": "Admin Alerts" },
+
+        # ── Token Quota / Rate Limiting ──
+        # Global defaults applied to every non-exempt user. Per-user overrides
+        # (token_quota_* columns on the user) take precedence. 0 means unlimited.
+        "token_quota_enabled": { "value": False, "type": "boolean", "description": "Master switch for per-user token quota enforcement across input and output tokens.", "category": "Token Quota" },
+        "token_quota_input_max": { "value": 0, "type": "integer", "description": "Default maximum input (prompt) tokens per user per period. 0 = unlimited.", "category": "Token Quota" },
+        "token_quota_output_max": { "value": 0, "type": "integer", "description": "Default maximum output (completion) tokens per user per period. 0 = unlimited.", "category": "Token Quota" },
+        "token_quota_period": { "value": "monthly", "type": "string", "description": "Default quota reset period: 'daily', 'weekly', or 'monthly'.", "category": "Token Quota" },
     }
 
     select_keys_query = text("SELECT key FROM global_configs")
@@ -900,6 +908,24 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         }
         
         for col_name, col_sql_def in new_web_search_cols.items():
+            if col_name not in user_columns_db:
+                try:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
+                    connection.commit()
+                except Exception as e:
+                    print(f"WARNING: Failed to add column {col_name} to users table: {e}")
+                    connection.rollback()
+
+        # --- Per-user token quota columns ---
+        # NULL numeric columns inherit the global default; 0 means unlimited.
+        new_quota_cols = {
+            "token_quota_exempt": "BOOLEAN DEFAULT 0 NOT NULL",
+            "token_quota_enabled": "BOOLEAN",
+            "token_quota_input_max": "INTEGER",
+            "token_quota_output_max": "INTEGER",
+            "token_quota_period": "VARCHAR",
+        }
+        for col_name, col_sql_def in new_quota_cols.items():
             if col_name not in user_columns_db:
                 try:
                     connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))

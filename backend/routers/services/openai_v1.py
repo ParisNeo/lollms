@@ -46,6 +46,7 @@ from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.files import extract_text_from_file_bytes 
 from backend.utils import track_service_usage, check_rate_limit, get_system_cache, set_system_cache
+from backend.token_quota import get_quota_status, build_exhausted_message
 from backend.db.models.generation_metric import record_generation_metric
 
 # --- Router Definition ---
@@ -461,6 +462,27 @@ async def get_user_from_api_key(
     )
     if not is_rate_limited:
         raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+
+    # Enforce the per-user token quota before allowing any OpenAI-compatible
+    # API work. This is the single shared auth dependency for every /v1/*
+    # endpoint, so when an admin activates a quota it bounds the API exactly as
+    # it bounds the WebUI. Admins and exempt users are never blocked (the
+    # resolver forces enforced=False for them). A broken resolver must never
+    # turn into an outage, so failures fall through to normal operation.
+    try:
+        quota_status = await loop.run_in_executor(
+            executor,
+            lambda: get_quota_status(db, user),
+        )
+        if quota_status.enforced and quota_status.exhausted:
+            raise HTTPException(
+                status_code=429,
+                detail=build_exhausted_message(quota_status),
+            )
+    except HTTPException:
+        raise
+    except Exception as quota_err:
+        print(f"[openai_v1] Quota check failed, allowing request: {quota_err}")
 
     await loop.run_in_executor(
         executor,
@@ -2050,9 +2072,10 @@ async def chat_completions(
 
                      # ── STREAMING PATH ────────────────────────────────────────────────────
                     in_reasoning = False
+                    produced_chars = 0
 
                     def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
-                        nonlocal in_reasoning
+                        nonlocal in_reasoning, produced_chars
                         if client_aborted or (lc and lc.cancel_generation):
                             return False
                         if lc and hasattr(lc, 'llm') and lc.llm:
@@ -2062,6 +2085,7 @@ async def chat_completions(
                                 return False
 
                         if msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK and chunk_text:
+                            produced_chars += len(chunk_text)
                             main_loop.call_soon_threadsafe(
                                 stream_queue.put_nowait,
                                 make_chunk(DeltaMessage(reasoning_content=chunk_text))
@@ -2069,10 +2093,11 @@ async def chat_completions(
                             return True
 
                         if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
-                            # Detect inline <think> tags for models emitting raw tokens
-                            if "<think>" in chunk_text:
+                            produced_chars += len(chunk_text)
+                            # Detect inline  thinking tags for models emitting raw tokens
+                            if " thinking" in chunk_text:
                                 in_reasoning = True
-                                parts = chunk_text.split("<think>", 1)
+                                parts = chunk_text.split(" thinking", 1)
                                 if parts[0]:
                                     main_loop.call_soon_threadsafe(
                                         stream_queue.put_nowait,
@@ -2198,6 +2223,29 @@ async def chat_completions(
                         cancel_client_generation(lc)
                     else:
                         reset_client_state(lc)
+
+                    # Meter this streamed generation exactly once against the
+                    # shared per-user token budget. Streaming does not surface a
+                    # usage block, so completion tokens are estimated from the
+                    # accumulated produced text length. Best-effort: a metric
+                    # failure must never break the already-finished response.
+                    try:
+                        _prompt_tokens_est = max(0, len(str(openai_messages)) // 4)
+                        _completion_tokens_est = max(0, produced_chars // 4)
+                        record_generation_metric(
+                            db=None,
+                            user_id=user.id,
+                            username=user.username,
+                            model_name=request.model,
+                            binding_name=binding_alias,
+                            prompt_tokens=_prompt_tokens_est,
+                            completion_tokens=_completion_tokens_est,
+                            source="api",
+                        )
+                    except Exception as _metric_err:
+                        ASCIIColors.warning(
+                            f"[openai_v1] Failed to record streaming generation metric: {_metric_err}"
+                        )
 
                     if watcher_task and not watcher_task.done():
                         watcher_task.cancel()
@@ -2482,7 +2530,11 @@ async def chat_completions(
             if reasoning_content:
                 reasoning_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(reasoning_content))
 
-            # Record generation telemetry
+            # Record generation telemetry against the shared per-user token
+            # budget. ``source="api"`` keeps OpenAI/ollama/lollms API traffic
+            # consistently attributed; quota accounting sums every
+            # GenerationMetric row regardless of source, so these tokens count
+            # toward the same quota as WebUI chat.
             record_generation_metric(
                 db=db,
                 user_id=user.id,
@@ -2491,7 +2543,7 @@ async def chat_completions(
                 binding_name=binding_alias,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                source="openai_v1"
+                source="api"
             )
 
             return ChatCompletionResponse(
@@ -3441,6 +3493,24 @@ async def create_response_openai(
     reasoning_tokens = 0
     if reasoning_content:
         reasoning_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(reasoning_content))
+
+    # Record generation telemetry against the shared per-user token budget so
+    # Responses API traffic counts toward the same quota as WebUI/other APIs.
+    try:
+        record_generation_metric(
+            db=db,
+            user_id=user.id,
+            username=user.username,
+            model_name=request.model,
+            binding_name=binding_alias,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            source="api",
+        )
+    except Exception as _metric_err:
+        ASCIIColors.warning(
+            f"[openai_v1] Failed to record Responses generation metric: {_metric_err}"
+        )
 
     return ResponseObject(
         model=request.model,

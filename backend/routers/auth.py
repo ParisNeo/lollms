@@ -586,6 +586,38 @@ async def get_my_details(
     return current_user
 
 
+@auth_router.get("/me/token-quota")
+async def get_my_token_quota(
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Return the caller's resolved token quota for the current period so the UI
+    can show remaining allowance and, when exhausted, inform the user precisely
+    when their quota resets.
+    """
+    from backend.token_quota import get_quota_status, build_exhausted_message
+
+    status = get_quota_status(db, db_user)
+    return {
+        "enforced": status.enforced,
+        "exempt": status.exempt,
+        "period": status.period,
+        "input_max": status.input_max,
+        "output_max": status.output_max,
+        "input_used": status.input_used,
+        "output_used": status.output_used,
+        "input_remaining": status.input_remaining,
+        "output_remaining": status.output_remaining,
+        "input_exhausted": status.input_exhausted,
+        "output_exhausted": status.output_exhausted,
+        "exhausted": status.exhausted,
+        "reset_at": status.period_end.isoformat() if status.period_end else None,
+        "period_start": status.period_start.isoformat() if status.period_start else None,
+        "message": build_exhausted_message(status) if status.exhausted else None,
+    }
+
+
 
 @auth_router.put("/me", response_model=UserAuthDetails)
 async def update_my_details(

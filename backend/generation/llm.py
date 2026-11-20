@@ -1223,6 +1223,30 @@ def build_llm_generation_router(router: APIRouter):
             discussion_id, current_user, db, 'interact'
         )
 
+        # 1b. Enforce per-user token quota for the discussion owner BEFORE any
+        #     generation work begins. Admins and exempt users are never blocked
+        #     (resolve_effective_quota forces enforced=False for them). When the
+        #     quota is exhausted we stream a business-level error event carrying
+        #     the precise reset time so the UI can inform the user.
+        try:
+            from backend.token_quota import get_quota_status
+            quota_status = get_quota_status(db, owner_db_user)
+            if quota_status.enforced and quota_status.exhausted:
+                quota_message = quota_status.message
+
+                async def quota_exceeded_stream():
+                    yield json.dumps({"type": "error", "content": quota_message}) + "\n"
+
+                return StreamingResponse(
+                    quota_exceeded_stream(),
+                    media_type="application/x-ndjson",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+        except Exception as quota_err:
+            # NEVER block generation because quota resolution failed: telemetry
+            # must stay best-effort and must not turn into an outage.
+            print(f"Warning: token quota check failed, allowing generation: {quota_err}")
+
         # 2. Setup LLM Client with active Universal Model Profile
         user_model_full = current_user.lollms_model_name
         binding_alias = None

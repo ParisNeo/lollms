@@ -12,6 +12,7 @@ import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from '../modals/GenericModal.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import TokenQuotaPanel from './TokenQuotaPanel.vue';
 
 ChartJS.register(
   Title, Tooltip, Legend,
@@ -36,6 +37,8 @@ const COLOR_WEBUI = '#6366f1';  // indigo-500
 const COLOR_API = '#f59e0b';    // amber-500
 const COLOR_TOTAL = '#10b981';  // emerald-500
 const COLOR_TASKS = '#3b82f6';  // blue-500
+const COLOR_INPUT = '#0ea5e9';  // sky-500  (prompt tokens)
+const COLOR_OUTPUT = '#f43f5e'; // rose-500 (completion tokens)
 
 const themeColor = (dark, light) => (uiStore.currentTheme === 'dark' ? dark : light);
 const gridColor = computed(() => themeColor('rgba(255,255,255,0.08)', 'rgba(0,0,0,0.08)'));
@@ -150,6 +153,47 @@ const tokenChartData = computed(() => {
     ],
   };
 });
+
+// Input (prompt) vs Output (completion) tokens per day. These are billed /
+// consumed differently, so they are charted together but as distinct curves.
+// Falls back gracefully to empty arrays when the backend omits the series.
+const inputOutputChartData = computed(() => {
+  if (!stats.value) return { labels: [], datasets: [] };
+  const prompt = buildDailyMap(stats.value.prompt_tokens_per_day);
+  const completion = buildDailyMap(stats.value.completion_tokens_per_day);
+  const labels = Array.from(prompt.keys());
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'Input (prompt) tokens',
+        data: labels.map((k) => prompt.get(k) || 0),
+        backgroundColor: COLOR_INPUT,
+        borderColor: COLOR_INPUT,
+        fill: true,
+        tension: 0.15,
+        pointRadius: 0,
+      },
+      {
+        label: 'Output (completion) tokens',
+        data: labels.map((k) => completion.get(k) || 0),
+        backgroundColor: COLOR_OUTPUT,
+        borderColor: COLOR_OUTPUT,
+        fill: true,
+        tension: 0.15,
+        pointRadius: 0,
+      },
+    ],
+  };
+});
+
+const hasInputOutputSeries = computed(() =>
+  Boolean(
+    stats.value &&
+    ((stats.value.prompt_tokens_per_day && stats.value.prompt_tokens_per_day.length) ||
+     (stats.value.completion_tokens_per_day && stats.value.completion_tokens_per_day.length))
+  )
+);
 
 const generationChartData = computed(() => {
   if (!stats.value) return { labels: [], datasets: [] };
@@ -289,6 +333,24 @@ watch(() => props.userId, (newId) => {
           </div>
         </div>
 
+        <!-- Token quota management (admin controls) -->
+        <TokenQuotaPanel :user-id="userId" :username="username" />
+
+        <!-- Input vs Output tokens per day (distinct cost curves) -->
+        <div v-if="hasInputOutputSeries" class="rounded-2xl border p-4" style="border-color: var(--border-main); background-color: var(--bg-card);">
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="text-sm font-black tracking-tight" style="color: var(--text-main);">
+              Input vs Output tokens <span class="text-[10px] font-mono opacity-60">(30d)</span>
+            </h4>
+            <span class="text-[10px] font-mono" style="color: var(--text-dim);">
+              Prompt {{ formatInt(stats.total_prompt_tokens) }} · Completion {{ formatInt(stats.total_completion_tokens) }}
+            </span>
+          </div>
+          <div class="h-64">
+            <Line :data="inputOutputChartData" :options="tokenChartOptions" />
+          </div>
+        </div>
+
         <!-- Tokens chart (WebUI vs API) -->
         <div class="rounded-2xl border p-4" style="border-color: var(--border-main); background-color: var(--bg-card);">
           <div class="flex items-center justify-between mb-3">
@@ -348,8 +410,10 @@ watch(() => props.userId, (newId) => {
           </div>
         </div>
 
-        <!-- Carbon footprint -->
-        <div v-if="stats.total_co2_g" class="rounded-2xl border p-4" style="border-color: var(--border-main); background-color: var(--bg-card);">
+        <!-- Carbon footprint (always rendered so a fresh account shows explicit
+             zeroes rather than silently hiding the whole section, which previously
+             made users think the feature was broken/missing). -->
+        <div class="rounded-2xl border p-4" style="border-color: var(--border-main); background-color: var(--bg-card);">
           <h4 class="text-sm font-black tracking-tight mb-2" style="color: var(--text-main);">Carbon footprint (lifetime)</h4>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
             <div>

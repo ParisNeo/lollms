@@ -357,6 +357,10 @@ class UserStats(BaseModel):
 class GlobalGenerationStats(BaseModel):
     generations_per_day: List[UserActivityStat] = Field(default_factory=list)
     tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    # Input (prompt) vs Output (completion) split — these are charted as distinct
+    # curves on the admin dashboard because they do not carry the same cost.
+    prompt_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    completion_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
     webui_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
     api_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
     webui_generations_per_day: List[UserActivityStat] = Field(default_factory=list)
@@ -405,6 +409,37 @@ class UserForAdminPanel(BaseModel):
     total_co2_g: float = 0.0
     webui_tokens: int = 0
     api_tokens: int = 0
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-user token quota (rate limiting). ``None`` on a numeric field means
+# "inherit the global default"; ``0`` means "unlimited".
+# ──────────────────────────────────────────────────────────────────────────────
+class TokenQuotaUpdate(BaseModel):
+    """Admin payload to set a user's quota overrides."""
+    exempt: Optional[bool] = None
+    enabled: Optional[bool] = None
+    input_max: Optional[int] = None
+    output_max: Optional[int] = None
+    period: Optional[str] = None  # 'daily' | 'weekly' | 'monthly' | None(inherit)
+
+class TokenQuotaUsage(BaseModel):
+    input_used: int = 0
+    input_max: int = 0
+    output_used: int = 0
+    output_max: int = 0
+    period_start: Optional[datetime.datetime] = None
+    period_end: Optional[datetime.datetime] = None
+
+class TokenQuotaStatus(BaseModel):
+    """Resolved effective quota for a user plus current-period usage."""
+    enforced: bool = False
+    exempt: bool = False
+    period: str = "monthly"
+    enabled: Optional[bool] = None
+    input_max: Optional[int] = None
+    output_max: Optional[int] = None
+    reset_at: Optional[datetime.datetime] = None
+    usage: TokenQuotaUsage = Field(default_factory=TokenQuotaUsage)
 
 class RequirementInfo(BaseModel):
     name: str

@@ -26,8 +26,10 @@ const chartRef = ref(null);
 // Interactive multi-curve visibility toggles
 const selectedCurves = ref({
     total_tokens: true,
-    webui_tokens: true,
-    api_tokens: true,
+    input_tokens: true,
+    output_tokens: true,
+    webui_tokens: false,
+    api_tokens: false,
     requests: false
 });
 
@@ -158,6 +160,38 @@ const chartData = computed(() => {
             });
         }
 
+        // 1a. Input (prompt) tokens per day — only rendered when the backend
+        //     provides the split series. Input and output tokens do not carry
+        //     the same cost, so they are charted independently from totals.
+        if (selectedCurves.value.input_tokens && Array.isArray(props.stats.prompt_tokens_per_day) && props.stats.prompt_tokens_per_day.length) {
+            datasets.push({
+                label: 'Input (Prompt) Tokens',
+                data: props.stats.prompt_tokens_per_day.map(s => ({ x: s.date, y: s.count })),
+                borderColor: '#0EA5E9',
+                backgroundColor: 'rgba(14, 165, 233, 0.12)',
+                borderWidth: 2,
+                tension: 0.2,
+                fill: false,
+                pointRadius: 2.5,
+                yAxisID: 'y'
+            });
+        }
+
+        // 1b. Output (completion) tokens per day.
+        if (selectedCurves.value.output_tokens && Array.isArray(props.stats.completion_tokens_per_day) && props.stats.completion_tokens_per_day.length) {
+            datasets.push({
+                label: 'Output (Completion) Tokens',
+                data: props.stats.completion_tokens_per_day.map(s => ({ x: s.date, y: s.count })),
+                borderColor: '#F43F5E',
+                backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                borderWidth: 2,
+                tension: 0.2,
+                fill: false,
+                pointRadius: 2.5,
+                yAxisID: 'y'
+            });
+        }
+
         // 2. WebUI Tokens
         if (selectedCurves.value.webui_tokens) {
             const dataArr = props.stats.webui_tokens_per_day || [];
@@ -209,6 +243,8 @@ const chartData = computed(() => {
 
         const allDates = [
             ...(props.stats.tokens_per_day || []).map(s => s.date),
+            ...(props.stats.prompt_tokens_per_day || []).map(s => s.date),
+            ...(props.stats.completion_tokens_per_day || []).map(s => s.date),
             ...(props.stats.generations_per_day || []).map(s => s.date)
         ];
         const uniqueDates = Array.from(new Set(allDates)).sort();
@@ -368,6 +404,16 @@ function exportChartCSV() {
                         <span>Total Tokens (Sum)</span>
                     </label>
 
+                    <label class="flex items-center gap-1.5 cursor-pointer font-bold text-sky-700 dark:text-sky-400">
+                        <input type="checkbox" v-model="selectedCurves.input_tokens" class="rounded text-sky-600 focus:ring-sky-500 w-3.5 h-3.5">
+                        <span>Input (Prompt) Tokens</span>
+                    </label>
+
+                    <label class="flex items-center gap-1.5 cursor-pointer font-bold text-rose-700 dark:text-rose-400">
+                        <input type="checkbox" v-model="selectedCurves.output_tokens" class="rounded text-rose-600 focus:ring-rose-500 w-3.5 h-3.5">
+                        <span>Output (Completion) Tokens</span>
+                    </label>
+
                     <label class="flex items-center gap-1.5 cursor-pointer font-bold text-blue-700 dark:text-blue-400">
                         <input type="checkbox" v-model="selectedCurves.webui_tokens" class="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5">
                         <span>WebUI Chat Tokens</span>
@@ -384,8 +430,12 @@ function exportChartCSV() {
                     </label>
                 </div>
 
-                <div class="flex items-center gap-1.5">
+                <div class="flex items-center gap-1.5 flex-wrap">
                     <button @click="selectAllCurves" class="text-[10px] font-bold text-gray-500 hover:text-blue-600 underline">Show All</button>
+                    <span class="text-gray-300 dark:text-gray-700">|</span>
+                    <button @click="selectOnlyCurve('input_tokens')" class="text-[10px] font-bold text-sky-500 hover:underline">Input Only</button>
+                    <span class="text-gray-300 dark:text-gray-700">|</span>
+                    <button @click="selectOnlyCurve('output_tokens')" class="text-[10px] font-bold text-rose-500 hover:underline">Output Only</button>
                     <span class="text-gray-300 dark:text-gray-700">|</span>
                     <button @click="selectOnlyCurve('webui_tokens')" class="text-[10px] font-bold text-blue-500 hover:underline">WebUI Only</button>
                     <span class="text-gray-300 dark:text-gray-700">|</span>

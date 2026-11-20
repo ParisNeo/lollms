@@ -168,6 +168,18 @@ class User(Base):
     google_gmail_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     mcp_access_info = Column(JSON, nullable=True)
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Token quota (per-user rate limiting on input/output token consumption).
+    # ``NULL`` on the numeric columns means "inherit the global default"; a
+    # value of ``0`` means "unlimited" for that direction. ``token_quota_exempt``
+    # removes the user from quota enforcement entirely.
+    # ──────────────────────────────────────────────────────────────────────
+    token_quota_exempt = Column(Boolean, default=False, nullable=False, server_default='0')
+    token_quota_enabled = Column(Boolean, nullable=True)
+    token_quota_input_max = Column(Integer, nullable=True)
+    token_quota_output_max = Column(Integer, nullable=True)
+    token_quota_period = Column(String, nullable=True)
+
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
     following = relationship(

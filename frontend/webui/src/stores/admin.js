@@ -672,6 +672,30 @@ export const useAdminStore = defineStore('admin', () => {
         await fetchAllUsers(); return r.data;
     }
     async function fetchUserStats(userId) { try { const response = await apiClient.get(`/api/admin/users/${userId}/stats`); return response.data; } catch (error) { return null; } }    
+
+    // ── Per-user token quota (admin controls) ──────────────────────────────
+    // GET returns the resolved effective quota + current-period usage so the
+    // panel can render progress bars and the reset time. PUT accepts per-field
+    // overrides; ``null`` inherits the global default, ``0`` means unlimited.
+    async function fetchUserTokenQuota(userId) {
+        const response = await apiClient.get(`/api/admin/users/${userId}/token-quota`);
+        return response.data;
+    }
+    async function updateUserTokenQuota(userId, payload) {
+        const response = await apiClient.put(`/api/admin/users/${userId}/token-quota`, payload);
+        return response.data;
+    }
+    // Global defaults surface through the standard settings endpoints already
+    // exposed (updateGlobalSettings); this helper groups the quota keys so the
+    // admin UI can save them in one PUT.
+    async function updateGlobalTokenQuota(config) {
+        await updateGlobalSettings({
+            token_quota_enabled: config.enabled,
+            token_quota_input_max: config.input_max,
+            token_quota_output_max: config.output_max,
+            token_quota_period: config.period,
+        });
+    }
     async function batchUpdateUsers(payload) { await apiClient.post('/api/admin/users/batch-update-settings', payload); await fetchAllUsers(); }
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) { const r = await apiClient.post('/api/admin/email-users', { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText }); tasksStore.addTask(r.data); return true; }
     // Single-recipient convenience path — hits /users/{id}/email so callers do not
@@ -872,7 +896,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchServiceDashboard, resetServiceUsage, 
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,
         fetchAllUsers, activateUser, disconnectUser, bulkActivateUsers, bulkDeactivateUsers, bulkDisconnectUsers, bulkSetRole,
-        fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
+        fetchUserStats, fetchUserTokenQuota, updateUserTokenQuota, updateGlobalTokenQuota, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
         uploadWelcomeLogo, removeWelcomeLogo, uploadSslFile, importOpenWebUIData, fetchAdminAvailableLollmsModels, generateIconForModel,
         

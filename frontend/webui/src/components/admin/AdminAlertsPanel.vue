@@ -196,11 +196,20 @@ onUnmounted(() => {
                     </p>
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
+                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300" title="Total alerts recorded">
+                        {{ summary.total || 0 }} total
+                    </span>
+                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-indigo-100 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300" title="Currently open alerts">
+                        {{ summary.open || 0 }} open
+                    </span>
                     <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-300">
                         {{ summary.critical }} critical
                     </span>
                     <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300">
                         {{ summary.warning }} warning
+                    </span>
+                    <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300">
+                        {{ summary.info || 0 }} info
                     </span>
                     <button
                         type="button"

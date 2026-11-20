@@ -21,7 +21,10 @@ from backend.models.user import (
     AdminUserUpdate, BatchUsersSettingsUpdate, EmailUsersRequest,
     EnhanceEmailRequest, EnhancedEmailResponse, UserPublic, UserAuthDetails
 )
-from backend.models.admin import UserForAdminPanel, UserStats, UserActivityStat, AdminDashboardStats
+from backend.models.admin import (
+    UserForAdminPanel, UserStats, UserActivityStat, AdminDashboardStats,
+    TokenQuotaUpdate, TokenQuotaStatus, TokenQuotaUsage,
+)
 from backend.session import get_current_admin_user, get_user_data_root, user_sessions, get_user_lollms_client
 from backend.security import get_password_hash as hash_password, create_reset_token, send_generic_email
 from backend.settings import settings
@@ -714,6 +717,94 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
         top_models=top_models,
         source_breakdown=source_breakdown,
     )
+
+def _build_quota_status(db: Session, user: DBUser) -> TokenQuotaStatus:
+    """Resolve the effective quota for a user and attach current-period usage."""
+    from backend.token_quota import get_quota_status
+    status = get_quota_status(db, user)
+    return TokenQuotaStatus(
+        enforced=status.enforced,
+        exempt=status.exempt,
+        period=status.period,
+        enabled=getattr(user, "token_quota_enabled", None),
+        input_max=status.input_max,
+        output_max=status.output_max,
+        reset_at=status.period_end,
+        usage=TokenQuotaUsage(
+            input_used=status.input_used,
+            input_max=status.input_max,
+            output_used=status.output_used,
+            output_max=status.output_max,
+            period_start=status.period_start,
+            period_end=status.period_end,
+        ),
+    )
+
+
+@user_management_router.get("/users/{user_id}/token-quota", response_model=TokenQuotaStatus)
+async def admin_get_user_token_quota(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """Return a single user's resolved quota overrides + current-period usage."""
+    user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    return _build_quota_status(db, user)
+
+
+@user_management_router.put("/users/{user_id}/token-quota", response_model=TokenQuotaStatus)
+async def admin_update_user_token_quota(
+    user_id: int,
+    payload: TokenQuotaUpdate,
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """
+    Update a user's token quota overrides.
+
+    Semantics per field:
+      • ``None`` → inherit the global default (column set to NULL).
+      • ``0``    → unlimited for that direction.
+      • ``> 0``  → explicit per-user maximum.
+    Only fields present in the payload are touched so partial updates are safe.
+    """
+    user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    provided = payload.model_dump(exclude_unset=True)
+
+    if "period" in provided:
+        period = provided["period"]
+        if period is not None and period not in ("daily", "weekly", "monthly"):
+            raise HTTPException(
+                status_code=400,
+                detail="period must be 'daily', 'weekly', 'monthly', or null.",
+            )
+        user.token_quota_period = period
+
+    if "enabled" in provided:
+        user.token_quota_enabled = provided["enabled"]
+
+    if "exempt" in provided:
+        user.token_quota_exempt = bool(provided["exempt"])
+
+    for field_name in ("input_max", "output_max"):
+        if field_name in provided:
+            value = provided[field_name]
+            if value is not None and int(value) < 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{field_name} must be >= 0 (0 = unlimited) or null to inherit.",
+                )
+            setattr(user, f"token_quota_{field_name}", value)
+
+    db.commit()
+    db.refresh(user)
+    return _build_quota_status(db, user)
+
 
 @user_management_router.put("/users/{user_id}", response_model=UserPublic)
 async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user)):

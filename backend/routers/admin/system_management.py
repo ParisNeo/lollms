@@ -488,6 +488,8 @@ def get_global_generation_stats(db: Session = Depends(get_db)):
     daily_api_gens = defaultdict(int)
 
     tokens_per_day_dict = defaultdict(int)
+    prompt_tokens_per_day_dict = defaultdict(int)
+    completion_tokens_per_day_dict = defaultdict(int)
     webui_tokens_per_day_dict = defaultdict(int)
     api_tokens_per_day_dict = defaultdict(int)
 
@@ -510,6 +512,8 @@ def get_global_generation_stats(db: Session = Depends(get_db)):
 
             daily_totals[d_str] += cnt
             tokens_per_day_dict[d_str] += tok
+            prompt_tokens_per_day_dict[d_str] += p
+            completion_tokens_per_day_dict[d_str] += c
             total_tokens += tok
             total_prompt_tokens += p
             total_completion_tokens += c
@@ -534,6 +538,14 @@ def get_global_generation_stats(db: Session = Depends(get_db)):
     ]
     tokens_per_day_list = [
         UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=tokens_per_day_dict[d_str])
+        for d_str in sorted_date_strings
+    ]
+    prompt_tokens_per_day_list = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=prompt_tokens_per_day_dict[d_str])
+        for d_str in sorted_date_strings
+    ]
+    completion_tokens_per_day_list = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=completion_tokens_per_day_dict[d_str])
         for d_str in sorted_date_strings
     ]
     webui_tokens_per_day_list = [
@@ -605,6 +617,8 @@ def get_global_generation_stats(db: Session = Depends(get_db)):
     return GlobalGenerationStats(
         generations_per_day=generations_per_day_list,
         tokens_per_day=tokens_per_day_list,
+        prompt_tokens_per_day=prompt_tokens_per_day_list,
+        completion_tokens_per_day=completion_tokens_per_day_list,
         webui_tokens_per_day=webui_tokens_per_day_list,
         api_tokens_per_day=api_tokens_per_day_list,
         webui_generations_per_day=webui_generations_per_day_list,

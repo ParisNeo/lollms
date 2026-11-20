@@ -26,6 +26,7 @@ from backend.session import (
 from backend.settings import settings
 from backend.utils import track_service_usage, check_rate_limit
 from backend.db.models.generation_metric import record_generation_metric
+from backend.token_quota import get_quota_status, build_exhausted_message
 from lollms_client import MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.services.openai_v1 import (
@@ -41,6 +42,31 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 # Create a thread pool for blocking operations
 executor = ThreadPoolExecutor(max_workers=50)
+
+
+def _record_api_generation(user: DBUser, model_name: str, binding_alias: Optional[str],
+                           prompt_tokens: int, completion_tokens: int) -> None:
+    """Best-effort metric recording so per-user quotas also meter API traffic.
+
+    Quota accounting (backend.token_quota.compute_usage) sums every
+    GenerationMetric row regardless of source, so recording here with
+    ``source="api"`` makes API generations count against the same quota as
+    WebUI chat. Failures must never break the API response.
+    """
+    try:
+        record_generation_metric(
+            db=None,
+            user_id=user.id,
+            username=user.username,
+            model_name=model_name or "unknown",
+            binding_name=binding_alias,
+            prompt_tokens=max(0, int(prompt_tokens or 0)),
+            completion_tokens=max(0, int(completion_tokens or 0)),
+            source="api",
+        )
+    except Exception as metric_err:
+        ASCIIColors.warning(f"[ollama_v1] Failed to record generation metric: {metric_err}")
+
 
 async def get_user_from_api_key(authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme), db: Session = Depends(get_db)) -> DBUser:
     if not settings.get("ollama_service_enabled", False):
@@ -131,6 +157,20 @@ async def list_models(
 async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
     loop = asyncio.get_running_loop()
 
+    # Enforce the per-user token quota BEFORE any generation work. The quota is
+    # shared with the WebUI: when an admin activates it, API access is bounded
+    # by the same budget. Admins/exempt users are never blocked (the resolver
+    # forces enforced=False for them). Return an Ollama-shaped error payload.
+    try:
+        quota_status = get_quota_status(db, user)
+        if quota_status.enforced and quota_status.exhausted:
+            raise HTTPException(status_code=429, detail={"error": build_exhausted_message(quota_status)})
+    except HTTPException:
+        raise
+    except Exception as quota_err:
+        # Never turn a broken quota resolver into an outage.
+        ASCIIColors.warning(f"[ollama_v1] Quota check failed, allowing generation: {quota_err}")
+
     # Offload potentially blocking database model resolution
     binding_alias, model_name = await loop.run_in_executor(
         executor,
@@ -182,6 +222,11 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
     openai_messages, images = preprocess_openai_messages(messages)
     if request.tools: openai_messages = handle_tools_injection(openai_messages, request.tools)
 
+    # Cheap prompt token estimate for the non-streaming metric. For streaming
+    # (where usage is not surfaced by Ollama's wire format) this is the only
+    # figure available, so we use it in both branches for consistency.
+    estimated_prompt_tokens = max(0, len(str(openai_messages)) // 4)
+
     generation_kwargs = {}
     if client_effort is None or str(client_effort).lower() in ("none", "null", "off", "disabled", "false") or client_thinking is False:
         generation_kwargs["think"] = None
@@ -230,12 +275,24 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
                             main_loop.call_soon_threadsafe(stream_queue.put_nowait, f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(content=chunk))]).model_dump_json()}\n\n")
                         return True
                     def bg_gen():
+                        _produced_chars = 0
                         try: 
-                            lc.generate_from_messages(openai_messages, streaming_callback=llm_cb, images=images, n_predict=request.max_tokens, **generation_kwargs)
+                            result_text = lc.generate_from_messages(openai_messages, streaming_callback=llm_cb, images=images, n_predict=request.max_tokens, **generation_kwargs)
+                            _produced_chars = len(result_text or "")
                         except Exception as e:
                             if "connection" in str(e).lower() or "disconnected" in str(e).lower():
                                 evict_client_from_registry(lc, user.username)
                         finally: 
+                            # Meter the completed stream exactly once. Streaming does
+                            # not return a usage block, so completion tokens are
+                            # estimated from the produced text length.
+                            _record_api_generation(
+                                user=user,
+                                model_name=request.model,
+                                binding_alias=binding_alias,
+                                prompt_tokens=estimated_prompt_tokens,
+                                completion_tokens=max(0, _produced_chars // 4),
+                            )
                             reset_client_state(lc)
                             main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
                     

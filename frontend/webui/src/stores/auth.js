@@ -36,6 +36,11 @@ export const useAuthStore = defineStore('auth', () => {
     // Populated from GET /api/settings-policy/me. Empty => nothing is restricted.
     const settingsPolicy = ref({});
 
+    // Current user's resolved token quota + usage for the active period.
+    // Shape mirrors GET /api/auth/me/token-quota. ``null`` until fetched.
+    const myTokenQuota = ref(null);
+    const isLoadingMyTokenQuota = ref(false);
+
     // --- WebSocket State ---
     const ws = ref(null);
     const wsConnected = ref(false);
@@ -92,6 +97,23 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     // --- Actions ---
+
+    // Fetch the current user's token quota status (input/output usage + limits
+    // + reset time). Non-fatal: on failure we leave the previous snapshot.
+    async function fetchMyTokenQuota() {
+        if (!token.value) { myTokenQuota.value = null; return null; }
+        isLoadingMyTokenQuota.value = true;
+        try {
+            const response = await apiClient.get('/api/auth/me/token-quota');
+            myTokenQuota.value = response.data;
+            return response.data;
+        } catch (error) {
+            console.warn('Could not fetch token quota.', error);
+            return null;
+        } finally {
+            isLoadingMyTokenQuota.value = false;
+        }
+    }
 
     async function fetchWelcomeInfo() {
         try {
@@ -690,6 +712,7 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = null;
         token.value = null;
         settingsPolicy.value = {};
+        myTokenQuota.value = null;
         localStorage.removeItem('lollms-token');
         disconnectWebSocket();
     }
@@ -845,6 +868,7 @@ export const useAuthStore = defineStore('auth', () => {
     return {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
         settingsPolicy, fieldPolicy, isFieldLocked, isFieldForced, fetchSettingsPolicy,
+        myTokenQuota, isLoadingMyTokenQuota, fetchMyTokenQuota,
         loadingMessage, loadingProgress, funFact, welcomeText, welcomeSlogan, welcome_logo_url, welcome_fun_fact_color, welcome_fun_fact_category, wsConnected,
         ssoClientConfig, isFetchingFunFact,
         latex_builder_enabled, export_to_txt_enabled, export_to_markdown_enabled, export_to_html_enabled, export_to_pdf_enabled, export_to_docx_enabled, export_to_xlsx_enabled, export_to_pptx_enabled,
