@@ -231,6 +231,105 @@ const sourceRatioChartOptions = {
 
         </div>
 
+        <!-- ── Top Users Leaderboard (per source & metric) ──
+             Moved up from below the Consumption Breakdown so it is immediately
+             visible on dashboard load — the previous position required scrolling
+             past two tall telemetry cards first, which made the feature appear
+             missing to admins who never scrolled that far. -->
+        <div class="p-6 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-4">
+            <div class="flex items-start justify-between flex-wrap gap-4 border-b dark:border-gray-700/80 pb-4">
+                <div>
+                    <h3 class="text-base font-black text-gray-900 dark:text-white tracking-tight flex items-center gap-2">
+                        <span>🏆</span>
+                        <span>Top Users</span>
+                    </h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                        Ranked by the chosen criterion within the chosen consumption channel.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Filter axes: source + metric -->
+            <div class="flex flex-wrap items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Source</span>
+                    <div class="flex items-center gap-1">
+                        <button
+                            v-for="s in TOP_USER_SOURCES"
+                            :key="String(s.value)"
+                            type="button"
+                            @click="setTopUsersSource(s.value)"
+                            class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors"
+                            :class="topUsersParams.source === s.value
+                                ? 'bg-indigo-600 text-white border-indigo-600'
+                                : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 hover:border-indigo-500/60'"
+                        >
+                            {{ s.label }}
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Metric</span>
+                    <div class="flex items-center gap-1">
+                        <button
+                            v-for="m in TOP_USER_METRICS"
+                            :key="m.value"
+                            type="button"
+                            @click="setTopUsersMetric(m.value)"
+                            class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors"
+                            :class="topUsersParams.metric === m.value
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 hover:border-emerald-500/60'"
+                        >
+                            {{ m.label }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Leaderboard -->
+            <div v-if="isLoadingTopUsers" class="flex justify-center items-center h-32">
+                <IconAnimateSpin class="w-6 h-6 text-blue-500" />
+            </div>
+            <div v-else-if="!topUsers || topUsers.length === 0" class="text-center py-10 text-sm italic text-gray-400 dark:text-gray-500 rounded-2xl border border-dashed dark:border-gray-700">
+                No consumption recorded yet for this scope.
+            </div>
+            <div v-else class="space-y-1.5">
+                <div
+                    v-for="(u, i) in topUsers"
+                    :key="u.user_id"
+                    @click="openUserStats(u)"
+                    class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors group"
+                >
+                    <span
+                        class="w-6 text-center font-black font-mono text-xs shrink-0"
+                        :class="i === 0 ? 'text-amber-500' : (i === 1 ? 'text-gray-400' : (i === 2 ? 'text-orange-500' : 'text-gray-500 dark:text-gray-400'))"
+                    >
+                        {{ i + 1 }}
+                    </span>
+                    <UserAvatar :icon="u.icon" :username="u.username" size-class="h-8 w-8" />
+                    <div class="flex-1 min-w-0">
+                        <div class="text-xs font-bold text-gray-900 dark:text-white truncate">@{{ u.username }}</div>
+                        <div class="text-[10px] font-mono text-gray-500 dark:text-gray-400 truncate">
+                            {{ (u.total_tokens || 0).toLocaleString() }} total
+                            <span class="opacity-60">· {{ (u.prompt_tokens || 0).toLocaleString() }} in</span>
+                            <span class="opacity-60">· {{ (u.completion_tokens || 0).toLocaleString() }} out</span>
+                            <span class="opacity-60">· {{ (u.calls || 0).toLocaleString() }} calls</span>
+                        </div>
+                    </div>
+                    <div class="text-right shrink-0">
+                        <div class="text-sm font-black font-mono text-gray-900 dark:text-white">
+                            {{ rowDisplayValue(u).toLocaleString() }}
+                        </div>
+                        <div class="text-[9px] font-bold uppercase text-gray-400">
+                            {{ metricLabel(topUsersParams.metric) }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- ── GLOBAL USAGE & ENVIRONMENTAL TELEMETRY ── -->
         <div class="space-y-6">
             <!-- Environmental Footprint & Global Consumption Banner -->
