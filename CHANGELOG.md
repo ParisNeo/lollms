@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-20 01:21]
+
+- Fixing CSS import syntax and updating component imports in the frontend assets directory.
+
 ## [2026-11-20 09:54]
 
 - fix: resolve admin dashboard issue in system management and store
