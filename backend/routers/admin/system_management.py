@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import psutil
-from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi import APIRouter, Depends, Request, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, desc, update
 from lollms_client import LollmsDataManager
@@ -364,6 +364,106 @@ async def kill_process(payload: KillProcessRequest, current_user: UserAuthDetail
         raise HTTPException(status_code=403, detail="Permission denied to kill process.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class TopUserStat(BaseModel):
+    user_id: int
+    username: str
+    icon: Optional[str] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    calls: int = 0
+
+@system_management_router.get("/top-users", response_model=List[TopUserStat])
+async def get_top_users(
+    source: Optional[str] = Query(None, description="Filter by source: 'chat' (WebUI), 'api', or omit for all"),
+    metric: str = Query("total_tokens", description="Ranking metric: 'input_tokens', 'output_tokens', 'total_tokens', or 'calls'"),
+    limit: int = Query(10, ge=1, le=100, description="Maximum number of users to return"),
+    days: int = Query(0, ge=0, le=3650, description="Restrict aggregation to the last N days. 0 = all time."),
+    db: Session = Depends(get_db),
+):
+    """
+    Return the top users by a chosen metric within an optional source scope.
+
+    The four supported metrics map cleanly to a single sortable integer column:
+      - 'input_tokens'   -> SUM(prompt_tokens)
+      - 'output_tokens'  -> SUM(completion_tokens)
+      - 'total_tokens'   -> SUM(total_tokens)
+      - 'calls'          -> COUNT(GenerationMetric.id)
+
+    ``source='chat'`` scopes to the WebUI chat surface, ``source='api'`` scopes
+    to every external API surface. Omitting ``source`` aggregates both.
+
+    Admin-authored dashboards frequently pivot between these four criteria and
+    two scopes; doing the aggregation in SQL keeps the frontend honest even as
+    the raw ``generation_metrics`` table grows into the millions of rows.
+    """
+    from backend.db.models.generation_metric import GenerationMetric
+
+    metric_norm = (metric or "total_tokens").strip().lower()
+    metric_expr_map = {
+        "input_tokens": func.coalesce(func.sum(GenerationMetric.prompt_tokens), 0),
+        "output_tokens": func.coalesce(func.sum(GenerationMetric.completion_tokens), 0),
+        "total_tokens": func.coalesce(func.sum(GenerationMetric.total_tokens), 0),
+        "calls": func.count(GenerationMetric.id),
+    }
+    if metric_norm not in metric_expr_map:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unsupported metric '{metric}'. Valid values: "
+                f"{', '.join(metric_expr_map.keys())}."
+            ),
+        )
+    rank_expr = metric_expr_map[metric_norm]
+
+    query = db.query(
+        GenerationMetric.user_id,
+        GenerationMetric.username,
+        func.coalesce(func.sum(GenerationMetric.prompt_tokens), 0).label("prompt_tokens"),
+        func.coalesce(func.sum(GenerationMetric.completion_tokens), 0).label("completion_tokens"),
+        func.coalesce(func.sum(GenerationMetric.total_tokens), 0).label("total_tokens"),
+        func.count(GenerationMetric.id).label("calls"),
+    ).group_by(GenerationMetric.user_id, GenerationMetric.username)
+
+    if source:
+        source_norm = source.strip().lower()
+        # 'webui' is accepted as an alias for the canonical 'chat' source tag.
+        if source_norm in ("webui", "chat"):
+            query = query.filter(GenerationMetric.source == "chat")
+        elif source_norm == "api":
+            query = query.filter(GenerationMetric.source != "chat")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported source '{source}'. Valid values: 'webui', 'chat', 'api'.",
+            )
+
+    if days and days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        query = query.filter(GenerationMetric.created_at >= cutoff)
+
+    rows = query.order_by(desc(rank_expr)).limit(limit).all()
+
+    # Resolve icons in one shot to avoid N+1 queries.
+    user_ids = [r[0] for r in rows if r[0] is not None]
+    icons_by_id: Dict[int, Optional[str]] = {}
+    if user_ids:
+        icon_rows = db.query(DBUser.id, DBUser.icon).filter(DBUser.id.in_(user_ids)).all()
+        icons_by_id = {uid: icon for uid, icon in icon_rows}
+
+    return [
+        TopUserStat(
+            user_id=user_id if user_id is not None else 0,
+            username=username or "unknown",
+            icon=icons_by_id.get(user_id),
+            prompt_tokens=int(prompt_tokens or 0),
+            completion_tokens=int(completion_tokens or 0),
+            total_tokens=int(total_tokens or 0),
+            calls=int(calls or 0),
+        )
+        for user_id, username, prompt_tokens, completion_tokens, total_tokens, calls in rows
+    ]
 
 @system_management_router.get("/model-usage-stats", response_model=List[ModelUsageStat])
 async def get_model_usage_stats(db: Session = Depends(get_db)):

@@ -128,6 +128,11 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingGlobalGenerationStats = ref(false);
     const modelUsageStats = ref([]);
     const isLoadingModelUsageStats = ref(false);
+    // Top users leaderboard (per source & metric). Params cached so a re-open
+    // of the dashboard can refresh with the last-selected filters.
+    const topUsers = ref([]);
+    const isLoadingTopUsers = ref(false);
+    const topUsersParams = ref({ source: null, metric: 'total_tokens', days: 0, limit: 10 });
     const funFacts = ref([]);
     const isLoadingFunFacts = ref(false);
     const funFactCategories = ref([]);
@@ -231,6 +236,30 @@ export const useAdminStore = defineStore('admin', () => {
         try { const response = await apiClient.get('/api/admin/model-usage-stats'); modelUsageStats.value = response.data || []; } 
         catch (error) { console.error("Failed to fetch model usage stats:", error); modelUsageStats.value = []; } 
         finally { isLoadingModelUsageStats.value = false; } 
+    }
+
+    // Fetches the top users leaderboard. ``overrides`` merges into the cached
+    // params so callers can pivot on one axis (e.g. flip source) without
+    // repeating the rest of the filter state.
+    async function fetchTopUsers(overrides = {}) {
+        const merged = { ...topUsersParams.value, ...overrides };
+        topUsersParams.value = merged;
+        isLoadingTopUsers.value = true;
+        try {
+            const params = {
+                metric: merged.metric,
+                limit: merged.limit,
+                days: merged.days,
+            };
+            if (merged.source) params.source = merged.source;
+            const response = await apiClient.get('/api/admin/top-users', { params });
+            topUsers.value = response.data || [];
+        } catch (error) {
+            console.error("Failed to fetch top users:", error);
+            topUsers.value = [];
+        } finally {
+            isLoadingTopUsers.value = false;
+        }
     }
 
     async function fetchGlobalSettings(force = false) { 
@@ -883,6 +912,7 @@ export const useAdminStore = defineStore('admin', () => {
         zooSkills, isLoadingZooSkills, skillFilters, skillZooRepositories, isLoadingSkillZooRepositories,
         installedApps, isLoadingInstalledApps,
         systemStatus, isLoadingSystemStatus, connectedUsers, isLoadingConnectedUsers, serverInfo, isLoadingServerInfo, globalGenerationStats, isLoadingGlobalGenerationStats, modelUsageStats, isLoadingModelUsageStats,
+        topUsers, isLoadingTopUsers, topUsersParams,
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories, newsArticles, isLoadingNewsArticles,
         isImporting, isEnhancingEmail, adminAvailableLollmsModels, isLoadingLollmsModels,
         appFilters, mcpFilters, promptFilters, personalityFilters, systemLogs, isLoadingSystemLogs,
@@ -894,7 +924,7 @@ export const useAdminStore = defineStore('admin', () => {
         forceAllUsersConfig, 
         fetchDashboardStats, fetchAlertSummary, setAlertSummary, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
         fetchServiceDashboard, resetServiceUsage, 
-        fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,
+        fetchSystemStatus, killProcess, fetchModelUsageStats, fetchTopUsers, fetchServerInfo, purgeUnusedUploads,
         fetchAllUsers, activateUser, disconnectUser, bulkActivateUsers, bulkDeactivateUsers, bulkDisconnectUsers, bulkSetRole,
         fetchUserStats, fetchUserTokenQuota, updateUserTokenQuota, updateGlobalTokenQuota, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
