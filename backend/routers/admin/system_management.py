@@ -99,6 +99,26 @@ class LogEntry(BaseModel):
     level: str
     message: str
 
+
+class ComposeEmailRequest(BaseModel):
+    """Request payload for AI-driven email authoring from a natural-language brief.
+
+    Unlike /enhance-email (which rewrites an already-written draft), /compose-email
+    generates the ENTIRE message (subject + body) from a prompt, so an admin can
+    say "invite users to try the new Flow Studio with a punchy headline" and get
+    a complete, ready-to-send draft.
+    """
+    prompt: str
+    tone: Optional[str] = "professional"
+    language: Optional[str] = "en"
+    background_color: Optional[str] = None
+    include_subject: bool = True
+
+
+class ComposeEmailResponse(BaseModel):
+    subject: str = ""
+    body: str = ""
+
 @system_management_router.post("/system/force-all-users-config", response_model=Dict[str, str])
 async def force_all_users_config(payload: ForceGlobalConfigPayload, db: Session = Depends(get_db)):
     """
@@ -535,6 +555,169 @@ async def get_server_info(request: Request, db: Session = Depends(get_db)):
         active_ports=active_ports, cors_origins=allowed_origins,
         local_ips=local_ips
     )
+
+@system_management_router.post("/compose-email", response_model=ComposeEmailResponse)
+async def compose_email_with_ai(
+    payload: ComposeEmailRequest,
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """
+    Generate a complete email (subject + body) from a natural-language prompt.
+
+    Uses the primary admin's configured LLM binding — the same one that powers
+    the existing /enhance-email flow — so admins do not need to configure a
+    second model for outreach. The output is stripped of markdown fences and
+    returned as plain {subject, body} JSON so the compose UI can drop it
+    directly into the form.
+    """
+    import re as _re
+    import json as _json
+
+    prompt_text = (payload.prompt or "").strip()
+    if not prompt_text:
+        raise HTTPException(status_code=400, detail="`prompt` must be a non-empty string.")
+
+    tone = (payload.tone or "professional").strip()
+    language = (payload.language or "en").strip()
+    want_subject = bool(payload.include_subject)
+
+    # Compose the system prompt. Keeping this deterministic makes the AI output
+    # stable for a given brief, and the explicit format contract eliminates the
+    # most common failure mode (the model prepending commentary like "Here's
+    # your email:" which would leak into the subject/body fields).
+    system_prompt = (
+        "You are an experienced email marketing copywriter writing an outreach "
+        "email that will be sent by an administrator of a self-hosted AI platform "
+        "(LoLLMs). Compose the very best email for the brief below.\n\n"
+        "RULES:\n"
+        f"- Tone: {tone}.\n"
+        f"- Language: {language}.\n"
+        "- The body must be plain text (no markdown fences, no HTML tags, no headings).\n"
+        "- Use short, readable paragraphs. 90-180 words is ideal.\n"
+        "- Never invent concrete statistics, prices, or URLs that were not in the brief.\n"
+        "- End with a warm, single-sentence sign-off from 'The LoLLMs team'.\n"
+    )
+    if want_subject:
+        system_prompt += (
+            "\nReturn ONLY a single JSON object with exactly two keys: "
+            "\"subject\" (a short, concrete subject line, under 90 characters) and "
+            "\"body\" (the full plain-text email body). Do not add any other text, "
+            "code fences, or explanation."
+        )
+    else:
+        system_prompt += (
+            "\nReturn ONLY a single JSON object with exactly two keys: "
+            "\"subject\" (empty string) and \"body\" (the full plain-text email body). "
+            "Do not add any other text, code fences, or explanation."
+        )
+
+    # Build the LLM client from the current admin's stored preferences — this
+    # matches the pattern used by /enhance-email so no extra configuration step
+    # is introduced for the operator.
+    try:
+        from backend.session import (
+            user_sessions,
+            build_lollms_client_from_params,
+            resolve_model_name,
+        )
+        from backend.db.models.user import User as DBUser
+
+        admin = db.query(DBUser).filter(DBUser.id == current_user.id).first()
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin user not found.")
+
+        # Ensure an in-memory session exists so the client factory can read
+        # model/preferences without re-running the whole session-init routine.
+        if admin.username not in user_sessions:
+            user_sessions[admin.username] = {
+                "safe_store_instances": {},
+                "discussions": {},
+                "active_vectorizer": getattr(admin, "safe_store_vectorizer", None),
+                "lollms_model_name": getattr(admin, "lollms_model_name", None),
+                "llm_params": {},
+                "active_personality_id": getattr(admin, "active_personality_id", None),
+            }
+
+        model_ref = getattr(admin, "lollms_model_name", None)
+        if not model_ref:
+            raise HTTPException(
+                status_code=503,
+                detail="No LLM model is configured for the administrator account.",
+            )
+
+        binding_alias, model_name = resolve_model_name(db, model_ref)
+        lc = build_lollms_client_from_params(
+            username=admin.username,
+            binding_alias=binding_alias,
+            model_name=model_name,
+            load_llm=True,
+            load_mcp=False,
+        )
+        if lc is None or not getattr(lc, "llm", None):
+            raise HTTPException(
+                status_code=503,
+                detail="The LLM client could not be initialised. Check bindings and model availability.",
+            )
+
+        raw = lc.generate_from_messages(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt_text},
+            ],
+            temperature=0.7,
+            n_predict=1200,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Email composition failed: {echo_safe(e)}",
+        )
+
+    text = raw if isinstance(raw, str) else str(raw)
+    text = _strip_fences(text)
+
+    parsed_subject = ""
+    parsed_body = ""
+    try:
+        obj = _json.loads(text)
+        if isinstance(obj, dict):
+            parsed_subject = str(obj.get("subject") or "").strip()
+            parsed_body = str(obj.get("body") or "").strip()
+    except Exception:
+        # Fallback: if the model ignores the JSON contract, treat the whole
+        # output as the body and leave the subject blank. Better to hand the
+        # admin a usable draft than to raise and lose the generation.
+        parsed_body = text.strip()
+
+    if not parsed_body and not parsed_subject:
+        raise HTTPException(
+            status_code=502,
+            detail="The model returned an empty email. Try rephrasing the prompt.",
+        )
+
+    return ComposeEmailResponse(subject=parsed_subject, body=parsed_body)
+
+
+def _strip_fences(text: str) -> str:
+    """Remove triple-backtick fences a model sometimes wraps JSON in."""
+    text = text.strip()
+    if text.startswith("```"):
+        # Drop leading fence (with optional language tag) and trailing fence.
+        text = text.split("\n", 1)[1] if "\n" in text else ""
+        if text.endswith("```"):
+            text = text[:-3]
+    return text.strip()
+
+
+def echo_safe(err: Exception) -> str:
+    """Return a non-leaking short description of an exception for HTTP details."""
+    msg = str(err) or err.__class__.__name__
+    return msg[:300]
+
 
 @system_management_router.post("/broadcast", status_code=202)
 async def broadcast_message_to_all_users(payload: AdminBroadcastRequest, current_user: UserAuthDetails = Depends(get_current_admin_user)):

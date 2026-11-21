@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-21 18:46]
+
+- feat: add system management endpoints and admin store actions
+
 ## [2026-11-20 15:22]
 
 - feat(dashboard): add top users leaderboard with source and metric filters

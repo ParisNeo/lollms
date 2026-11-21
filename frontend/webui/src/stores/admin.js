@@ -741,6 +741,24 @@ export const useAdminStore = defineStore('admin', () => {
         return true;
     }
     async function enhanceEmail(subject, body, backgroundColor, prompt) { isEnhancingEmail.value = true; try { const response = await apiClient.post('/api/admin/enhance-email', { subject, body, background_color: backgroundColor, prompt }); return response.data; } finally { isEnhancingEmail.value = false; } }
+    // Generate a complete email (subject + body) from a natural-language prompt.
+    // Distinct from enhanceEmail: "enhance" rewrites an existing draft, "compose"
+    // drafts from scratch. Returns { subject, body } so the caller can drop the
+    // result straight into the compose form.
+    async function composeEmail({ prompt, tone = 'professional', language = 'en', includeSubject = true }) {
+        isEnhancingEmail.value = true;
+        try {
+            const response = await apiClient.post('/api/admin/compose-email', {
+                prompt,
+                tone,
+                language,
+                include_subject: includeSubject,
+            });
+            return response.data || { subject: '', body: '' };
+        } finally {
+            isEnhancingEmail.value = false;
+        }
+    }
     async function uploadWelcomeLogo(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/upload-logo', formData); await fetchGlobalSettings(true); uiStore.addNotification(response.data.message, 'success'); }
     async function removeWelcomeLogo() { await apiClient.delete('/api/admin/remove-logo'); await fetchGlobalSettings(true); uiStore.addNotification('Custom logo removed.', 'success'); }
     async function uploadSslFile(file, fileType) { const formData = new FormData(); formData.append('file', file); formData.append('file_type', fileType); const response = await apiClient.post('/api/admin/upload-ssl-file', formData, { headers: { 'Content-Type': 'multipart/form-data' }, }); await fetchGlobalSettings(true); return response.data.path; }
@@ -957,7 +975,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact, createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, exportCategory, importFunFacts, importCategoryFromFile, generateFunFacts,
         fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles, fetchSystemLogs,
         
-        sendEmailToUsers, sendEmailToUser, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
+        sendEmailToUsers, sendEmailToUser, enhanceEmail, composeEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
         fetchBindingZoo, installLlmFromZoo, fetchTtiBindingZoo, installTtiFromZoo, fetchTtsBindingZoo, installTtsFromZoo, fetchSttBindingZoo, installSttFromZoo,
         fetchTtvBindingZoo, installTtvFromZoo, fetchTtmBindingZoo, installTtmFromZoo,
 
