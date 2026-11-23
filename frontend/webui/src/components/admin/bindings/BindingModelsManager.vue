@@ -19,6 +19,11 @@ import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../../assets/icons/IconCircle.vue';
 import IconArrowPath from '../../../assets/icons/IconArrowPath.vue';
 import apiClient from '../../../services/api';
+import {
+    buildDefaultProfilePayload,
+    collectTakenProfileNames,
+    resolveBindingAction,
+} from './bindingConfigs';
 
 const props = defineProps({
     binding: { type: Object, required: false, default: null },
@@ -106,6 +111,96 @@ async function handleAutoCreateProfiles() {
         uiStore.addNotification(e.response?.data?.detail || 'Failed to auto-create profiles.', 'error');
     } finally {
         isAutoCreating.value = false;
+    }
+}
+
+// ── Explicit bulk + per-row profile building ────────────────────────────────
+// Small state bucket so each row can show its own spinner and the bulk button
+// can show a single global one. All naming / vision / ctx defaults come from
+// bindingConfigs so this legacy manager matches the zoo and profiles grid
+// exactly.
+const quickCreatingName = ref(null);
+const isBulkCreating = ref(false);
+
+function resolveSaveAliasFn() {
+    return resolveBindingAction(adminStore, props.bindingType, 'saveAlias');
+}
+
+function buildProfileAliasForModel(activeB, modelName, taken) {
+    return buildDefaultProfilePayload(activeB, props.bindingType, modelName, taken);
+}
+
+// Single click on a model row: create-and-save its profile immediately so the
+// user doesn't have to open the editor. Keeps the row spinner while in flight.
+async function quickCreateProfile(model) {
+    const activeB = currentActiveBinding.value;
+    if (!activeB) return;
+    const modelName = model?.original_model_name || model?.name;
+    if (!modelName) return;
+    if (quickCreatingName.value) return; // serialize
+
+    const saveFn = resolveSaveAliasFn();
+    if (!saveFn) {
+        uiStore.addNotification('Profile creation is not supported for this modality.', 'warning');
+        return;
+    }
+
+    quickCreatingName.value = modelName;
+    try {
+        const taken = collectTakenProfileNames(activeB);
+        const payload = buildProfileAliasForModel(activeB, modelName, taken);
+        await saveFn(activeB.id, payload);
+        uiStore.addNotification(`Profile '${payload.alias.title}' created.`, 'success');
+        await Promise.allSettled([fetchModels(), fetchUniversalProfiles()]);
+    } catch (e) {
+        console.error('Quick profile creation failed:', e);
+        uiStore.addNotification(e?.response?.data?.detail || 'Failed to create profile.', 'error');
+    } finally {
+        quickCreatingName.value = null;
+    }
+}
+
+// Bulk-build profiles for every unaliased engine model currently visible.
+// Uses the same defaults/naming as quickCreateProfile so behaviour is
+// predictable across the two entry points.
+async function bulkBuildProfiles() {
+    const activeB = currentActiveBinding.value;
+    if (!activeB) return;
+    const targets = filteredModels.value.map(m => m?.original_model_name || m?.name).filter(Boolean);
+    if (targets.length === 0) {
+        uiStore.addNotification('No unaliased models to build profiles for.', 'info');
+        return;
+    }
+
+    const saveFn = resolveSaveAliasFn();
+    if (!saveFn) {
+        uiStore.addNotification('Profile creation is not supported for this modality.', 'warning');
+        return;
+    }
+
+    isBulkCreating.value = true;
+    const taken = collectTakenProfileNames(activeB);
+    let created = 0;
+    let failed = 0;
+    for (const modelName of targets) {
+        try {
+            const payload = buildProfileAliasForModel(activeB, modelName, taken);
+            await saveFn(activeB.id, payload);
+            created += 1;
+        } catch (e) {
+            console.warn(`Bulk profile creation failed for '${modelName}':`, e);
+            failed += 1;
+        }
+    }
+    isBulkCreating.value = false;
+    await Promise.allSettled([fetchModels(), fetchUniversalProfiles()]);
+    if (created > 0) {
+        uiStore.addNotification(
+            `Created ${created} profile(s)${failed ? ` · ${failed} failed` : ''}.`,
+            failed ? 'warning' : 'success'
+        );
+    } else if (failed > 0) {
+        uiStore.addNotification('Failed to build profiles. Check server logs.', 'error');
     }
 }
 
@@ -863,6 +958,16 @@ watch(() => props.binding, (newBinding) => {
                         <IconSparkles v-else class="w-3.5 h-3.5 text-purple-500" />
                         <span>Auto-Profiles</span>
                      </button>
+                     <button
+                        @click="bulkBuildProfiles"
+                        :disabled="isBulkCreating || !currentActiveBinding || filteredModels.length === 0"
+                        class="btn btn-secondary btn-xs flex items-center gap-1 shrink-0 h-8 px-2 text-blue-600 dark:text-blue-300"
+                        :title="`Build a profile for each of the ${filteredModels.length} unaliased model(s)`"
+                     >
+                        <IconAnimateSpin v-if="isBulkCreating" class="w-3.5 h-3.5 animate-spin" />
+                        <IconPlus v-else class="w-3.5 h-3.5" />
+                        <span>Bulk Build ({{ filteredModels.length }})</span>
+                     </button>
                      <button @click="addNewProfile" class="btn btn-primary btn-xs flex items-center gap-1 shrink-0 h-8" :title="isSmartRouter ? 'Add New Smart Router Group' : 'Add New Model Profile'">
                         <IconPlus class="w-3.5 h-3.5" />
                         <span>{{ isSmartRouter ? 'Add Group' : 'Add Profile' }}</span>
@@ -937,13 +1042,23 @@ watch(() => props.binding, (newBinding) => {
                             </button>
                         </div>
                         <ul v-if="filteredModels.length > 0" class="list-none p-0 m-0 space-y-1">
-                            <li v-for="model in filteredModels" :key="model.original_model_name" class="list-none p-0 m-0">
+                            <li v-for="model in filteredModels" :key="model.original_model_name" class="list-none p-0 m-0 flex items-center gap-1 group/model">
                                 <button @click="selectModel(model)"
-                                        class="w-full text-left p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between transition-colors"
+                                        class="grow min-w-0 text-left p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between transition-colors"
                                         :class="{'bg-gray-200 dark:bg-gray-700 font-bold': selectedModel && selectedModel.original_model_name === model.original_model_name}">
                                     <div class="grow min-w-0">
                                         <p class="font-medium text-xs font-mono truncate text-gray-700 dark:text-gray-300">{{ model.original_model_name }}</p>
                                     </div>
+                                </button>
+                                <button
+                                    @click.stop="quickCreateProfile(model)"
+                                    :disabled="quickCreatingName === model.original_model_name || isBulkCreating"
+                                    type="button"
+                                    class="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors shrink-0 disabled:opacity-40"
+                                    :title="`Create a profile for '${model.original_model_name}' (named ${currentActiveBinding?.alias || 'binding'}_${model.original_model_name})`"
+                                >
+                                    <IconAnimateSpin v-if="quickCreatingName === model.original_model_name" class="w-3.5 h-3.5 animate-spin" />
+                                    <IconPlus v-else class="w-3.5 h-3.5" />
                                 </button>
                             </li>
                         </ul>

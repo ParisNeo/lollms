@@ -54,14 +54,11 @@ const McpZoo = defineAsyncComponent(() => import('./zoos/McpsManagement.vue'));
 const AppZoo = defineAsyncComponent(() => import('./zoos/AppsManagement.vue'));
 const SkillZoo = defineAsyncComponent(() => import('./zoos/SkillsManagement.vue'));
 
-// Engine Bindings
-const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBindingsSettings.vue'));
-const TTIBindingsSettings = defineAsyncComponent(() => import('./bindings/TTIBindingsSettings.vue'));
-const TTSBindingsSettings = defineAsyncComponent(() => import('./bindings/TTSBindingsSettings.vue'));
-const STTBindingsSettings = defineAsyncComponent(() => import('./bindings/STTBindingsSettings.vue'));
-const TTVBindingsSettings = defineAsyncComponent(() => import('./bindings/TTVBindingsSettings.vue'));
-const TTMBindingsSettings = defineAsyncComponent(() => import('./bindings/TTMBindingsSettings.vue'));
-const RAGBindingsSettings = defineAsyncComponent(() => import('./bindings/RAGBindingsSettings.vue'));
+// Engine Bindings — unified, config-driven admin surface for ALL modalities.
+// The single <BindingsAdminView> handles llm/tti/tts/stt/ttv/ttm/rag via the
+// bindingConfigs.js capability map, so adding a modality no longer requires a
+// new component. The `initial-modality` prop only sets the default tab.
+const BindingsAdminView = defineAsyncComponent(() => import('./bindings/BindingsAdminView.vue'));
 
 // ── Alert banner ────────────────────────────────────────────────────────────
 // A persistent, always-visible strip surfaces critical/warning conditions even
@@ -176,14 +173,11 @@ function handleDashboardNavigation(payload) {
         <AppZoo v-else-if="activeTab === 'apps' || activeTab === 'apps_zoo'" />
         <SkillZoo v-else-if="activeTab === 'skills_zoo'" />
 
-        <!-- 6. BINDINGS & ENGINES -->
-        <LLMBindingsSettings v-else-if="activeTab === 'llm_bindings' || activeTab === 'llm'" />
-        <TTIBindingsSettings v-else-if="activeTab === 'tti_bindings' || activeTab === 'tti'" />
-        <TTVBindingsSettings v-else-if="activeTab === 'ttv_bindings' || activeTab === 'ttv'" />
-        <TTMBindingsSettings v-else-if="activeTab === 'ttm_bindings' || activeTab === 'ttm'" />
-        <TTSBindingsSettings v-else-if="activeTab === 'tts_bindings' || activeTab === 'tts'" />
-        <STTBindingsSettings v-else-if="activeTab === 'stt_bindings' || activeTab === 'stt'" />
-        <RAGBindingsSettings v-else-if="activeTab === 'rag_bindings' || activeTab === 'rag'" />
+        <!-- 6. BINDINGS & ENGINES — unified config-driven panel -->
+        <BindingsAdminView
+            v-else-if="['llm_bindings','llm','tti_bindings','tti','ttv_bindings','ttv','ttm_bindings','ttm','tts_bindings','tts','stt_bindings','stt','rag_bindings','rag'].includes(activeTab)"
+            :initial-modality="activeTab.replace('_bindings', '')"
+        />
         <BuildersSettings v-else-if="activeTab === 'builders'" />
         <AiBotSettings v-else-if="activeTab === 'ai_bot'" />
 

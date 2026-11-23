@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-23 02:03]
+
+- feat(admin): enhance bindings management and refine zoos with security tests
+
 ## [2026-11-21 18:46]
 
 - feat: add system management endpoints and admin store actions

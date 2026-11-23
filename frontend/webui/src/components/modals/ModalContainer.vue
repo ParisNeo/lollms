@@ -65,6 +65,7 @@ const DiscussionGroupModal = defineAsyncComponent(() => import('./DiscussionGrou
 const MoveDiscussionModal = defineAsyncComponent(() => import('./MoveDiscussionModal.vue'));
 const EnhancePromptModal = defineAsyncComponent(() => import('./EnhancePromptModal.vue'));
 const CameraCaptureModal = defineAsyncComponent(() => import('./CameraCaptureModal.vue'));
+const BluetoothImageModal = defineAsyncComponent(() => import('./BluetoothImageModal.vue'));
 const ImageEditorSettingsModal = defineAsyncComponent(() => import('./ImageEditorSettingsModal.vue'));
 const NoteEditorModal = defineAsyncComponent(() => import('./NoteEditorModal.vue'));
 const NoteGroupModal = defineAsyncComponent(() => import('./NoteGroupModal.vue'));
@@ -150,6 +151,7 @@ const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardMod
     <MoveDiscussionModal v-if="activeModal === 'moveDiscussion'" />
     <EnhancePromptModal v-if="activeModal === 'enhancePrompt'" />
     <CameraCaptureModal v-if="activeModal === 'cameraCapture'" />
+    <BluetoothImageModal v-if="activeModal === 'bluetoothImage'" />
     <ImageEditorSettingsModal v-if="activeModal === 'imageEditorSettings'" />
     <NoteEditorModal v-if="activeModal === 'noteEditor'" />
     <NoteGroupModal v-if="activeModal === 'noteGroup'" />

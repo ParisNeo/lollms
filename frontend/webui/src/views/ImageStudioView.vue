@@ -72,6 +72,9 @@
                 <button @click="openCameraModal" class="btn-icon p-1.5 text-gray-500 hover:text-blue-600" title="Capture from Webcam">
                     <IconCamera class="w-4.5 h-4.5" />
                 </button>
+                <button @click="openBluetoothModal" class="btn-icon p-1.5 text-gray-500 hover:text-blue-600" title="Receive Image over Bluetooth">
+                    <IconBluetooth class="w-4.5 h-4.5" />
+                </button>
                 <button @click="handleNewBlankImage" class="btn-icon p-1.5 text-gray-500 hover:text-blue-600" title="Open Layer Canvas Studio">
                     <IconPlus class="w-4.5 h-4.5" />
                 </button>
@@ -805,6 +808,7 @@ import IconRefresh from '../assets/icons/IconRefresh.vue';
 import IconChevronUp from '../assets/icons/IconChevronUp.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconCamera from '../assets/icons/IconCamera.vue';
+import IconBluetooth from '../assets/icons/IconBluetooth.vue';
 import IconXMark from '../assets/icons/IconXMark.vue';
 import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
 import IconFolder from '../assets/icons/IconFolder.vue';
@@ -1854,6 +1858,7 @@ async function handlePaste(e) {
 }
 
 function openCameraModal() { uiStore.openModal('cameraCapture'); }
+function openBluetoothModal() { uiStore.openModal('bluetoothImage'); }
 function handleRefresh() { imageStore.fetchImages(); }
 
 onMounted(() => {

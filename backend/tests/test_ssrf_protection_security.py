@@ -6,8 +6,9 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+import socket
+
 import pytest
-from fastapi import HTTPException
 
 from backend.security import validate_url, safe_requests_get
 
@@ -24,10 +25,32 @@ def test_validate_url_blocks_ssrf(malicious_url):
     with pytest.raises(ValueError):
         validate_url(malicious_url)
 
-def test_validate_url_allows_public():
+def _stub_public_dns(monkeypatch, host: str = "example.com") -> None:
+    """Stub socket.getaddrinfo so DNS-dependent tests are hermetic.
+
+    ``validate_url`` performs a real DNS lookup. On sandboxed CI (no DNS)
+    that raises ``socket.gaierror`` and short-circuits the intended code
+    path. We return a fixed public IPv4 for ``host`` so the public-IP and
+    redirect-validation branches actually run.
+    """
+    import backend.security as sec
+
+    def _resolve(name, *args, **kwargs):
+        if name == host:
+            return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("93.184.216.34", 0))]
+        # Anything else: refuse to resolve so tests can't accidentally
+        # reach the network.
+        raise socket.gaierror(f"unexpected host: {name}")
+
+    monkeypatch.setattr(sec.socket, "getaddrinfo", _resolve)
+
+def test_validate_url_allows_public(monkeypatch):
+    _stub_public_dns(monkeypatch, "example.com")
     validate_url("https://example.com")
 
-def test_safe_requests_get_blocks_redirect_to_internal():
+def test_safe_requests_get_blocks_redirect_to_internal(monkeypatch):
+    _stub_public_dns(monkeypatch, "example.com")
+
     mock_redirect_response = MagicMock()
     mock_redirect_response.status_code = 302
     mock_redirect_response.headers = {"Location": "http://169.254.169.254/latest/meta-data/"}

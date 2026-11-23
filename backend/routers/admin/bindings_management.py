@@ -363,23 +363,258 @@ def _execute_binding_command_task(task: Task, binding_type: str, binding_data: D
         trace_exception(e)
         raise e
 
+def _zoo_from_live_models(obj) -> List[Dict[str, Any]]:
+    """Synthesizes a zoo-shaped catalogue from a binding's *live* model list.
+
+    Some engines (Ollama, vLLM, LM Studio, most OpenAI-compatible servers)
+    do not publish a static "downloadable zoo" — they only expose a
+    ``list_models()`` endpoint returning the models the server already serves.
+    From the admin's perspective those *are* the installable/selectable
+    models, so when the static zoo is empty we present them as a zoo.
+
+    The returned entries honour the same dict shape as ``get_zoo()``
+    (``name``/``description``/``size``/``type``/``link``) so the frontend and
+    install paths require zero changes.
+    """
+    if obj is None:
+        return []
+    list_models = getattr(obj, 'list_models', None)
+    if not callable(list_models):
+        return []
+
+    # A class-only object has not been instantiated; ``list_models`` needs a
+    # live server, so try it bound to the instance/class as-is. Instances from
+    # ``_get_binding_instance`` are the useful case here.
+    try:
+        raw_models = list_models()
+    except Exception as e:
+        ASCIIColors.warning(f"[LOLLMS_DEBUG] live list_models() failed on {obj!r}: {e}")
+        return []
+
+    if not isinstance(raw_models, (list, tuple)):
+        return []
+
+    synthesized: List[Dict[str, Any]] = []
+    for entry in raw_models:
+        name = None
+        description = ''
+        size = None
+        mtype = None
+        link = None
+
+        if isinstance(entry, str):
+            name = entry
+        elif isinstance(entry, dict):
+            name = (
+                entry.get('model_name')
+                or entry.get('original_model_name')
+                or entry.get('name')
+                or entry.get('id')
+            )
+            description = entry.get('description') or entry.get('owned_by') or ''
+            size = entry.get('size')
+            mtype = entry.get('type') or entry.get('object')
+            link = entry.get('link')
+        else:
+            # Fallback: attribute-style model records.
+            name = (
+                getattr(entry, 'model_name', None)
+                or getattr(entry, 'original_model_name', None)
+                or getattr(entry, 'name', None)
+                or getattr(entry, 'id', None)
+            )
+            description = getattr(entry, 'description', '') or getattr(entry, 'owned_by', '') or ''
+            size = getattr(entry, 'size', None)
+            mtype = getattr(entry, 'type', None) or getattr(entry, 'object', None)
+            link = getattr(entry, 'link', None)
+
+        if not name:
+            continue
+
+        synthesized.append({
+            'name': str(name),
+            # Signal to any UI that wants to distinguish this from a
+            # downloadable catalogue entry: it is already installed/served.
+            'description': description or 'Model served by the binding (live catalogue).',
+            'size': size,
+            'type': mtype or 'served',
+            'link': link,
+            'is_installed': True,
+            'source': 'live',
+        })
+
+    return synthesized
+
+
+def _extract_zoo_from_object(obj) -> List[Dict[str, Any]]:
+    """Reads the model-zoo catalogue from a binding *or* a binding class.
+
+    The zoo is static catalogue data (names/descriptions/sizes). It is exposed
+    on the binding class (or on instances) via ``list_models_zoo`` /
+    ``get_models_zoo`` / ``models_zoo``. This helper tries all three shapes so
+    a class-only object (no live server) works the same as an instance.
+    """
+    if obj is None:
+        return []
+
+    # When ``obj`` is a *class* it has not been instantiated. Many zoo getters
+    # are plain instance methods whose body never touches ``self`` (e.g. the
+    # base ``LollmsLLMBinding.get_zoo`` reads a module-local ``zoo.json`` via
+    # ``__file__``). Such methods can be invoked on the class by supplying
+    # ``None`` as ``self``. This is the key to reading the catalogue while the
+    # remote engine is offline (the connecting ``__init__`` is skipped entirely).
+    is_class = isinstance(obj, type)
+
+    for getter_name in ('get_zoo', 'list_models_zoo', 'get_models_zoo'):
+        getter = getattr(obj, getter_name, None)
+        if not callable(getter):
+            continue
+        # 1. Try the plain call (works for static/class methods and instances).
+        try:
+            result = getter()
+            if result:
+                return result
+        except Exception as e:
+            ASCIIColors.warning(f"[LOLLMS_DEBUG] zoo getter '{getter_name}' plain call failed on {obj!r}: {e}")
+        # 2. Class-only fallback: call the unbound method with ``None`` as self.
+        #    Fails harmlessly for methods that genuinely need instance state.
+        if is_class:
+            try:
+                result = getter(None)
+                if result:
+                    return result
+            except Exception as e:
+                ASCIIColors.warning(f"[LOLLMS_DEBUG] zoo getter '{getter_name}' None-self call failed on {obj!r}: {e}")
+
+    try:
+        if hasattr(obj, 'models_zoo'):
+            zoo = getattr(obj, 'models_zoo')
+            return zoo() if callable(zoo) else (zoo or [])
+    except Exception as e:
+        trace_exception(e)
+    return []
+
+
 def _get_binding_zoo(binding_record, binding_type: str) -> List[Dict[str, Any]]:
+    """Returns the model zoo for a binding in a connection-independent way.
+
+    The zoo is *catalogue* data (no live server needed). The old implementation
+    built a live binding instance first, which fails whenever the remote server
+    is unreachable — even though the zoo data is available statically. We now:
+      1. Try a live instance (best case: gives the exact catalogue the engine exposes).
+      2. On any failure, fall back to the binding *class* and read its static zoo,
+         so administrators can still browse/install models when the server is down.
+    """
+    # 1. Live instance path (unchanged behaviour when the server is reachable).
     try:
         config = _get_effective_config(binding_record)
         service = _get_binding_instance(binding_type, binding_record.name, config)
-        if not service:
-            return []
-        if hasattr(service, 'list_models_zoo') and callable(service.list_models_zoo):
-            return service.list_models_zoo() or []
-        if hasattr(service, 'get_models_zoo') and callable(service.get_models_zoo):
-            return service.get_models_zoo() or []
-        if hasattr(service, 'models_zoo'):
-            zoo = service.models_zoo
-            return zoo() if callable(zoo) else (zoo or [])
-        return []
+        zoo = _extract_zoo_from_object(service)
+        if zoo:
+            return zoo
+        # NEW: no static zoo, but the engine may still SERVE models via
+        # ``list_models()`` (Ollama / vLLM / OpenAI-compatible / LM Studio).
+        # Surface those as zoo entries so admins can install/select them.
+        live_zoo = _zoo_from_live_models(service)
+        if live_zoo:
+            return live_zoo
+    except Exception as e:
+        # Expected when the remote engine is offline; fall through to class path.
+        ASCIIColors.warning(f"Live zoo probe failed for '{binding_record.name}' ({binding_type}); trying class-level zoo: {e}")
+
+    # 2. Class-level static zoo path (no live connection required).
+    #    The concrete binding class reads its catalogue from a local zoo.json
+    #    (see ``LollmsLLMBinding.get_zoo``); calling it on the class with a
+    #    ``None`` self works because the body only uses ``__file__``.
+    try:
+        binding_class = _resolve_binding_class(binding_type, binding_record.name)
+        zoo = _extract_zoo_from_object(binding_class)
+        if zoo:
+            return zoo
     except Exception as e:
         trace_exception(e)
+
+    # 3. Last resort: instantiate through the public factory. This usually
+    #    fails for offline engines (the constructor connects), but a few
+    #    bindings expose their zoo without a live connection.
+    try:
+        from lollms_client import create_binding as _create_binding
+        inst = _create_binding(binding_type, binding_name=binding_record.name, binding_config={})
+        zoo = _extract_zoo_from_object(inst)
+        if zoo:
+            return zoo
+        # NEW: a live-but-uncatalogued engine (e.g. Ollama serving models).
+        return _zoo_from_live_models(inst)
+    except Exception:
         return []
+
+
+def _resolve_binding_class(binding_type: str, binding_name: str):
+    """Resolves a binding *class* for a modality without instantiating it.
+
+    Each modality module exposes a ``create_binding`` factory plus a registry of
+    binding names. ``list_bindings`` validates the name is known. Importing the
+    concrete class avoids the server-connecting constructor that
+    ``_get_binding_instance`` triggers.
+    """
+    # Concrete binding classes live in per-modality subpackages:
+    #   lollms_client.llm_bindings.<name>
+    #   lollms_client.tti_bindings.<name>
+    #   ... etc.
+    # The top-level modules (``lollms_llm_binding`` …) only expose factory
+    # functions, NOT the concrete classes. We therefore look in the subpackage
+    # first, then fall back to the top-level module (base class).
+    modality_package_map = {
+        "llm": ("llm_bindings", "lollms_llm_binding", "LLMBinding"),
+        "tti": ("tti_bindings", "lollms_tti_binding", "TTIBinding"),
+        "tts": ("tts_bindings", "lollms_tts_binding", "TTSBinding"),
+        "stt": ("stt_bindings", "lollms_stt_binding", "STTBinding"),
+        "ttv": ("ttv_bindings", "lollms_ttv_binding", "TTVBinding"),
+        "ttm": ("ttm_bindings", "lollms_ttm_binding", "TTMBinding"),
+    }
+    entry = modality_package_map.get(binding_type)
+    if not entry:
+        return None
+    subpkg, top_module, base_class_name = entry
+
+    class_name_candidates = [
+        "".join(part.capitalize() for part in binding_name.split("_")) + "Binding",
+        binding_name + "_binding",
+        binding_name,
+    ]
+
+    # 1. Try the concrete subpackage: lollms_client.<subpkg>.<name>
+    try:
+        submod = __import__(
+            f"lollms_client.{subpkg}.{binding_name}",
+            fromlist=class_name_candidates + [base_class_name],
+        )
+        for cand in class_name_candidates:
+            cls = getattr(submod, cand, None)
+            if isinstance(cls, type):
+                return cls
+        # Some packages re-export their class under __all__ or a "Binding" name.
+        for attr_name in dir(submod):
+            if attr_name.endswith("Binding") and not attr_name.startswith("_"):
+                cls = getattr(submod, attr_name, None)
+                if isinstance(cls, type):
+                    return cls
+    except Exception:
+        pass
+
+    # 2. Fall back to the top-level module (base class — may not carry a zoo).
+    try:
+        mod = __import__(f"lollms_client.{top_module}", fromlist=[base_class_name])
+        for cand in class_name_candidates:
+            cls = getattr(mod, cand, None)
+            if isinstance(cls, type):
+                return cls
+        base_cls = getattr(mod, base_class_name, None)
+        if isinstance(base_cls, type):
+            return base_cls
+    except Exception:
+        pass
+    return None
 
 def _install_from_zoo_task(task: Task, binding_type: str, binding_data: Dict, index: int):
     task.log(f"Installing model index {index} from zoo for {binding_type.upper()} binding '{binding_data['alias']}'...")

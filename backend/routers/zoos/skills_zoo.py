@@ -76,25 +76,48 @@ def _refresh_zoo_cache_task(task: Task):
     return {"message": "Zoo cache refreshed successfully."}
 
 def _resolve_safe_skill_root(repo_name: str) -> Path:
-    clean = repo_name.rstrip('/\\').split('/')[-1].split('\\')[-1]
-    if clean.endswith('.git'):
+    """Resolve the on-disk root directory for a skill repository name.
+
+    The repository identifier comes from the client and must NEVER be used as
+    a raw path component: it is reduced to a single, sanitized basename
+    before being joined to ``SKILLS_ZOO_ROOT_PATH`` so it cannot traverse
+    outside the zoo root (CWE-22).
+    """
+    raw = (repo_name or "").rstrip("/\\")
+    clean = raw.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if clean.endswith(".git"):
         clean = clean[:-4]
-    for cand in [clean, repo_name, "lollms_skills_zoo"]:
-        if ':' in cand:
+    candidates = [clean] if clean and clean not in (".", "..") else []
+    candidates.append("lollms_skills_zoo")
+    for cand in candidates:
+        if not cand or ":" in cand or cand in (".", "..") or "/" in cand or "\\" in cand:
             continue
         try:
-            target = SKILLS_ZOO_ROOT_PATH / cand
-            if target.is_dir():
+            target = (SKILLS_ZOO_ROOT_PATH / cand).resolve()
+            if SKILLS_ZOO_ROOT_PATH.resolve() in target.parents and target.is_dir():
                 return target
         except OSError:
             continue
     try:
         dirs = [d for d in SKILLS_ZOO_ROOT_PATH.iterdir() if d.is_dir() and not d.name.startswith('.')]
         if dirs:
-            return dirs[0]
+            return dirs[0].resolve()
     except Exception:
         pass
-    return SKILLS_ZOO_ROOT_PATH / clean
+    return (SKILLS_ZOO_ROOT_PATH / clean).resolve()
+
+
+def _resolve_within_root(root: Path, subpath: str) -> Path:
+    """Join ``subpath`` to ``root`` and enforce containment under ``root``.
+
+    Raises ``HTTPException(400)`` if the resolved path escapes ``root``. This
+    is the single containment gate for every client-controlled file read.
+    """
+    resolved_root = root.resolve()
+    resolved_target = (resolved_root / subpath).resolve()
+    if resolved_target != resolved_root and resolved_root not in resolved_target.parents:
+        raise HTTPException(status_code=400, detail="Invalid path.")
+    return resolved_target
 
 def _install_skill_task(task: Task, repo_name: str, folder_name: str, item_name: Optional[str] = None):
     task.log(f"Installing skill from {repo_name}/{folder_name}...")
@@ -263,7 +286,10 @@ def get_available_zoo_skills(
         repo_obj = repos_map.get(repo_name)
 
         safe_root = _resolve_safe_skill_root(repo_name)
-        target_path = safe_root / info.get('folder_name', '')
+        try:
+            target_path = _resolve_within_root(safe_root, info.get('folder_name', ''))
+        except HTTPException:
+            target_path = safe_root / "_invalid_"
         has_doc = target_path.is_file() or any((target_path / f).exists() for f in ["README.md", "readme.md", "SKILL.md", "skill.md"])
 
         model_data = {
@@ -315,34 +341,44 @@ def get_available_zoo_skills(
     )
 
 @skills_zoo_router.get("/readme", response_class=PlainTextResponse)
-def get_skill_readme(repository: str, folder_name: str):
+def get_skill_readme(
+    repository: str,
+    folder_name: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+):
     repo_root = _resolve_safe_skill_root(repository)
-    target = repo_root / folder_name
+    target = _resolve_within_root(repo_root, folder_name)
     if target.is_file():
         return target.read_text(encoding="utf-8", errors="replace")
 
     for cand in ["README.md", "readme.md", "SKILL.md", "skill.md", "skill.xml"]:
-        candidate_file = target / cand
+        candidate_file = _resolve_within_root(target, cand)
         if candidate_file.exists():
             return candidate_file.read_text(encoding="utf-8", errors="replace")
 
     raise HTTPException(status_code=404, detail="Documentation not found for this skill.")
 
 @skills_zoo_router.get("/license", response_class=PlainTextResponse)
-def get_skill_license_text(repository: str, folder_name: str):
+def get_skill_license_text(
+    repository: str,
+    folder_name: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+):
     repo_root = _resolve_safe_skill_root(repository)
-    target = repo_root / folder_name
+    target = _resolve_within_root(repo_root, folder_name)
 
     lic_candidates = ["LICENSE", "LICENSE.txt", "LICENSE.md", "license.txt", "license", "license.md"]
     if target.is_dir():
         for cand in lic_candidates:
-            if (target / cand).is_file():
-                return (target / cand).read_text(encoding="utf-8", errors="replace")
+            candidate = _resolve_within_root(target, cand)
+            if candidate.is_file():
+                return candidate.read_text(encoding="utf-8", errors="replace")
 
     if repo_root.is_dir():
         for cand in lic_candidates:
-            if (repo_root / cand).is_file():
-                return (repo_root / cand).read_text(encoding="utf-8", errors="replace")
+            candidate = _resolve_within_root(repo_root, cand)
+            if candidate.is_file():
+                return candidate.read_text(encoding="utf-8", errors="replace")
 
     return "Standard Open Source License (No explicit LICENSE text provided in skill folder)."
 

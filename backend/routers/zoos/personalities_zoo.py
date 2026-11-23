@@ -511,7 +511,13 @@ def get_available(
 
 @personalities_zoo_router.get("/readme", response_class=PlainTextResponse)
 def get_readme(repository: str, folder_name: str):
-    readme_path = PERSONALITIES_ZOO_ROOT_PATH / repository / folder_name / "README.md"
+    # Containment: resolve the repository-relative path and reject any
+    # client-controlled ``repository``/``folder_name`` that escapes the zoo
+    # root (CWE-22). Guards the unauthenticated readme fetch.
+    root = PERSONALITIES_ZOO_ROOT_PATH.resolve()
+    readme_path = (root / repository / folder_name / "README.md").resolve()
+    if root not in readme_path.parents:
+        raise HTTPException(status_code=400, detail="Invalid path.")
     if not readme_path.exists(): raise HTTPException(status_code=404, detail="README.md not found.")
     return readme_path.read_text(encoding="utf-8")
 
