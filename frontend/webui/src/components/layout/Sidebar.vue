@@ -9,6 +9,7 @@ import { useDataStore } from '../../stores/data';
 import { useImageStore } from '../../stores/images';
 import DiscussionList from './DiscussionList.vue';
 import VideoProjectList from './VideoProjectList.vue';
+import PersonalityList from './PersonalityList.vue';
 
 import logoDefault from '../../assets/logo.png';
 import IconPlus from '../../assets/icons/IconPlus.vue';
@@ -179,9 +180,7 @@ async function handlePlusClick() {
             }
             break;
         case 'personality':
-            uiStore.openModal('personalityEditor', { 
-                personality: { id: null, name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null } 
-            });
+            await router.push({ name: 'PersonalityStudio', query: { create: '1' } });
             break;
         case 'chat':
         default:
@@ -201,6 +200,7 @@ async function handlePlusClick() {
            so each studio owns the "list" surface inside the global sidebar. -->
       <template v-if="isSidebarOpen">
         <VideoProjectList v-if="currentContext === 'video'" class="h-full" />
+        <PersonalityList v-else-if="currentContext === 'personality'" class="h-full" />
         <DiscussionList v-else class="h-full" />
       </template>
 

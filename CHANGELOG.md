@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-23 14:46]
+
+- Fix XML parser security for skill-related content and update asset routing
+
 ## [2026-11-23 03:10]
 
 - fix: binding modules and UI components

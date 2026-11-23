@@ -1651,6 +1651,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "author": "VARCHAR",
             "version": "VARCHAR",
             "language": "VARCHAR DEFAULT 'markdown'",
+            "supporting_files": "JSON",
             "created_at": "DATETIME",
             "updated_at": "DATETIME"
         }
@@ -1663,6 +1664,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 except Exception as e:
                     connection.rollback()
                     print(f"WARNING: Failed to add column {col_name} to skills table: {e}")
+
+        connection.execute(text("UPDATE skills SET supporting_files = '{}' WHERE supporting_files IS NULL"))
 
         # Ensure index on name exists
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)"))

@@ -1,6 +1,6 @@
 import uuid
 from sqlalchemy import (
-    Column, String, Text, ForeignKey, Integer, Index, DateTime
+    Column, String, Text, ForeignKey, Integer, Index, DateTime, JSON
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -15,6 +15,7 @@ class Skill(Base):
     category = Column(String, nullable=True)
     language = Column(String, nullable=True, default="markdown")
     content = Column(Text, nullable=False)
+    supporting_files = Column(JSON, nullable=True, default=dict)
     author = Column(String, nullable=True, default="Community")
     version = Column(String, nullable=True, default="1.0.0")
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
