@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { useRouter } from 'vue-router';
 import { useAdminStore } from '../../../stores/admin';
 import { useTasksStore } from '../../../stores/tasks';
 import { useUiStore } from '../../../stores/ui';
@@ -14,6 +15,7 @@ import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 import PersonalityZooCard from '../../ui/Cards/PersonalityZooCard.vue';
 import AppCardSkeleton from '../../ui/Cards/AppCardSkeleton.vue';
 
+const router = useRouter();
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
@@ -248,8 +250,12 @@ function handleStarToggle(itemName) {
     else starredItems.value.push(itemName); 
 }
 
-function openEditor(personality = null) {
-    uiStore.openModal('personalityEditor', { personality });
+function openStudio() {
+    router.push({ name: 'PersonalityStudio' });
+}
+
+function openEditor() {
+    router.push({ name: 'PersonalityStudio', query: { create: '1' } });
 }
 
 function openGeneratePersonalityModal() {
@@ -324,6 +330,7 @@ async function handleRefreshCache() {
                 </div>
 
                 <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <button @click="openStudio" class="btn btn-secondary btn-sm flex-1 sm:flex-none justify-center">Open Studio</button>
                     <button @click="openGeneratePersonalityModal" class="btn btn-secondary btn-sm flex-1 sm:flex-none justify-center">
                         <IconSparkles class="w-3.5 h-3.5 mr-1" />Generate with AI
                     </button>

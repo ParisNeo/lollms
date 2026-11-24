@@ -42,9 +42,9 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
-## [2026-11-24 14:43]
+## [2026-11-23 14:46]
 
-- fix(webui): auto-select handbag after creation in personality studio
+- Fix XML parser security for skill-related content and update asset routing
 
 ## [2026-11-23 03:10]
 

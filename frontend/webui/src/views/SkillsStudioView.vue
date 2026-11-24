@@ -31,6 +31,7 @@ const isAdmin = computed(() => authStore.isAdmin);
 const selectedSkillId = ref(null);
 const isSaving = ref(false);
 const fileInput = ref(null);
+const newResourcePath = ref('');
 
 const form = ref({
     name: '',
@@ -38,7 +39,8 @@ const form = ref({
     description: '',
     content: '',
     is_system: false,
-    author: ''
+    author: '',
+    supporting_files: {}
 });
 
 const selectedSkill = computed(() => {
@@ -55,8 +57,10 @@ function selectSkill(skill) {
         description: skill.description || '',
         content: skill.content || '',
         is_system: Boolean(skill.is_system),
-        author: skill.author || ''
+        author: skill.author || '',
+        supporting_files: { ...(skill.supporting_files || {}) }
     };
+    newResourcePath.value = '';
     router.replace({ query: { ...route.query, skillId: skill.id } });
 }
 
@@ -68,8 +72,32 @@ function createNewSkill(asSystem = false) {
         description: 'Describe what this skill teaches the AI...',
         is_system: asSystem && isAdmin.value,
         author: asSystem ? 'System' : (authStore.user?.username || 'Personal'),
-        content: `---\nname: New Skill\ndescription: Describe what this skill does here\n---\n\n# Instructions\n\nStep-by-step cognitive directives for the model go here...`
+        supporting_files: {},
+        content: `---\nname: ${asSystem ? 'New System Skill' : 'New Skill'}\nauthor: ${asSystem ? 'System' : (authStore.user?.username || 'Personal')}\ndescription: Describe what this skill does here\n---\n\n# Instructions\n\nReference optional subskills with relative Markdown links, for example [Helper](helpers/helper.md).`
     };
+    newResourcePath.value = '';
+}
+
+function addResource() {
+    const path = newResourcePath.value.trim().replaceAll('\\\\', '/').replace(/^\/+/, '');
+    if (!path || path.split('/').some(part => !part || part === '.' || part === '..')) {
+        uiStore.addNotification('Enter a safe relative file path, such as helpers/research.md.', 'warning');
+        return;
+    }
+    if (path.toLowerCase() === 'skill.md') {
+        uiStore.addNotification('SKILL.md is edited in the main editor.', 'warning');
+        return;
+    }
+    if (Object.prototype.hasOwnProperty.call(form.value.supporting_files, path)) {
+        uiStore.addNotification('A file with this path already exists.', 'warning');
+        return;
+    }
+    form.value.supporting_files[path] = path.toLowerCase() === 'license.md' ? 'MIT License\n' : '';
+    newResourcePath.value = '';
+}
+
+function removeResource(path) {
+    delete form.value.supporting_files[path];
 }
 
 async function saveSkill() {
@@ -86,7 +114,8 @@ async function saveSkill() {
             description: form.value.description,
             content: form.value.content,
             is_system: Boolean(form.value.is_system),
-            author: form.value.author
+            author: form.value.author,
+            supporting_files: form.value.supporting_files
         };
 
         if (selectedSkillId.value) {
@@ -189,7 +218,7 @@ watch(() => route.query.skillId, (newId) => {
     <PageViewLayout title="Skills Studio" :title-icon="IconSparkles" :show-sidebar="false">
         <template #main>
             <div class="h-full flex flex-col overflow-hidden bg-bg-app">
-                <input type="file" ref="fileInput" @change="handleFileImport" class="hidden" accept=".xml,.md">
+                <input type="file" ref="fileInput" @change="handleFileImport" class="hidden" accept=".xml,.md,.zip">
 
                 <!-- Header Toolbar -->
                 <div class="shrink-0 px-6 py-3.5 border-b border-border-main bg-bg-card/70 backdrop-blur-sm flex items-center justify-between gap-4 flex-wrap">
@@ -200,6 +229,7 @@ watch(() => route.query.skillId, (newId) => {
                         <div class="flex items-center gap-2 min-w-0">
                             <input v-model="form.name" type="text" class="input-field text-sm font-bold w-52 sm:w-72" placeholder="Skill Name..." required />
                             <input v-model="form.category" type="text" class="input-field text-xs w-32 hidden sm:block" placeholder="Category" />
+                            <input v-model="form.author" type="text" class="input-field text-xs w-36 hidden lg:block" placeholder="Author (required)" />
 
                             <!-- System Skill Indicator / Admin Toggle -->
                             <div v-if="isAdmin" class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold shrink-0 cursor-pointer"
@@ -227,11 +257,15 @@ watch(() => route.query.skillId, (newId) => {
                             <IconArrowDownTray class="w-3.5 h-3.5" />
                             <span class="hidden md:inline">Import</span>
                         </button>
-                        <button v-if="selectedSkillId" @click="handleExport('xml')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export as XML (.xml)">
+                        <button v-if="selectedSkillId" @click="handleExport('zip')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export complete skill package: SKILL.md, subskills, README.md and LICENSE.md">
+                            <IconArrowUpTray class="w-3.5 h-3.5 text-purple-500" />
+                            <span class="hidden md:inline">Export Package</span>
+                        </button>
+                        <button v-if="selectedSkillId" @click="handleExport('xml')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export main skill as XML (.xml), without supporting files">
                             <IconArrowUpTray class="w-3.5 h-3.5 text-blue-500" />
                             <span class="hidden md:inline">Export XML</span>
                         </button>
-                        <button v-if="selectedSkillId" @click="handleExport('md')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export as Claude/LoLLMs Markdown (.md)">
+                        <button v-if="selectedSkillId" @click="handleExport('md')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export only SKILL.md as Claude/LoLLMs Markdown">
                             <IconArrowUpTray class="w-3.5 h-3.5 text-teal-500" />
                             <span class="hidden md:inline">Export MD</span>
                         </button>
@@ -255,6 +289,24 @@ watch(() => route.query.skillId, (newId) => {
                     <div class="shrink-0 bg-bg-card/50 p-3.5 rounded-2xl border border-border-main space-y-2">
                         <label class="block text-[10px] font-black uppercase tracking-wider text-text-dim">Behavioral Description</label>
                         <input v-model="form.description" type="text" class="input-field text-xs w-full" placeholder="Specify when and how the AI will trigger this capability..." />
+                    </div>
+
+                    <div class="shrink-0 bg-bg-card/50 p-3.5 rounded-2xl border border-border-main space-y-3">
+                        <div>
+                            <label class="block text-[10px] font-black uppercase tracking-wider text-text-dim">Package Files</label>
+                            <p class="text-[11px] text-text-dim mt-1">Add subskills referenced by SKILL.md, plus optional README.md and LICENSE.md. All paths are relative and exported together in the ZIP package.</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <input v-model="newResourcePath" type="text" class="input-field text-xs grow" placeholder="helpers/example.md, README.md, or LICENSE.md" @keyup.enter="addResource" />
+                            <button type="button" class="btn btn-secondary btn-sm" @click="addResource"><IconPlus class="w-3.5 h-3.5" /> Add File</button>
+                        </div>
+                        <div v-for="(content, path) in form.supporting_files" :key="path" class="rounded-xl border border-border-main overflow-hidden">
+                            <div class="flex items-center justify-between px-3 py-1.5 bg-bg-app">
+                                <span class="font-mono text-xs">{{ path }}</span>
+                                <button type="button" class="p-1 text-rose-500" title="Remove file" @click="removeResource(path)"><IconTrash class="w-3.5 h-3.5" /></button>
+                            </div>
+                            <textarea v-model="form.supporting_files[path]" rows="3" class="input-field w-full border-0 rounded-none font-mono text-xs" :placeholder="`Contents of ${path}`"></textarea>
+                        </div>
                     </div>
 
                     <div class="grow overflow-hidden flex flex-col">

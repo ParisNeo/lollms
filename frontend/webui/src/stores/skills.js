@@ -95,7 +95,8 @@ export const useSkillsStore = defineStore('skills', () => {
             const a = document.createElement('a');
             a.href = url;
             const contentDisposition = response.headers['content-disposition'];
-            let filename = `skill_export.${format === 'xml' ? 'xml' : 'md'}`;
+            const extension = ['zip', 'package'].includes(format) ? 'zip' : (format === 'xml' ? 'xml' : 'md');
+            let filename = `skill_export.${extension}`;
             if (contentDisposition) {
                 const match = contentDisposition.match(/filename="([^"]+)"/);
                 if (match && match[1]) filename = match[1];
