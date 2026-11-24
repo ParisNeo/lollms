@@ -318,6 +318,29 @@ function closeEditor() {
   showEditor.value = false;
   editorHandbag.value = null;
 }
+
+// After the editor modal saves, the modal emits the saved handbag identity
+// ({ handbag_name, scope }) for a CREATE, or the updated payload for an EDIT.
+// Creating a NEW personality leaves selectedHandbag null, so without opening
+// the freshly created handbag the user sees no change and assumes nothing was
+// created. Mirror the import flow: refresh the catalog, then select the new
+// handbag so it appears in the editor.
+async function onEditorSaved(saved) {
+  await fetchCatalog();
+  const createdName = saved?.handbag_name;
+  const createdScope = saved?.scope;
+  if (createdName) {
+    const bucket = createdScope === 'global' ? catalog.value.global : catalog.value.personal;
+    const item =
+      bucket.find(h => h.handbag_name === createdName) ||
+      [...catalog.value.global, ...catalog.value.personal].find(h => h.handbag_name === createdName);
+    if (item) {
+      fetchHandbagDetail(item);
+      return;
+    }
+  }
+  if (selectedHandbag.value) refreshDetail();
+}
 function openShare(item) {
   shareHandbagName.value = item.handbag_name;
   shareOwner.value = item.owner;
@@ -1307,7 +1330,7 @@ onMounted(() => {
         v-if="showEditor"
         :personality="editorHandbag"
         @close="closeEditor"
-        @saved="() => { fetchCatalog(); if (selectedHandbag) refreshDetail(); }"
+        @saved="onEditorSaved"
       />
 
       <!-- Skills library picker -->
