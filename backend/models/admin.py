@@ -353,6 +353,13 @@ class UserStats(BaseModel):
     co2_equivalents: Dict[str, float] = Field(default_factory=dict)
     top_models: List[Dict[str, Any]] = Field(default_factory=list)
     source_breakdown: SourceConsumptionBreakdown = Field(default_factory=SourceConsumptionBreakdown)
+    # Per-API-key consumption breakdown. Each item:
+    # {api_key_id, name, key_prefix, is_active, total_tokens, prompt_tokens,
+    #  completion_tokens, calls, last_used_at}. Token counters are populated
+    # only when the metering table records a per-key attribution; otherwise the
+    # key listing is still returned (with zero counters) so the dashboard can
+    # show the user's keys and their status without fabricating usage.
+    api_key_usage: List[Dict[str, Any]] = Field(default_factory=list)
 
 class GlobalGenerationStats(BaseModel):
     generations_per_day: List[UserActivityStat] = Field(default_factory=list)

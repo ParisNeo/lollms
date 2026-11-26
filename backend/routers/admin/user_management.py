@@ -561,6 +561,21 @@ async def get_user_stats(
     tokens_30d = sum(daily_tokens.values())
     gens_30d = sum(daily_gens.values())
 
+    # Tasks per day (last 30 days) owned by this user. ``UserStats.tasks_per_day``
+    # is a REQUIRED field, so we must always supply it (empty list is valid).
+    task_rows = db.query(
+        func.date(DBTask.created_at).label("d"),
+        func.count(DBTask.id).label("c"),
+    ).filter(
+        DBTask.owner_user_id == user_id,
+        DBTask.created_at >= cutoff_30d,
+    ).group_by(func.date(DBTask.created_at)).all()
+    tasks_per_day = [
+        UserActivityStat(date=datetime.strptime(str(d), "%Y-%m-%d").date(), count=int(c or 0))
+        for d, c in task_rows
+        if d
+    ]
+
     def _series(source_map):
         return [{"date": d, "count": int(v)} for d, v in sorted(source_map.items())]
 
@@ -611,6 +626,7 @@ async def get_user_stats(
         webui_tokens_per_day=_series(daily_webui),
         api_tokens_per_day=_series(daily_api),
         messages_per_day=_series(daily_gens),
+        tasks_per_day=tasks_per_day,
         weekday_generation_mean=weekday_mean,
         source_breakdown=source_breakdown,
         top_models=top_models,
@@ -663,6 +679,15 @@ async def export_user_stats(
     generations_per_day = data.get("messages_per_day") or []
     top_models = data.get("top_models") or []
 
+    # Charts are rendered once (PNG bytes) and reused across HTML/DOCX/PDF.
+    # ``_user_stats_charts`` degrades to an empty list when matplotlib is absent.
+    try:
+        from backend.routers.admin import _user_stats_charts as _charts_mod
+        chart_items = _charts_mod.build_charts(data)
+    except Exception:
+        _charts_mod = None
+        chart_items = []
+
     def _build_html():
         rows = "".join(
             f"<tr><td>{t.get('date','')}</td><td>{_num(t.get('count',0))}</td></tr>"
@@ -681,6 +706,14 @@ async def export_user_stats(
             f"<div class='kpi'><b>WebUI / API tokens:</b> {_num(sb.get('webui_tokens',0))} / {_num(sb.get('api_tokens',0))}</div>"
             f"<div class='kpi'><b>Energy:</b> {data.get('total_energy_kwh',0)} kWh · {data.get('total_co2_g',0)} g CO₂</div>"
         )
+        charts_html = ""
+        if chart_items and _charts_mod is not None:
+            blocks = "".join(
+                f"<div class='chart'><div class='chart-title'>{c_title}</div>"
+                f"<img src='{_charts_mod.png_to_data_uri(c_png)}' alt='{c_title}' /></div>"
+                for c_title, c_png in chart_items
+            )
+            charts_html = f"<h2>Charts</h2>{blocks}"
         return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title>
 <style>
 body{{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:32px;color:#1f2937;}}
@@ -690,9 +723,13 @@ table{{border-collapse:collapse;width:100%;margin:12px 0 24px;font-size:12px;}}
 th,td{{border:1px solid #e5e7eb;padding:6px 8px;text-align:left;}}
 th{{background:#f3f4f6;font-weight:700;}}
 h2{{font-size:15px;margin:24px 0 4px;}}
+.chart{{margin:14px 0 22px;page-break-inside:avoid;}}
+.chart-title{{font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;}}
+.chart img{{width:100%;max-width:720px;height:auto;border:1px solid #eef0f3;border-radius:6px;}}
 </style></head><body>
 <h1>{title}</h1><div class="sub">{subtitle}</div>
 <div>{kpi}</div>
+{charts_html}
 <h2>Tokens per day (30 days)</h2>
 <table><thead><tr><th>Date</th><th>Tokens</th></tr></thead>
 <tbody>{rows or '<tr><td colspan="2">No data</td></tr>'}</tbody></table>
@@ -708,70 +745,207 @@ h2{{font-size:15px;margin:24px 0 4px;}}
             headers={"Content-Disposition": f'attachment; filename="{filename_base}.html"'},
         )
 
+    # DOCX / PDF reuse the shared, Windows-safe conversion helpers in
+    # ``backend.routers.files`` (the same ones powering the consumption-analytics
+    # export). This avoids importing WeasyPrint directly, which raises an
+    # ``OSError`` at import time on hosts missing GTK/Pango (libgobject) — that
+    # turned every PDF request into a 500. The helpers transparently fall back
+    # to a pure-Python engine, so PDF/DOCX work on any platform.
+    try:
+        from backend.routers.files import (
+            md2_to_html, html_to_docx_bytes, md_to_pdf_bytes, html_to_pdf_bytes,
+        )
+    except Exception:
+        md2_to_html = html_to_docx_bytes = md_to_pdf_bytes = html_to_pdf_bytes = None
+
     if format == "docx":
+        # Prefer a NATIVE python-docx build so chart PNGs embed cleanly via
+        # add_picture (the generic HTML->DOCX converter cannot reliably embed
+        # images). Fall back to the shared HTML helper when python-docx is
+        # unavailable, preserving the previous table-only behaviour.
         try:
             from docx import Document
-        except ImportError:
-            raise HTTPException(status_code=501, detail="DOCX export requires python-docx.")
-        doc = Document()
-        doc.add_heading(title, level=1)
-        doc.add_paragraph(subtitle)
-        doc.add_heading("Summary", level=2)
-        summary = doc.add_table(rows=0, cols=2)
-        try:
-            summary.style = "Light Grid Accent 1"
+            from docx.shared import Inches
         except Exception:
-            pass
-        metrics = [
-            ("Total tokens", _num(data.get("total_tokens", 0))),
-            ("Prompt tokens", _num(data.get("total_prompt_tokens", 0))),
-            ("Completion tokens", _num(data.get("total_completion_tokens", 0))),
-            ("Tokens (7d)", _num(data.get("tokens_last_7d", 0))),
-            ("Tokens (30d)", _num(data.get("tokens_last_30d", 0))),
-            ("WebUI tokens", _num(sb.get("webui_tokens", 0))),
-            ("API tokens", _num(sb.get("api_tokens", 0))),
-            ("Energy (kWh)", str(data.get("total_energy_kwh", 0))),
-            ("CO2 (g)", str(data.get("total_co2_g", 0))),
-        ]
-        for label, value in metrics:
-            cells = summary.add_row().cells
-            cells[0].text = str(label)
-            cells[1].text = str(value)
-        doc.add_heading("Top models", level=2)
-        mt = doc.add_table(rows=1, cols=3)
-        try:
-            mt.style = "Light Grid Accent 1"
-        except Exception:
-            pass
-        hdr = mt.rows[0].cells
-        hdr[0].text, hdr[1].text, hdr[2].text = "Model", "Tokens", "Calls"
-        if top_models:
-            for m in top_models:
-                c = mt.add_row().cells
-                c[0].text = str(m.get("model_name") or "unknown")
-                c[1].text = _num(m.get("total_tokens", 0))
-                c[2].text = _num(m.get("count", 0))
+            Document = None
+
+        if Document is not None:
+            try:
+                doc = Document()
+                doc.add_heading(title, level=1)
+                doc.add_paragraph(subtitle)
+
+                doc.add_heading("Summary", level=2)
+                summary = doc.add_table(rows=0, cols=2)
+                try:
+                    summary.style = "Light Grid Accent 1"
+                except Exception:
+                    pass
+                metrics = [
+                    ("Total tokens", _num(data.get("total_tokens", 0))),
+                    ("Prompt tokens", _num(data.get("total_prompt_tokens", 0))),
+                    ("Completion tokens", _num(data.get("total_completion_tokens", 0))),
+                    ("Tokens (7d)", _num(data.get("tokens_last_7d", 0))),
+                    ("Tokens (30d)", _num(data.get("tokens_last_30d", 0))),
+                    ("WebUI tokens", _num(sb.get("webui_tokens", 0))),
+                    ("API tokens", _num(sb.get("api_tokens", 0))),
+                    ("Energy (kWh)", str(data.get("total_energy_kwh", 0))),
+                    ("CO2 (g)", str(data.get("total_co2_g", 0))),
+                ]
+                for label, value in metrics:
+                    cells = summary.add_row().cells
+                    cells[0].text = str(label)
+                    cells[1].text = str(value)
+
+                # Embed charts as images (one section per figure).
+                if chart_items:
+                    doc.add_heading("Charts", level=2)
+                    for c_title, c_png in chart_items:
+                        doc.add_heading(c_title, level=3)
+                        stream = _io.BytesIO(c_png)
+                        stream.seek(0)
+                        try:
+                            doc.add_picture(stream, width=Inches(6.3))
+                        except Exception:
+                            # A malformed image must not sink the whole export.
+                            pass
+
+                doc.add_heading("Top models", level=2)
+                mt = doc.add_table(rows=1, cols=3)
+                try:
+                    mt.style = "Light Grid Accent 1"
+                except Exception:
+                    pass
+                hdr = mt.rows[0].cells
+                hdr[0].text, hdr[1].text, hdr[2].text = "Model", "Tokens", "Calls"
+                if top_models:
+                    for m in top_models:
+                        c = mt.add_row().cells
+                        c[0].text = str(m.get("model_name") or "unknown")
+                        c[1].text = _num(m.get("total_tokens", 0))
+                        c[2].text = _num(m.get("count", 0))
+                else:
+                    mt.add_row().cells[0].text = "No model usage recorded."
+
+                bio = _io.BytesIO()
+                doc.save(bio)
+                content = bio.getvalue()
+            except Exception as e:
+                trace_exception(e)
+                raise HTTPException(status_code=500, detail=f"DOCX generation failed: {e}")
         else:
-            mt.add_row().cells[0].text = "No model usage recorded."
-        bio = _io.BytesIO()
-        doc.save(bio)
-        bio.seek(0)
-        from fastapi.responses import StreamingResponse
-        return StreamingResponse(
-            bio,
+            if html_to_docx_bytes is None:
+                raise HTTPException(status_code=501, detail="DOCX export is unavailable (helper import failed).")
+            try:
+                content = html_to_docx_bytes(_build_html())
+            except Exception as e:
+                trace_exception(e)
+                raise HTTPException(status_code=500, detail=f"DOCX generation failed: {e}")
+
+        return _Resp(
+            content=content,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={"Content-Disposition": f'attachment; filename="{filename_base}.docx"'},
         )
 
     if format == "pdf":
-        try:
-            from weasyprint import HTML as WeasyHTML
-        except ImportError:
-            raise HTTPException(status_code=501, detail="PDF export requires weasyprint.")
-        pdf_bytes = WeasyHTML(string=_build_html()).write_pdf()
-        from fastapi.responses import StreamingResponse
-        return StreamingResponse(
-            _io.BytesIO(pdf_bytes),
+        # Prefer a self-contained reportlab build so chart images are drawn as
+        # native Image flowables (guaranteed rendering, cross-platform). When
+        # reportlab is unavailable we fall back to the shared HTML->PDF helper
+        # (charts are inlined as base64 <img>, rendered by engines that support
+        # them; at worst the tabular report still exports).
+        content = None
+        if chart_items:
+            try:
+                from reportlab.lib.pagesizes import A4
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.units import mm
+                from reportlab.platypus import (
+                    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+                    Image as RLImage, PageBreak,
+                )
+                from reportlab.lib import colors as rl_colors
+
+                pdf_buf = _io.BytesIO()
+                docpdf = SimpleDocTemplate(
+                    pdf_buf, pagesize=A4,
+                    leftMargin=16 * mm, rightMargin=16 * mm,
+                    topMargin=14 * mm, bottomMargin=14 * mm,
+                    title=title,
+                )
+                styles = getSampleStyleSheet()
+                body_style = ParagraphStyle(
+                    "UsrSub", parent=styles["Normal"], fontSize=8.5,
+                    textColor=rl_colors.HexColor("#6b7280"),
+                )
+                h2_style = ParagraphStyle(
+                    "UsrH2", parent=styles["Heading2"], fontSize=12,
+                    spaceBefore=10, spaceAfter=4,
+                )
+                story = [
+                    Paragraph(title, styles["Title"]),
+                    Paragraph(subtitle, body_style),
+                    Spacer(1, 8),
+                    Paragraph("Summary", h2_style),
+                ]
+                kv_rows = [
+                    ["Total tokens", _num(data.get("total_tokens", 0))],
+                    ["Prompt tokens", _num(data.get("total_prompt_tokens", 0))],
+                    ["Completion tokens", _num(data.get("total_completion_tokens", 0))],
+                    ["Tokens (7d / 30d)", f"{_num(data.get('tokens_last_7d', 0))} / {_num(data.get('tokens_last_30d', 0))}"],
+                    ["WebUI / API tokens", f"{_num(sb.get('webui_tokens', 0))} / {_num(sb.get('api_tokens', 0))}"],
+                    ["Energy (kWh)", str(data.get("total_energy_kwh", 0))],
+                    ["CO2 (g)", str(data.get("total_co2_g", 0))],
+                ]
+                kv_table = Table(kv_rows, colWidths=[70 * mm, 100 * mm])
+                kv_table.setStyle(TableStyle([
+                    ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#e5e7eb")),
+                    ("BACKGROUND", (0, 0), (0, -1), rl_colors.HexColor("#f3f4f6")),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ]))
+                story.append(kv_table)
+                story.append(PageBreak())
+
+                # One chart per page, scaled to the printable width.
+                page_width = A4[0] - 32 * mm
+                for c_title, c_png in chart_items:
+                    story.append(Paragraph(c_title, h2_style))
+                    try:
+                        img = RLImage(_io.BytesIO(c_png))
+                        # Preserve aspect ratio, clamp to page width.
+                        ratio = img.imageHeight / float(img.imageWidth or 1)
+                        img.drawWidth = page_width
+                        img.drawHeight = page_width * ratio
+                        story.append(img)
+                    except Exception:
+                        pass
+                    story.append(Spacer(1, 6))
+                    story.append(PageBreak())
+
+                docpdf.build(story)
+                content = pdf_buf.getvalue()
+            except Exception as e:
+                trace_exception(e)
+                content = None  # fall through to helper path
+
+        if content is None:
+            if html_to_pdf_bytes is None and md_to_pdf_bytes is None:
+                raise HTTPException(status_code=501, detail="PDF export is unavailable (no PDF engine).")
+            html = _build_html()
+            try:
+                content = html_to_pdf_bytes(html) if html_to_pdf_bytes else md_to_pdf_bytes(html)
+            except Exception as e:
+                try:
+                    content = html_to_pdf_bytes(html)
+                except Exception:
+                    trace_exception(e)
+                    raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+        return _Resp(
+            content=content,
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
         )
