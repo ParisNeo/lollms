@@ -1,4 +1,4 @@
-import{d as Ne,b as l,s as Pe,w as $e,o as We,h as n,k as x,t,x as D,u as f,l as ae,n as se,V as s,y as k,z as M,au as W,F as ie,B as de,O as je,E as b,A as pe,C as be,c as Ie,v as ze}from"./vendor.js";import{u as xe,s as fe,Q as Y,_ as Le,S as ge,at as J,o as G,a5 as me,w as Re,W as ue,f as Ue,g as De}from"./index.js";import"./vendor-highlight.js";import"./vendor-viz.js";const Fe=Ne("music",()=>{const y=xe(),i=fe(),Q=l("simple"),w=l("a rap song about love"),c=l(`[intro]
+import{d as Ne,b as l,s as Pe,w as $e,o as We,h as n,k as x,t,x as D,u as f,l as ae,n as se,V as s,y as k,z as M,au as W,F as ie,B as de,O as je,E as b,A as pe,C as be,c as Ie,v as ze}from"./vendor.js";import{u as xe,s as fe,Q as Y,_ as Le,S as ge,as as J,o as G,a5 as me,w as Re,W as ue,f as Ue,g as De}from"./index.js";import"./vendor-highlight.js";import"./vendor-viz.js";const Fe=Ne("music",()=>{const y=xe(),i=fe(),Q=l("simple"),w=l("a rap song about love"),c=l(`[intro]
 Check one two, check
 Listen close
 

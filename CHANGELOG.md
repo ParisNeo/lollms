@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-11-26 05:25]
+
+- Fixing module dependencies for frontend assets
+
 ## [2026-11-26 05:22]
 
 - feat(user): enhance user statistics with token counts and dashboard settings
