@@ -940,6 +940,16 @@ watch(
   }
 );
 
+// The "New" button in the sidebar navigates to this same route with `create=1`.
+// When we're already mounted there, `onMounted` won't fire again, so we must
+// watch the query flag to open the creation editor on demand.
+watch(
+  () => route.query.create,
+  (create) => {
+    if (create === '1' && !showEditor.value) openCreateEditor();
+  }
+);
+
 onMounted(() => {
   if (typeof authStore.fetchSettingsPolicy === 'function') authStore.fetchSettingsPolicy().catch(() => {});
   fetchCatalog().finally(() => {

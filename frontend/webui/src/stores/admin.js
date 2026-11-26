@@ -717,6 +717,29 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function fetchUserStats(userId) { try { const response = await apiClient.get(`/api/admin/users/${userId}/stats`); return response.data; } catch (error) { return null; } }    
 
+    // Streams a self-contained per-user statistics report. The backend mirrors
+    // the on-screen modal aggregation (identity block, summary, input/output
+    // split, WebUI/API pie, timeline + top-model charts) and is strictly scoped
+    // to the given userId so one admin cannot export another tenant's report by
+    // tampering with query params. ``format`` ∈ {html, pdf, docx, xlsx}.
+    async function exportUserStats(userId, format = 'html') {
+        const response = await apiClient.get(`/api/admin/users/${userId}/stats/export`, {
+            params: { format },
+            responseType: 'blob',
+        });
+        const blob = new Blob([response.data]);
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        link.setAttribute('download', `user_${userId}_stats_${stamp}.${format}`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        return true;
+    }
+
     // ── Per-user token quota (admin controls) ──────────────────────────────
     // GET returns the resolved effective quota + current-period usage so the
     // panel can render progress bars and the reset time. PUT accepts per-field
@@ -1023,7 +1046,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchConsumptionAnalytics, exportConsumptionAnalytics,
         fetchConsumptionAnalytics, exportConsumptionAnalytics,
         fetchAllUsers, activateUser, disconnectUser, bulkActivateUsers, bulkDeactivateUsers, bulkDisconnectUsers, bulkSetRole,
-        fetchUserStats, fetchUserTokenQuota, updateUserTokenQuota, updateGlobalTokenQuota, batchUpdateUsers, fetchGlobalGenerationStats,
+        fetchUserStats, exportUserStats, fetchUserTokenQuota, updateUserTokenQuota, updateGlobalTokenQuota, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
         uploadWelcomeLogo, removeWelcomeLogo, uploadSslFile, importOpenWebUIData, fetchAdminAvailableLollmsModels, generateIconForModel,
         

@@ -674,7 +674,7 @@ onMounted(() => {
                 </table>
             </div>
         </div>
-        <UserStatsModal v-if="selectedUserForStats" :userId="selectedUserForStats.id" :username="selectedUserForStats.username" />
+        <UserStatsModal v-if="selectedUserForStats" :userId="selectedUserForStats.id" :username="selectedUserForStats.username" :user="selectedUserForStats" />
 
         <!-- Direct single-user email composer (independent of the bulk modal) -->
         <Teleport to="body">

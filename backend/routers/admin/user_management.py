@@ -464,259 +464,507 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
     return _project_user_public(new_user)
 
 @user_management_router.get("/users/{user_id}/stats", response_model=UserStats)
-async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
+async def get_user_stats(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """Aggregate per-user usage statistics for the admin stats modal.
+
+    Single source of truth shared by the JSON endpoint and every export format
+    (html/pdf/docx/xlsx). All series are 30-day windows built from
+    ``GenerationMetric`` plus the user's ``UserStats`` shape.
+    """
+    from backend.db.models.generation_metric import (
+        GenerationMetric, KWH_PER_TOKEN, CO2_G_PER_KWH, calculate_co2_equivalents,
+    )
+
     user = db.query(DBUser).filter(DBUser.id == user_id).first()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User not found.")
 
-    from backend.db.models.generation_metric import GenerationMetric, calculate_co2_equivalents, KWH_PER_TOKEN, CO2_G_PER_KWH
+    now = datetime.now(timezone.utc)
+    cutoff_7d = now - timedelta(days=7)
+    cutoff_30d = now - timedelta(days=30)
 
-    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    base = db.query(GenerationMetric).filter(GenerationMetric.user_id == user_id)
+    rows_30d = base.filter(GenerationMetric.created_at >= cutoff_30d).all()
 
-    task_stats_raw = db.query(
-        func.date(DBTask.created_at),
-        func.count(DBTask.id)
-    ).filter(
-        DBTask.owner_user_id == user_id,
-        DBTask.created_at >= thirty_days_ago
-    ).group_by(
-        func.date(DBTask.created_at)
-    ).all()
-    task_stats = [UserActivityStat(date=date, count=count) for date, count in task_stats_raw]
+    total_tokens = total_prompt = total_completion = 0
+    tokens_7d = tokens_30d = gens_7d = gens_30d = 0
+    webui_tokens = api_tokens = webui_requests = api_requests = 0
+    energy_kwh = co2_g = 0.0
 
-    # Metrics Telemetry (per-day series split by source so the modal can chart
-    # WebUI vs API independently, not just the lifetime rollup).
-    metrics = db.query(
-        func.date(GenerationMetric.created_at).label('metric_date'),
-        GenerationMetric.source,
-        func.count(GenerationMetric.id).label('gen_count'),
-        func.sum(GenerationMetric.total_tokens).label('tok_count'),
-        func.sum(GenerationMetric.prompt_tokens).label('p_tok'),
-        func.sum(GenerationMetric.completion_tokens).label('c_tok')
-    ).filter(
-        GenerationMetric.user_id == user_id,
-        GenerationMetric.created_at >= thirty_days_ago
-    ).group_by(
-        func.date(GenerationMetric.created_at),
-        GenerationMetric.source,
-    ).all()
+    def _norm_dt(dt):
+        if dt is None:
+            return now
+        if isinstance(dt, str):
+            try:
+                return datetime.fromisoformat(dt)
+            except ValueError:
+                return now
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
 
-    daily_msgs = defaultdict(int)         # generation count (kept for backward-compat consumers)
-    daily_tokens = defaultdict(int)       # total tokens
-    daily_prompt = defaultdict(int)       # prompt tokens
-    daily_completion = defaultdict(int)   # completion tokens
-    daily_webui_tokens = defaultdict(int) # WebUI (source=='chat') tokens
-    daily_api_tokens = defaultdict(int)   # API (source!='chat') tokens
-    daily_webui_gens = defaultdict(int)   # WebUI generation count
-    daily_api_gens = defaultdict(int)     # API generation count
+    daily_tokens = defaultdict(int)
+    daily_webui = defaultdict(int)
+    daily_api = defaultdict(int)
+    daily_prompt = defaultdict(int)
+    daily_completion = defaultdict(int)
+    daily_gens = defaultdict(int)
+    model_totals = defaultdict(lambda: {"model_name": "", "total_tokens": 0, "count": 0})
+    weekday_counts = defaultdict(list)
 
-    total_tokens = 0
-    total_prompt = 0
-    total_comp = 0
-    total_generations_30d = 0
-
-    for date_str, src, count, tokens, p_tok, c_tok in metrics:
-        if not date_str:
-            continue
-        d_str = str(date_str)
-        cnt = count or 0
-        tok = tokens or 0
-        p = p_tok or 0
-        c = c_tok or 0
-
-        daily_msgs[d_str] += cnt
-        daily_tokens[d_str] += tok
-        daily_prompt[d_str] += p
-        daily_completion[d_str] += c
-        total_generations_30d += cnt
-        total_tokens += tok
-        total_prompt += p
-        total_comp += c
-
-        if src == "chat":
-            daily_webui_tokens[d_str] += tok
-            daily_webui_gens[d_str] += cnt
+    for r in rows_30d:
+        pt = int(r.prompt_tokens or 0)
+        ct = int(r.completion_tokens or 0)
+        tt = int(r.total_tokens or (pt + ct))
+        energy_kwh += float(r.energy_kwh or 0)
+        co2_g += float(r.co2_g or 0)
+        dt = _norm_dt(r.created_at)
+        day = dt.strftime("%Y-%m-%d")
+        daily_tokens[day] += tt
+        daily_prompt[day] += pt
+        daily_completion[day] += ct
+        daily_gens[day] += 1
+        weekday_counts[dt.weekday()].append(1)
+        if (r.source or "chat") == "chat":
+            daily_webui[day] += tt
+            webui_tokens += tt
+            webui_requests += 1
         else:
-            daily_api_tokens[d_str] += tok
-            daily_api_gens[d_str] += cnt
+            daily_api[day] += tt
+            api_tokens += tt
+            api_requests += 1
+        mname = r.model_name or "unknown"
+        m = model_totals[mname]
+        m["model_name"] = mname
+        m["total_tokens"] += tt
+        m["count"] += 1
 
-    top_models_raw = db.query(
-        GenerationMetric.model_name,
-        func.sum(GenerationMetric.total_tokens).label('tok_sum'),
-        func.count(GenerationMetric.id).label('usage_count')
-    ).filter(
-        GenerationMetric.user_id == user_id
-    ).group_by(GenerationMetric.model_name).order_by(desc('tok_sum')).limit(5).all()
-
-    top_models = [
-        {"model_name": row[0] or "unknown", "total_tokens": row[1] or 0, "count": row[2] or 0}
-        for row in top_models_raw
-    ]
-
-    message_stats = [
-        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
-        for d_str, c in sorted(daily_msgs.items())
-    ]
-    tokens_per_day = [
-        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
-        for d_str, c in sorted(daily_tokens.items())
-    ]
-    generations_per_day = [
-        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
-        for d_str, c in sorted(daily_msgs.items())
-    ]
-    webui_tokens_per_day = [
-        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
-        for d_str, c in sorted(daily_webui_tokens.items())
-    ]
-    api_tokens_per_day = [
-        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
-        for d_str, c in sorted(daily_api_tokens.items())
-    ]
-    prompt_tokens_per_day = [
-        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
-        for d_str, c in sorted(daily_prompt.items())
-    ]
-    completion_tokens_per_day = [
-        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
-        for d_str, c in sorted(daily_completion.items())
-    ]
-
-    # ── Weekly / monthly rollups (rolling windows ending today) ────────────
-    def _sum_since(days: int) -> int:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-        val = db.query(
-            func.coalesce(func.sum(GenerationMetric.total_tokens), 0)
-        ).filter(
-            GenerationMetric.user_id == user_id,
-            GenerationMetric.created_at >= cutoff,
-        ).scalar()
-        return int(val or 0)
-
-    tokens_last_7d = _sum_since(7)
-    tokens_last_30d = _sum_since(30)
-
-    gen_last_7d = int(
-        db.query(func.count(GenerationMetric.id)).filter(
-            GenerationMetric.user_id == user_id,
-            GenerationMetric.created_at >= (datetime.now(timezone.utc) - timedelta(days=7)),
-        ).scalar() or 0
-    )
-    gen_last_30d = total_generations_30d
-
-    # ── Weekday profile (Monday..Sunday mean over the 30-day window) ───────
-    weekday_buckets = defaultdict(list)
-    for d_str, c in daily_msgs.items():
-        try:
-            weekday_buckets[datetime.strptime(d_str, '%Y-%m-%d').date().weekday()].append(c)
-        except ValueError:
-            continue
-    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    weekday_generation_mean = {
-        name: (sum(weekday_buckets[i]) / len(weekday_buckets[i]) if weekday_buckets[i] else 0.0)
-        for i, name in enumerate(weekday_names)
-    }
-
-    # Lifetime totals (unfiltered by the 30-day window) so the admin-list token
-    # column and this per-user detail view report the same underlying figure.
-    lifetime_totals = db.query(
+    # Lifetime totals (independent of the 30-day window).
+    lifetime = db.query(
         func.coalesce(func.sum(GenerationMetric.total_tokens), 0),
         func.coalesce(func.sum(GenerationMetric.prompt_tokens), 0),
         func.coalesce(func.sum(GenerationMetric.completion_tokens), 0),
-        func.count(GenerationMetric.id),
     ).filter(GenerationMetric.user_id == user_id).first()
-    lifetime_tokens = int(lifetime_totals[0] or 0) if lifetime_totals else 0
-    lifetime_prompt = int(lifetime_totals[1] or 0) if lifetime_totals else 0
-    lifetime_completion = int(lifetime_totals[2] or 0) if lifetime_totals else 0
-    lifetime_gen_count = int(lifetime_totals[3] or 0) if lifetime_totals else 0
+    if lifetime:
+        total_tokens, total_prompt, total_completion = (int(lifetime[0] or 0), int(lifetime[1] or 0), int(lifetime[2] or 0))
 
-    source_rows = db.query(
-        GenerationMetric.source,
-        func.count(GenerationMetric.id).label('req_count'),
-        func.sum(GenerationMetric.total_tokens).label('tot_tok')
-    ).filter(
-        GenerationMetric.user_id == user_id,
-        GenerationMetric.created_at >= thirty_days_ago
-    ).group_by(GenerationMetric.source).all()
+    seven = db.query(
+        func.coalesce(func.sum(GenerationMetric.total_tokens), 0),
+        func.count(GenerationMetric.id),
+    ).filter(GenerationMetric.user_id == user_id, GenerationMetric.created_at >= cutoff_7d).first()
+    if seven:
+        tokens_7d, gens_7d = int(seven[0] or 0), int(seven[1] or 0)
+    tokens_30d = sum(daily_tokens.values())
+    gens_30d = sum(daily_gens.values())
 
-    webui_tokens = 0
-    api_tokens = 0
-    webui_reqs = 0
-    api_reqs = 0
+    def _series(source_map):
+        return [{"date": d, "count": int(v)} for d, v in sorted(source_map.items())]
 
-    for src, req_c, tok_c in source_rows:
-        t = tok_c or 0
-        r = req_c or 0
-        if src == "chat":
-            webui_tokens += t
-            webui_reqs += r
-        else:
-            api_tokens += t
-            api_reqs += r
+    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    weekday_mean = {weekday_names[i]: round(len(weekday_counts.get(i, [])), 2) for i in range(7) if weekday_counts.get(i)}
+    for i in range(7):
+        weekday_mean.setdefault(weekday_names[i], 0.0)
 
-    total_reqs = webui_reqs + api_reqs
-    sum_tokens = webui_tokens + api_tokens if (webui_tokens + api_tokens) > 0 else total_tokens
+    share_base = (webui_tokens + api_tokens) or 1
+    webui_ratio = round(webui_tokens / share_base * 100, 1)
+    api_ratio = round(api_tokens / share_base * 100, 1)
 
-    webui_ratio = round((webui_tokens / sum_tokens * 100.0), 1) if sum_tokens > 0 else 0.0
-    api_ratio = round((api_tokens / sum_tokens * 100.0), 1) if sum_tokens > 0 else 0.0
+    top_models = sorted(model_totals.values(), key=lambda x: x["total_tokens"], reverse=True)[:10]
 
     from backend.models.admin import SourceConsumptionBreakdown
-
     source_breakdown = SourceConsumptionBreakdown(
         webui_tokens=webui_tokens,
         api_tokens=api_tokens,
-        total_tokens=sum_tokens,
-        webui_requests=webui_reqs,
-        api_requests=api_reqs,
-        total_requests=total_reqs,
+        total_tokens=webui_tokens + api_tokens,
+        webui_requests=webui_requests,
+        api_requests=api_requests,
+        total_requests=webui_requests + api_requests,
         webui_ratio=webui_ratio,
         api_ratio=api_ratio,
         webui_energy_kwh=round(webui_tokens * KWH_PER_TOKEN, 4),
         api_energy_kwh=round(api_tokens * KWH_PER_TOKEN, 4),
         webui_co2_g=round(webui_tokens * KWH_PER_TOKEN * CO2_G_PER_KWH, 2),
-        api_co2_g=round(api_tokens * KWH_PER_TOKEN * CO2_G_PER_KWH, 2)
+        api_co2_g=round(api_tokens * KWH_PER_TOKEN * CO2_G_PER_KWH, 2),
     )
-
-    # Prefer the lifetime metrics when available — the admin user list shows
-    # lifetime totals, so the detail modal must match to avoid a confusing
-    # discontinuity between the two views. Fall back to the 30-day window only
-    # when no generation metrics exist at all (e.g. brand-new account).
-    if lifetime_gen_count > 0:
-        sum_tokens = lifetime_tokens
-        total_prompt = lifetime_prompt
-        total_comp = lifetime_completion
-
-    energy_kwh = sum_tokens * KWH_PER_TOKEN
-    co2_g = energy_kwh * CO2_G_PER_KWH
-    equivalents = calculate_co2_equivalents(co2_g)
 
     return UserStats(
-        tasks_per_day=task_stats,
-        messages_per_day=message_stats,
-        tokens_per_day=tokens_per_day,
-        # New: richer breakdown of the same 30-day window so the single-user
-        # detail view can match the depth of the global dashboard.
-        generations_per_day=generations_per_day,
-        webui_tokens_per_day=webui_tokens_per_day,
-        api_tokens_per_day=api_tokens_per_day,
-        prompt_tokens_per_day=prompt_tokens_per_day,
-        completion_tokens_per_day=completion_tokens_per_day,
-        tokens_last_7d=tokens_last_7d,
-        tokens_last_30d=tokens_last_30d,
-        generations_last_7d=gen_last_7d,
-        generations_last_30d=gen_last_30d,
-        weekday_generation_mean=weekday_generation_mean,
-        total_generations_30d=total_generations_30d,
-        # Preserved fields
-        total_tokens=sum_tokens,
+        user_id=user_id,
+        username=user.username,
+        tokens_last_7d=tokens_7d,
+        tokens_last_30d=tokens_30d,
+        generations_last_7d=gens_7d,
+        generations_last_30d=gens_30d,
+        total_tokens=total_tokens,
         total_prompt_tokens=total_prompt,
-        total_completion_tokens=total_comp,
+        total_completion_tokens=total_completion,
+        total_generations_30d=gens_30d,
         total_energy_kwh=round(energy_kwh, 4),
         total_co2_g=round(co2_g, 2),
-        co2_equivalents=equivalents,
-        top_models=top_models,
+        co2_equivalents=calculate_co2_equivalents(co2_g),
+        tokens_per_day=_series(daily_tokens),
+        prompt_tokens_per_day=_series(daily_prompt),
+        completion_tokens_per_day=_series(daily_completion),
+        webui_tokens_per_day=_series(daily_webui),
+        api_tokens_per_day=_series(daily_api),
+        messages_per_day=_series(daily_gens),
+        weekday_generation_mean=weekday_mean,
         source_breakdown=source_breakdown,
+        top_models=top_models,
     )
+
+
+@user_management_router.get("/users/{user_id}/stats/export")
+async def export_user_stats(
+    user_id: int,
+    format: str = Query("xlsx", pattern="^(xlsx|html|docx|pdf)$"),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Export a single user's statistics in html/pdf/docx/xlsx.
+
+    Strictly scoped to ``user_id`` so the exported document can never leak
+    another user's data. Reuses ``get_user_stats`` as the single source of
+    truth so every format matches the on-screen modal exactly.
+    """
+    user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    report = await get_user_stats(user_id=user_id, db=db, current_admin=current_admin)
+    data = report.model_dump() if hasattr(report, "model_dump") else dict(report)
+
+    import io as _io
+    from datetime import datetime as _dt
+    from fastapi import Response as _Resp
+
+    stamp = _dt.now().strftime("%Y-%m-%d %H:%M")
+    filename_base = f"user_stats_{user.username}_{_dt.now().strftime('%Y%m%d_%H%M%S')}"
+    title = f"User Statistics — {user.username}"
+    subtitle = (
+        f"Account: {user.username} (id {user.id}) · Role: "
+        f"{'Admin' if getattr(user, 'is_admin', False) else ('Moderator' if getattr(user, 'is_moderator', False) else 'User')}"
+        f" · Status: {user.status} · Generated: {stamp}"
+    )
+
+    def _num(n):
+        try:
+            return f"{int(n):,}"
+        except Exception:
+            return str(n)
+
+    sb = data.get("source_breakdown") or {}
+    tokens_per_day = data.get("tokens_per_day") or []
+    webui_per_day = data.get("webui_tokens_per_day") or []
+    api_per_day = data.get("api_tokens_per_day") or []
+    generations_per_day = data.get("messages_per_day") or []
+    top_models = data.get("top_models") or []
+
+    def _build_html():
+        rows = "".join(
+            f"<tr><td>{t.get('date','')}</td><td>{_num(t.get('count',0))}</td></tr>"
+            for t in tokens_per_day
+        )
+        model_rows = "".join(
+            f"<tr><td>{m.get('model_name','')}</td><td>{_num(m.get('total_tokens',0))}</td>"
+            f"<td>{_num(m.get('count',0))}</td></tr>"
+            for m in top_models
+        )
+        kpi = (
+            f"<div class='kpi'><b>Total tokens:</b> {_num(data.get('total_tokens',0))} "
+            f"({_num(data.get('total_prompt_tokens',0))} in · {_num(data.get('total_completion_tokens',0))} out)</div>"
+            f"<div class='kpi'><b>Lifetime generations:</b> {_num(data.get('total_generations_30d',0))}</div>"
+            f"<div class='kpi'><b>Tokens (7d / 30d):</b> {_num(data.get('tokens_last_7d',0))} / {_num(data.get('tokens_last_30d',0))}</div>"
+            f"<div class='kpi'><b>WebUI / API tokens:</b> {_num(sb.get('webui_tokens',0))} / {_num(sb.get('api_tokens',0))}</div>"
+            f"<div class='kpi'><b>Energy:</b> {data.get('total_energy_kwh',0)} kWh · {data.get('total_co2_g',0)} g CO₂</div>"
+        )
+        return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title>
+<style>
+body{{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:32px;color:#1f2937;}}
+h1{{font-size:22px;margin:0 0 4px;}} .sub{{color:#6b7280;font-size:12px;margin-bottom:20px;}}
+.kpi{{padding:6px 0;font-size:13px;border-bottom:1px solid #eee;}}
+table{{border-collapse:collapse;width:100%;margin:12px 0 24px;font-size:12px;}}
+th,td{{border:1px solid #e5e7eb;padding:6px 8px;text-align:left;}}
+th{{background:#f3f4f6;font-weight:700;}}
+h2{{font-size:15px;margin:24px 0 4px;}}
+</style></head><body>
+<h1>{title}</h1><div class="sub">{subtitle}</div>
+<div>{kpi}</div>
+<h2>Tokens per day (30 days)</h2>
+<table><thead><tr><th>Date</th><th>Tokens</th></tr></thead>
+<tbody>{rows or '<tr><td colspan="2">No data</td></tr>'}</tbody></table>
+<h2>Top models</h2>
+<table><thead><tr><th>Model</th><th>Tokens</th><th>Calls</th></tr></thead>
+<tbody>{model_rows or '<tr><td colspan="3">No data</td></tr>'}</tbody></table>
+</body></html>"""
+
+    if format == "html":
+        return _Resp(
+            content=_build_html().encode("utf-8"),
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.html"'},
+        )
+
+    if format == "docx":
+        try:
+            from docx import Document
+        except ImportError:
+            raise HTTPException(status_code=501, detail="DOCX export requires python-docx.")
+        doc = Document()
+        doc.add_heading(title, level=1)
+        doc.add_paragraph(subtitle)
+        doc.add_heading("Summary", level=2)
+        summary = doc.add_table(rows=0, cols=2)
+        try:
+            summary.style = "Light Grid Accent 1"
+        except Exception:
+            pass
+        metrics = [
+            ("Total tokens", _num(data.get("total_tokens", 0))),
+            ("Prompt tokens", _num(data.get("total_prompt_tokens", 0))),
+            ("Completion tokens", _num(data.get("total_completion_tokens", 0))),
+            ("Tokens (7d)", _num(data.get("tokens_last_7d", 0))),
+            ("Tokens (30d)", _num(data.get("tokens_last_30d", 0))),
+            ("WebUI tokens", _num(sb.get("webui_tokens", 0))),
+            ("API tokens", _num(sb.get("api_tokens", 0))),
+            ("Energy (kWh)", str(data.get("total_energy_kwh", 0))),
+            ("CO2 (g)", str(data.get("total_co2_g", 0))),
+        ]
+        for label, value in metrics:
+            cells = summary.add_row().cells
+            cells[0].text = str(label)
+            cells[1].text = str(value)
+        doc.add_heading("Top models", level=2)
+        mt = doc.add_table(rows=1, cols=3)
+        try:
+            mt.style = "Light Grid Accent 1"
+        except Exception:
+            pass
+        hdr = mt.rows[0].cells
+        hdr[0].text, hdr[1].text, hdr[2].text = "Model", "Tokens", "Calls"
+        if top_models:
+            for m in top_models:
+                c = mt.add_row().cells
+                c[0].text = str(m.get("model_name") or "unknown")
+                c[1].text = _num(m.get("total_tokens", 0))
+                c[2].text = _num(m.get("count", 0))
+        else:
+            mt.add_row().cells[0].text = "No model usage recorded."
+        bio = _io.BytesIO()
+        doc.save(bio)
+        bio.seek(0)
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            bio,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.docx"'},
+        )
+
+    if format == "pdf":
+        try:
+            from weasyprint import HTML as WeasyHTML
+        except ImportError:
+            raise HTTPException(status_code=501, detail="PDF export requires weasyprint.")
+        pdf_bytes = WeasyHTML(string=_build_html()).write_pdf()
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            _io.BytesIO(pdf_bytes),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
+        )
+
+    # ---- XLSX: styled tables + native Excel charts -----------------------
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+
+    _HEADER_FILL = PatternFill("solid", fgColor="4F46E5")
+    _HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
+    _TITLE_FONT = Font(bold=True, size=16, color="1F2937")
+    _SUB_FONT = Font(italic=True, size=10, color="6B7280")
+    _THIN = Side(style="thin", color="E5E7EB")
+    _BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+    _CENTER = Alignment(horizontal="center", vertical="center")
+
+    def _style_header(ws, row, ncols):
+        for c in range(1, ncols + 1):
+            cell = ws.cell(row=row, column=c)
+            cell.fill = _HEADER_FILL
+            cell.font = _HEADER_FONT
+            cell.alignment = _CENTER
+            cell.border = _BORDER
+
+    def _style_body(ws, first_row, last_row, ncols, right_cols=()):
+        for r in range(first_row, last_row + 1):
+            for c in range(1, ncols + 1):
+                cell = ws.cell(row=r, column=c)
+                cell.border = _BORDER
+                if c in right_cols:
+                    cell.alignment = Alignment(horizontal="right")
+
+    # --- Summary sheet (user info block + KPIs) ---
+    ws = wb.active
+    ws.title = "Summary"
+    ws["A1"] = title
+    ws["A1"].font = _TITLE_FONT
+    ws["A2"] = subtitle
+    ws["A2"].font = _SUB_FONT
+    ws.merge_cells("A1:D1")
+    ws.merge_cells("A2:D2")
+
+    ws["A4"] = "User Information"
+    ws["A4"].font = Font(bold=True, size=13)
+    info_rows = [
+        ("Username", user.username),
+        ("User ID", user.id),
+        ("Role", "Admin" if getattr(user, "is_admin", False) else ("Moderator" if getattr(user, "is_moderator", False) else "User")),
+        ("Status", user.status),
+        ("Email", user.email or "—"),
+    ]
+    r = 5
+    for label, value in info_rows:
+        ws.cell(row=r, column=1, value=label).font = Font(bold=True)
+        ws.cell(row=r, column=2, value=value)
+        r += 1
+
+    r += 1
+    ws.cell(row=r, column=1, value="Key Metrics").font = Font(bold=True, size=13)
+    r += 1
+    ws.cell(row=r, column=1, value="Metric")
+    ws.cell(row=r, column=2, value="Value")
+    _style_header(ws, r, 2)
+    metrics = [
+        ("Total tokens", int(data.get("total_tokens", 0))),
+        ("Prompt tokens", int(data.get("total_prompt_tokens", 0))),
+        ("Completion tokens", int(data.get("total_completion_tokens", 0))),
+        ("Tokens last 7d", int(data.get("tokens_last_7d", 0))),
+        ("Tokens last 30d", int(data.get("tokens_last_30d", 0))),
+        ("Generations last 7d", int(data.get("generations_last_7d", 0))),
+        ("Generations last 30d", int(data.get("generations_last_30d", 0))),
+        ("WebUI tokens", int(sb.get("webui_tokens", 0))),
+        ("API tokens", int(sb.get("api_tokens", 0))),
+        ("Energy (kWh)", float(data.get("total_energy_kwh", 0))),
+        ("CO2 (g)", float(data.get("total_co2_g", 0))),
+    ]
+    first_metric_row = r + 1
+    for label, value in metrics:
+        r += 1
+        ws.cell(row=r, column=1, value=label)
+        ws.cell(row=r, column=2, value=value)
+    _style_body(ws, first_metric_row, r, 2, right_cols=(2,))
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 24
+
+    # --- WebUI vs API split: small data block + native pie chart ---
+    split_label_row = r + 2
+    ws.cell(row=split_label_row, column=1, value="WebUI vs API tokens").font = Font(bold=True, size=13)
+    ws.cell(row=split_label_row + 1, column=1, value="Channel")
+    ws.cell(row=split_label_row + 1, column=2, value="Tokens")
+    _style_header(ws, split_label_row + 1, 2)
+    ws.cell(row=split_label_row + 2, column=1, value="WebUI")
+    ws.cell(row=split_label_row + 2, column=2, value=int(sb.get("webui_tokens", 0)))
+    ws.cell(row=split_label_row + 3, column=1, value="API")
+    ws.cell(row=split_label_row + 3, column=2, value=int(sb.get("api_tokens", 0)))
+    _style_body(ws, split_label_row + 2, split_label_row + 3, 2, right_cols=(2,))
+    if (int(sb.get("webui_tokens", 0)) + int(sb.get("api_tokens", 0))) > 0:
+        from openpyxl.chart import PieChart, Reference
+        pie = PieChart()
+        pie.title = "WebUI vs API token share"
+        pdata = Reference(ws, min_col=2, min_row=split_label_row + 1, max_row=split_label_row + 3)
+        plabels = Reference(ws, min_col=1, min_row=split_label_row + 2, max_row=split_label_row + 3)
+        pie.add_data(pdata, titles_from_data=True)
+        pie.set_categories(plabels)
+        pie.height = 7
+        pie.width = 11
+        ws.add_chart(pie, "D5")
+
+    # --- Timeline sheet + chart ---
+    ws2 = wb.create_sheet("Timeline")
+    ws2["A1"] = "Tokens per day"
+    ws2["A1"].font = Font(bold=True, size=13)
+    headers = ["Date", "Tokens", "WebUI", "API", "Generations"]
+    for i, h in enumerate(headers, start=1):
+        ws2.cell(row=3, column=i, value=h)
+    _style_header(ws2, 3, len(headers))
+
+    webui_map = {str(w.get("date")): int(w.get("count", 0)) for w in webui_per_day}
+    api_map = {str(a.get("date")): int(a.get("count", 0)) for a in api_per_day}
+    gen_map = {str(g.get("date")): int(g.get("count", 0)) for g in generations_per_day}
+
+    row_idx = 4
+    for t in tokens_per_day:
+        d = str(t.get("date"))
+        ws2.cell(row=row_idx, column=1, value=d)
+        ws2.cell(row=row_idx, column=2, value=int(t.get("count", 0)))
+        ws2.cell(row=row_idx, column=3, value=webui_map.get(d, 0))
+        ws2.cell(row=row_idx, column=4, value=api_map.get(d, 0))
+        ws2.cell(row=row_idx, column=5, value=gen_map.get(d, 0))
+        row_idx += 1
+    last_row = row_idx - 1
+    if last_row >= 4:
+        _style_body(ws2, 4, last_row, len(headers), right_cols=(2, 3, 4, 5))
+        from openpyxl.chart import BarChart, Reference
+        chart = BarChart()
+        chart.type = "col"
+        chart.title = f"Tokens per day — {user.username}"
+        chart.y_axis.title = "Tokens"
+        chart.x_axis.title = "Date"
+        data_ref = Reference(ws2, min_col=2, min_row=3, max_row=last_row)
+        cats_ref = Reference(ws2, min_col=1, min_row=4, max_row=last_row)
+        chart.add_data(data_ref, titles_from_data=True)
+        chart.set_categories(cats_ref)
+        chart.height = 9
+        chart.width = 24
+        ws2.add_chart(chart, "G3")
+    for col, w in zip("ABCDE", (14, 12, 12, 12, 14)):
+        ws2.column_dimensions[col].width = w
+
+    # --- Top models sheet + chart ---
+    ws3 = wb.create_sheet("Top Models")
+    ws3["A1"] = "Top models"
+    ws3["A1"].font = Font(bold=True, size=13)
+    m_headers = ["Model", "Tokens", "Calls"]
+    for i, h in enumerate(m_headers, start=1):
+        ws3.cell(row=3, column=i, value=h)
+    _style_header(ws3, 3, len(m_headers))
+    mr = 4
+    for m in top_models:
+        ws3.cell(row=mr, column=1, value=m.get("model_name", ""))
+        ws3.cell(row=mr, column=2, value=int(m.get("total_tokens", 0)))
+        ws3.cell(row=mr, column=3, value=int(m.get("count", 0)))
+        mr += 1
+    m_last = mr - 1
+    if m_last >= 4:
+        _style_body(ws3, 4, m_last, len(m_headers), right_cols=(2, 3))
+        from openpyxl.chart import BarChart, Reference
+        chart2 = BarChart()
+        chart2.type = "bar"
+        chart2.title = "Tokens by model"
+        chart2.y_axis.title = "Model"
+        chart2.x_axis.title = "Tokens"
+        data_ref2 = Reference(ws3, min_col=2, min_row=3, max_row=m_last)
+        cats_ref2 = Reference(ws3, min_col=1, min_row=4, max_row=m_last)
+        chart2.add_data(data_ref2, titles_from_data=True)
+        chart2.set_categories(cats_ref2)
+        chart2.height = 8
+        chart2.width = 22
+        ws3.add_chart(chart2, "E3")
+    for col, w in zip("ABC", (28, 14, 12)):
+        ws3.column_dimensions[col].width = w
+
+    bio = _io.BytesIO()
+    wb.save(bio)
+    return _Resp(
+        content=bio.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.xlsx"'},
+    )
+
 
 def _build_quota_status(db: Session, user: DBUser) -> TokenQuotaStatus:
     """Resolve the effective quota for a user and attach current-period usage."""

@@ -974,52 +974,204 @@ h2{{font-size:15px;margin:24px 0 4px;}}
 
     if format == "xlsx":
         from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.chart import BarChart, PieChart, Reference
         from fastapi import Response as _Resp
+
+        HEADER_FILL = PatternFill("solid", fgColor="4F46E5")
+        HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
+        TITLE_FONT = Font(bold=True, size=16, color="1F2937")
+        SUB_FONT = Font(italic=True, size=10, color="6B7280")
+        SECTION_FONT = Font(bold=True, size=13, color="1F2937")
+        _thin = Side(style="thin", color="E5E7EB")
+        BORDER = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+        CENTER = Alignment(horizontal="center", vertical="center")
+
+        def style_header(sheet, row, ncols):
+            for c in range(1, ncols + 1):
+                cell = sheet.cell(row=row, column=c)
+                cell.fill = HEADER_FILL
+                cell.font = HEADER_FONT
+                cell.alignment = CENTER
+                cell.border = BORDER
+
+        def style_body(sheet, first_row, last_row, ncols, right_cols=()):
+            for rr in range(first_row, last_row + 1):
+                for c in range(1, ncols + 1):
+                    cell = sheet.cell(row=rr, column=c)
+                    cell.border = BORDER
+                    if c in right_cols:
+                        cell.alignment = Alignment(horizontal="right")
+
         wb = Workbook()
+
+        # --- Summary sheet: title + KPI table + WebUI/API pie chart ---
         ws = wb.active
         ws.title = "Summary"
-        ws.append(["Token Consumption Report"])
-        ws.append([subtitle])
-        ws.append([])
-        ws.append(["Metric", "Value"])
-        ws.append(["Total tokens", int(totals.get("total_tokens", 0))])
-        ws.append(["Input tokens", int(totals.get("input_tokens", 0))])
-        ws.append(["Output tokens", int(totals.get("output_tokens", 0))])
-        ws.append(["Calls", int(totals.get("calls", 0))])
-        ws.append(["WebUI tokens", int(totals.get("webui_tokens", 0))])
-        ws.append(["API tokens", int(totals.get("api_tokens", 0))])
-        ws.append(["Energy kWh", float(totals.get("energy_kwh", 0))])
-        ws.append(["CO2 g", float(totals.get("co2_g", 0))])
+        ws["A1"] = title
+        ws["A1"].font = TITLE_FONT
+        ws["A2"] = subtitle
+        ws["A2"].font = SUB_FONT
+        ws.merge_cells("A1:D1")
+        ws.merge_cells("A2:D2")
 
+        ws["A4"] = "Key Metrics"
+        ws["A4"].font = SECTION_FONT
+        ws["A5"] = "Metric"
+        ws["B5"] = "Value"
+        style_header(ws, 5, 2)
+        summary_rows = [
+            ("Total tokens", int(totals.get("total_tokens", 0))),
+            ("Input tokens", int(totals.get("input_tokens", 0))),
+            ("Output tokens", int(totals.get("output_tokens", 0))),
+            ("Calls", int(totals.get("calls", 0))),
+            ("WebUI tokens", int(totals.get("webui_tokens", 0))),
+            ("API tokens", int(totals.get("api_tokens", 0))),
+            ("Energy (kWh)", float(totals.get("energy_kwh", 0))),
+            ("CO2 (g)", float(totals.get("co2_g", 0))),
+        ]
+        rr = 6
+        for label, value in summary_rows:
+            ws.cell(row=rr, column=1, value=label)
+            ws.cell(row=rr, column=2, value=value)
+            rr += 1
+        style_body(ws, 6, rr - 1, 2, right_cols=(2,))
+        ws.column_dimensions["A"].width = 22
+        ws.column_dimensions["B"].width = 22
+
+        # WebUI vs API pie chart data block (kept on Summary, chart anchored beside)
+        split_header = rr + 1
+        ws.cell(row=split_header, column=1, value="WebUI vs API").font = SECTION_FONT
+        ws.cell(row=split_header + 1, column=1, value="Channel")
+        ws.cell(row=split_header + 1, column=2, value="Tokens")
+        style_header(ws, split_header + 1, 2)
+        ws.cell(row=split_header + 2, column=1, value="WebUI")
+        ws.cell(row=split_header + 2, column=2, value=int(totals.get("webui_tokens", 0)))
+        ws.cell(row=split_header + 3, column=1, value="API")
+        ws.cell(row=split_header + 3, column=2, value=int(totals.get("api_tokens", 0)))
+        style_body(ws, split_header + 2, split_header + 3, 2, right_cols=(2,))
+        if (int(totals.get("webui_tokens", 0)) + int(totals.get("api_tokens", 0))) > 0:
+            pie = PieChart()
+            pie.title = "WebUI vs API token share"
+            pdata = Reference(ws, min_col=2, min_row=split_header + 1, max_row=split_header + 3)
+            plabels = Reference(ws, min_col=1, min_row=split_header + 2, max_row=split_header + 3)
+            pie.add_data(pdata, titles_from_data=True)
+            pie.set_categories(plabels)
+            pie.height = 7
+            pie.width = 11
+            ws.add_chart(pie, "D5")
+
+        # --- Timeline sheet: styled table + stacked bar chart ---
         ws2 = wb.create_sheet("Timeline")
-        ws2.append(["Period", "Input", "Output", "Total", "Calls", "WebUI", "API"])
+        ws2["A1"] = "Consumption over time"
+        ws2["A1"].font = SECTION_FONT
+        tl_headers = ["Period", "Input", "Output", "Total", "Calls", "WebUI", "API"]
+        for i, h in enumerate(tl_headers, start=1):
+            ws2.cell(row=3, column=i, value=h)
+        style_header(ws2, 3, len(tl_headers))
+        r2 = 4
         for b in buckets:
-            ws2.append([
-                b.get("label", ""), int(b.get("input_tokens", 0)), int(b.get("output_tokens", 0)),
-                int(b.get("total_tokens", 0)), int(b.get("calls", 0)),
-                int(b.get("webui_tokens", 0)), int(b.get("api_tokens", 0)),
-            ])
+            ws2.cell(row=r2, column=1, value=b.get("label", ""))
+            ws2.cell(row=r2, column=2, value=int(b.get("input_tokens", 0)))
+            ws2.cell(row=r2, column=3, value=int(b.get("output_tokens", 0)))
+            ws2.cell(row=r2, column=4, value=int(b.get("total_tokens", 0)))
+            ws2.cell(row=r2, column=5, value=int(b.get("calls", 0)))
+            ws2.cell(row=r2, column=6, value=int(b.get("webui_tokens", 0)))
+            ws2.cell(row=r2, column=7, value=int(b.get("api_tokens", 0)))
+            r2 += 1
+        tl_last = r2 - 1
+        if tl_last >= 4:
+            style_body(ws2, 4, tl_last, len(tl_headers), right_cols=(2, 3, 4, 5, 6, 7))
+            chart = BarChart()
+            chart.type = "col"
+            chart.grouping = "stacked"
+            chart.title = "Input vs Output tokens over time"
+            chart.y_axis.title = "Tokens"
+            chart.x_axis.title = "Period"
+            data = Reference(ws2, min_col=2, max_col=3, min_row=3, max_row=tl_last)
+            cats = Reference(ws2, min_col=1, min_row=4, max_row=tl_last)
+            chart.add_data(data, titles_from_data=True)
+            chart.set_categories(cats)
+            chart.height = 9
+            chart.width = 24
+            ws2.add_chart(chart, "I3")
+        for col, w in zip("ABCDEFG", (16, 12, 12, 12, 10, 12, 12)):
+            ws2.column_dimensions[col].width = w
 
+        # --- By Model sheet: styled table + bar chart ---
         ws3 = wb.create_sheet("By Model")
-        ws3.append(["Model", "Input", "Output", "Total", "Share %"])
+        ws3["A1"] = "Top models"
+        ws3["A1"].font = SECTION_FONT
+        m_headers = ["Model", "Input", "Output", "Total", "Share %"]
+        for i, h in enumerate(m_headers, start=1):
+            ws3.cell(row=3, column=i, value=h)
+        style_header(ws3, 3, len(m_headers))
+        r3 = 4
         for m in by_model:
-            ws3.append([m.get("model_name", ""), int(m.get("input_tokens", 0)),
-                        int(m.get("output_tokens", 0)), int(m.get("total_tokens", 0)),
-                        float(m.get("percentage", 0))])
+            ws3.cell(row=r3, column=1, value=m.get("model_name", ""))
+            ws3.cell(row=r3, column=2, value=int(m.get("input_tokens", 0)))
+            ws3.cell(row=r3, column=3, value=int(m.get("output_tokens", 0)))
+            ws3.cell(row=r3, column=4, value=int(m.get("total_tokens", 0)))
+            ws3.cell(row=r3, column=5, value=float(m.get("percentage", 0)))
+            r3 += 1
+        m_last = r3 - 1
+        if m_last >= 4:
+            style_body(ws3, 4, m_last, len(m_headers), right_cols=(2, 3, 4, 5))
+            mchart = BarChart()
+            mchart.type = "bar"
+            mchart.title = "Tokens by model"
+            mchart.y_axis.title = "Model"
+            mchart.x_axis.title = "Tokens"
+            mdata = Reference(ws3, min_col=4, min_row=3, max_row=m_last)
+            mcats = Reference(ws3, min_col=1, min_row=4, max_row=m_last)
+            mchart.add_data(mdata, titles_from_data=True)
+            mchart.set_categories(mcats)
+            mchart.height = 8
+            mchart.width = 22
+            ws3.add_chart(mchart, "G3")
+        for col, w in zip("ABCDE", (30, 12, 12, 14, 10)):
+            ws3.column_dimensions[col].width = w
 
+        # --- By User sheet: styled table + bar chart ---
         ws4 = wb.create_sheet("By User")
-        ws4.append(["User", "Input", "Output", "Total", "Share %"])
+        ws4["A1"] = "Top users"
+        ws4["A1"].font = SECTION_FONT
+        u_headers = ["User", "Input", "Output", "Total", "Share %"]
+        for i, h in enumerate(u_headers, start=1):
+            ws4.cell(row=3, column=i, value=h)
+        style_header(ws4, 3, len(u_headers))
+        r4 = 4
         for u in by_user:
-            ws4.append([u.get("username", ""), int(u.get("input_tokens", 0)),
-                        int(u.get("output_tokens", 0)), int(u.get("total_tokens", 0)),
-                        float(u.get("percentage", 0))])
+            ws4.cell(row=r4, column=1, value=u.get("username", ""))
+            ws4.cell(row=r4, column=2, value=int(u.get("input_tokens", 0)))
+            ws4.cell(row=r4, column=3, value=int(u.get("output_tokens", 0)))
+            ws4.cell(row=r4, column=4, value=int(u.get("total_tokens", 0)))
+            ws4.cell(row=r4, column=5, value=float(u.get("percentage", 0)))
+            r4 += 1
+        u_last = r4 - 1
+        if u_last >= 4:
+            style_body(ws4, 4, u_last, len(u_headers), right_cols=(2, 3, 4, 5))
+            uchart = BarChart()
+            uchart.type = "bar"
+            uchart.title = "Tokens by user"
+            uchart.y_axis.title = "User"
+            uchart.x_axis.title = "Tokens"
+            udata = Reference(ws4, min_col=4, min_row=3, max_row=u_last)
+            ucats = Reference(ws4, min_col=1, min_row=4, max_row=u_last)
+            uchart.add_data(udata, titles_from_data=True)
+            uchart.set_categories(ucats)
+            uchart.height = 8
+            uchart.width = 22
+            ws4.add_chart(uchart, "G3")
+        for col, w in zip("ABCDE", (26, 12, 12, 14, 10)):
+            ws4.column_dimensions[col].width = w
 
         bio = _io.BytesIO()
         wb.save(bio)
         return _Resp(
             content=bio.getvalue(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename=\"token_consumption_{_dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx\"'},
+            headers={"Content-Disposition": f'attachment; filename="token_consumption_{_dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx"'},
         )
 
     # ---- DOCX / PDF: build markdown-ish HTML then convert with shared helpers ----

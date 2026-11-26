@@ -12,6 +12,10 @@ import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from '../modals/GenericModal.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconTable from '../../assets/icons/IconTable.vue';
+import IconDocumentText from '../../assets/icons/IconDocumentText.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
 import TokenQuotaPanel from './TokenQuotaPanel.vue';
 
 ChartJS.register(
@@ -23,13 +27,15 @@ ChartJS.register(
 const props = defineProps({
   userId: { type: Number, required: true },
   username: { type: String, required: true },
+  // Full user record (optional) so the identity block can show role/status/
+  // email without an extra round-trip. Falls back gracefully when absent.
+  user: { type: Object, default: null },
 });
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
 const stats = ref(null);
 const isLoading = ref(true);
-const chartRef = ref(null);
 
 // Palette shared across all charts so WebUI (indigo) vs API (amber) is
 // consistently recognisable across the two timeseries charts.
@@ -276,12 +282,56 @@ function formatInt(n) {
 // ── Data loading ──────────────────────────────────────────────────────────
 async function fetchStats() {
   isLoading.value = true;
+  // Reset so a previously-viewed user's numbers never linger while the next
+  // user's payload is loading (prevents cross-user data mingling in the UI).
+  stats.value = null;
   try {
     stats.value = await adminStore.fetchUserStats(props.userId);
   } finally {
     isLoading.value = false;
   }
 }
+
+// ── Export (HTML / PDF / DOCX / XLSX) — strictly scoped to this user's id ─
+// The backend reuses the same aggregation as the modal, so every format is
+// guaranteed to match what the admin is currently looking at.
+const EXPORT_FORMATS = [
+  { value: 'xlsx', label: 'XLSX', icon: IconTable, title: 'Excel workbook with charts & tables' },
+  { value: 'html', label: 'HTML', icon: IconDocumentText, title: 'Standalone HTML report' },
+  { value: 'docx', label: 'DOCX', icon: IconFileText, title: 'Word document report' },
+  { value: 'pdf', label: 'PDF', icon: IconPresentationChartBar, title: 'Print-ready PDF report' },
+];
+const isExporting = ref(false);
+const exportingFormat = ref(null);
+async function exportStats(format) {
+  if (isExporting.value) return;
+  isExporting.value = true;
+  exportingFormat.value = format;
+  try {
+    await adminStore.exportUserStats(props.userId, format);
+    uiStore.addNotification(`Export (${String(format).toUpperCase()}) downloaded.`, 'success');
+  } catch (e) {
+    uiStore.addNotification(`Export failed: ${e?.message || e}`, 'error');
+  } finally {
+    isExporting.value = false;
+    exportingFormat.value = null;
+  }
+}
+
+// ── Identity block — derived from the optional `user` prop ────────────────
+const identity = computed(() => {
+  const u = props.user || {};
+  const role = u.is_admin ? 'Admin' : (u.is_moderator ? 'Moderator' : 'User');
+  return {
+    username: u.username || props.username,
+    id: u.id ?? props.userId,
+    role,
+    status: u.status || '—',
+    email: u.email || '—',
+    joined: u.created_at ? new Date(u.created_at).toLocaleDateString() : '—',
+    lastSeen: u.last_activity_at ? new Date(u.last_activity_at).toLocaleString() : 'Never',
+  };
+});
 
 function exportChart() {
   const chart = chartRef.value?.chart;
@@ -310,6 +360,41 @@ watch(() => props.userId, (newId) => {
         <p class="text-gray-500">Could not load statistics for this user.</p>
       </div>
       <div v-else class="space-y-6">
+        <!-- Identity block: who these stats belong to (prevents cross-user confusion) -->
+        <div class="rounded-2xl border p-4 flex flex-wrap items-center gap-x-6 gap-y-2"
+             style="border-color: var(--border-main); background-color: var(--bg-card);">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-black"
+                 :style="{ backgroundColor: 'var(--brand-primary, #6366f1)', color: '#fff' }">
+              {{ (identity.username || '?').slice(0, 1).toUpperCase() }}
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-black truncate" style="color: var(--text-main);">{{ identity.username }}</div>
+              <div class="text-[10px] font-mono truncate" style="color: var(--text-dim);">
+                ID {{ identity.id }} · {{ identity.email }}
+              </div>
+            </div>
+          </div>
+          <div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px]">
+            <div>
+              <span class="uppercase text-[9px] font-black tracking-widest" style="color: var(--text-dim);">Role</span>
+              <span class="ml-1 font-bold" style="color: var(--text-main);">{{ identity.role }}</span>
+            </div>
+            <div>
+              <span class="uppercase text-[9px] font-black tracking-widest" style="color: var(--text-dim);">Status</span>
+              <span class="ml-1 font-bold" style="color: var(--text-main);">{{ identity.status }}</span>
+            </div>
+            <div>
+              <span class="uppercase text-[9px] font-black tracking-widest" style="color: var(--text-dim);">Joined</span>
+              <span class="ml-1 font-bold" style="color: var(--text-main);">{{ identity.joined }}</span>
+            </div>
+            <div>
+              <span class="uppercase text-[9px] font-black tracking-widest" style="color: var(--text-dim);">Last seen</span>
+              <span class="ml-1 font-bold" style="color: var(--text-main);">{{ identity.lastSeen }}</span>
+            </div>
+          </div>
+        </div>
+
         <!-- Summary cards -->
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div
@@ -362,7 +447,7 @@ watch(() => props.userId, (newId) => {
             </span>
           </div>
           <div class="h-64">
-            <Line :data="tokenChartData" :options="tokenChartOptions" ref="chartRef" />
+            <Line :data="tokenChartData" :options="tokenChartOptions" />
           </div>
         </div>
 
@@ -436,8 +521,19 @@ watch(() => props.userId, (newId) => {
       <button @click="fetchStats" class="btn btn-secondary" :disabled="isLoading">
         {{ isLoading ? 'Reloading...' : 'Reload Data' }}
       </button>
-      <button @click="exportChart" class="btn btn-secondary">Export Chart</button>
       <div class="grow"></div>
+      <button
+        v-for="fmt in EXPORT_FORMATS"
+        :key="fmt.value"
+        @click="exportStats(fmt.value)"
+        class="btn btn-secondary flex items-center gap-1.5"
+        :disabled="isExporting || isLoading"
+        :title="fmt.title"
+      >
+        <IconAnimateSpin v-if="exportingFormat === fmt.value" class="w-4 h-4 animate-spin" />
+        <component v-else :is="fmt.icon" class="w-4 h-4" />
+        <span>{{ exportingFormat === fmt.value ? 'Exporting…' : fmt.label }}</span>
+      </button>
       <button @click="uiStore.closeModal('userStats')" class="btn btn-primary">Close</button>
     </template>
   </GenericModal>

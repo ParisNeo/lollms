@@ -7,20 +7,6 @@
           <IconPresentationChartBar class="w-5 h-5" />
           <span>Token Consumption Analytics</span>
         </h3>
-        <div class="export-actions">
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('html')" title="Export as HTML">
-            <IconDocumentText class="w-4 h-4" /><span>HTML</span>
-          </button>
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('pdf')" title="Export as PDF">
-            <IconFileText class="w-4 h-4" /><span>PDF</span>
-          </button>
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('docx')" title="Export as Word Document">
-            <IconDocumentText class="w-4 h-4" /><span>DOCX</span>
-          </button>
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('xlsx')" title="Export as Excel Workbook">
-            <IconTable class="w-4 h-4" /><span>XLSX</span>
-          </button>
-        </div>
       </div>
 
       <!-- Filters: granularity tabs, source scope, time window -->
@@ -213,6 +199,25 @@
           </table>
         </div>
       </div>
+
+      <!-- ─── Export actions (bottom bar) ──────────────────────────────── -->
+      <div class="export-footer">
+        <span class="export-footer-label">Export report</span>
+        <div class="export-actions">
+          <button class="btn-export" :disabled="!consolidated" @click="doExport('html')" title="Export as HTML">
+            <IconDocumentText class="w-4 h-4" /><span>HTML</span>
+          </button>
+          <button class="btn-export" :disabled="!consolidated" @click="doExport('pdf')" title="Export as PDF">
+            <IconFileText class="w-4 h-4" /><span>PDF</span>
+          </button>
+          <button class="btn-export" :disabled="!consolidated" @click="doExport('docx')" title="Export as Word Document">
+            <IconDocumentText class="w-4 h-4" /><span>DOCX</span>
+          </button>
+          <button class="btn-export" :disabled="!consolidated" @click="doExport('xlsx')" title="Export as Excel Workbook">
+            <IconTable class="w-4 h-4" /><span>XLSX</span>
+          </button>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -385,6 +390,15 @@ onMounted(() => {
 .panel-title { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 1.15rem; font-weight: 700; }
 
 .export-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.export-footer {
+  display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem;
+  padding: 0.85rem 1rem; border-radius: 0.75rem;
+  background: var(--bg-elev, #fff); border: 1px solid var(--border-color, #e5e7eb);
+}
+.export-footer-label {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+  color: var(--text-muted, #6b7280);
+}
 .btn-export {
   display: inline-flex; align-items: center; gap: 0.35rem;
   padding: 0.35rem 0.7rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 600;
