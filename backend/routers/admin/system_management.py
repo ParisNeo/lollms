@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import psutil
-from fastapi import APIRouter, Depends, Request, HTTPException, Query
+from fastapi import APIRouter, Depends, Request, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import func, desc, update
 from lollms_client import LollmsDataManager
@@ -394,6 +394,390 @@ class TopUserStat(BaseModel):
     total_tokens: int = 0
     calls: int = 0
 
+
+# ---------------------------------------------------------------------------
+# Rich token consumption analytics
+# ---------------------------------------------------------------------------
+# The admin dashboard needs fine-grained, multi-dimensional views of token
+# consumption. ``GenerationMetric`` is the single source of truth for all
+# metered generations (WebUI chat tagged ``source='chat'``; every external API
+# surface tagged ``source!='chat'``). All aggregation happens in SQL so the
+# endpoint stays responsive as the table grows into the millions of rows.
+
+
+class ConsumptionBucket(BaseModel):
+    label: str
+    bucket: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    calls: int = 0
+    webui_input_tokens: int = 0
+    webui_output_tokens: int = 0
+    webui_tokens: int = 0
+    webui_calls: int = 0
+    api_input_tokens: int = 0
+    api_output_tokens: int = 0
+    api_tokens: int = 0
+    api_calls: int = 0
+
+
+
+
+class ConsumptionTotals(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    calls: int = 0
+    webui_input_tokens: int = 0
+    webui_output_tokens: int = 0
+    webui_tokens: int = 0
+    webui_calls: int = 0
+    api_input_tokens: int = 0
+    api_output_tokens: int = 0
+    api_tokens: int = 0
+    api_calls: int = 0
+    energy_kwh: float = 0.0
+    co2_g: float = 0.0
+
+
+
+
+class ConsumptionBreakdownItem(BaseModel):
+    """One row of the Top Models / Top Users breakdown tables.
+
+    ``name`` is the generic identity field (model name or username). The
+    frontend also reads the semantic aliases ``model_name`` / ``username`` and
+    ``calls``, so they are all declared here — an undeclared field would be
+    silently dropped by ``_only`` and the panel would render blanks.
+    """
+    name: str = ""
+    model_name: Optional[str] = None
+    username: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    calls: int = 0
+    percentage: float = 0.0
+
+
+class ConsumptionAnalyticsResponse(BaseModel):
+    granularity: str
+    source: str
+    days: int
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+    totals: ConsumptionTotals = ConsumptionTotals()
+    buckets: List[ConsumptionBucket] = []
+    by_model: List[ConsumptionBreakdownItem] = []
+    by_user: List[ConsumptionBreakdownItem] = []
+    avg_tokens_per_call: float = 0
+    avg_output_per_call: float = 0
+    input_output_ratio: str = "—"
+    peak_bucket: Optional[str] = None
+
+
+
+_VALID_GRANULARITIES = {"hour", "day", "week", "month"}
+_VALID_SOURCE_SCOPES = {"all", "webui", "api"}
+
+
+def _bucket_sql_expr(granularity: str):
+    """Return a SQLAlchemy expression producing a sortable bucket string.
+
+    SQLite's ``strftime`` gives us deterministic ISO-like strings:
+      * hour  -> ``YYYY-MM-DD HH:00``
+      * day   -> ``YYYY-MM-DD``
+      * week  -> ``YYYY-Www`` (ISO week)
+      * month -> ``YYYY-MM``
+    These sort lexicographically, so no extra ordering expression is needed.
+    """
+    from backend.db.models.generation_metric import GenerationMetric
+
+    col = GenerationMetric.created_at
+    if granularity == "hour":
+        return func.strftime("%Y-%m-%d %H:00", col)
+    if granularity == "day":
+        return func.strftime("%Y-%m-%d", col)
+    if granularity == "week":
+        return func.strftime("%Y-W%W", col)
+    return func.strftime("%Y-%m", col)
+
+
+def _humanize_bucket_label(bucket: str, granularity: str) -> str:
+    """Turn a raw bucket string into a human-friendly label."""
+    if not bucket:
+        return bucket
+    try:
+        if granularity == "hour":
+            return bucket  # "2025-11-25 14:00"
+        if granularity == "day":
+            dt = datetime.strptime(bucket, "%Y-%m-%d")
+            return dt.strftime("%a %d %b")
+        if granularity == "month":
+            dt = datetime.strptime(bucket, "%Y-%m")
+            return dt.strftime("%b %Y")
+        # week: "YYYY-Www"
+        year, week = bucket.split("-W")
+        return f"Wk {int(week):02d} {year}"
+    except Exception:
+        return bucket
+
+
+
+def _source_values_for(scope: str):
+    """Map a UI 'source' scope to the concrete ``GenerationMetric.source`` values.
+
+    WebUI chat records ``source="chat"``; every external/API surface records a
+    different token (e.g. ``"openai"``, ``"ollama"``, ``"lollms"``, ``"api"``).
+    Keeping this mapping in one place ensures the on-screen report and the
+    export never disagree about what counts as "API".
+    """
+    scope = (scope or "all").lower()
+    if scope == "webui":
+        return ("chat", "webui")
+    if scope == "api":
+        return ("openai", "ollama", "lollms", "api", "service", "openai_v1", "ollama_v1", "lollms_v1")
+    return None
+
+
+
+@system_management_router.get("/system/consumption-analytics", response_model=ConsumptionAnalyticsResponse)
+def get_consumption_analytics(
+    granularity: str = Query("day", description="hour|day|week|month"),
+    source: str = Query("all", description="all|webui|api"),
+    days: int = Query(30, ge=0, le=3650),
+    top_n: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _admin: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """Fine-grained token consumption analytics.
+
+    Aggregation is done in Python over the raw ``generation_metrics`` rows so the
+    result is identical on SQLite and PostgreSQL and never depends on
+    dialect-specific date functions. ``source`` filters via a value-set mapping
+    (webui -> chat; api -> openai/ollama/lollms/...).
+    """
+    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta
+    from backend.db.models.generation_metric import GenerationMetric
+    from collections import defaultdict
+
+    if granularity not in ("hour", "day", "week", "month"):
+        granularity = "day"
+
+    query = db.query(GenerationMetric)
+    if days and days > 0:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        query = query.filter(GenerationMetric.created_at >= cutoff)
+    source_values = _source_values_for(source)
+    if source_values is not None:
+        query = query.filter(GenerationMetric.source.in_(source_values))
+
+    rows = query.all()
+
+    def _normalize_dt(dt):
+        if dt is None:
+            return datetime.utcnow()
+        if isinstance(dt, str):
+            try:
+                return datetime.fromisoformat(dt)
+            except ValueError:
+                return datetime.utcnow()
+        return dt
+
+    def _bucket_key(dt):
+        if granularity == "hour":
+            return dt.strftime("%Y-%m-%d %H:00")
+        if granularity == "week":
+            iso = dt.isocalendar()
+            return f"{iso[0]}-W{iso[1]:02d}"
+        if granularity == "month":
+            return dt.strftime("%Y-%m")
+        return dt.strftime("%Y-%m-%d")
+
+    def _is_api_source(src):
+        return src in ("openai", "ollama", "lollms", "api", "openai_v1", "ollama_v1", "lollms_v1")
+
+    buckets = defaultdict(lambda: {
+        "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0,
+        "webui_input_tokens": 0, "webui_output_tokens": 0, "webui_tokens": 0, "webui_calls": 0,
+        "api_input_tokens": 0, "api_output_tokens": 0, "api_tokens": 0, "api_calls": 0,
+    })
+    totals = {
+        "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0,
+        "webui_input_tokens": 0, "webui_output_tokens": 0, "webui_tokens": 0, "webui_calls": 0,
+        "api_input_tokens": 0, "api_output_tokens": 0, "api_tokens": 0, "api_calls": 0,
+    }
+    model_totals = defaultdict(lambda: {"model_name": "", "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0})
+    user_totals = defaultdict(lambda: {"username": "", "input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "calls": 0})
+    energy_kwh = 0.0
+    co2_g = 0.0
+
+    for row in rows:
+        dt = _normalize_dt(row.created_at)
+        key = _bucket_key(dt)
+        b = buckets[key]
+        pt = int(row.prompt_tokens or 0)
+        ct = int(row.completion_tokens or 0)
+        tt = int(row.total_tokens or (pt + ct))
+        b["input_tokens"] += pt
+        b["output_tokens"] += ct
+        b["total_tokens"] += tt
+        b["calls"] += 1
+        totals["input_tokens"] += pt
+        totals["output_tokens"] += ct
+        totals["total_tokens"] += tt
+        totals["calls"] += 1
+        energy_kwh += float(row.energy_kwh or 0)
+        co2_g += float(row.co2_g or 0)
+
+        if _is_api_source(row.source):
+            b["api_input_tokens"] += pt
+            b["api_output_tokens"] += ct
+            b["api_tokens"] += tt
+            b["api_calls"] += 1
+            totals["api_input_tokens"] += pt
+            totals["api_output_tokens"] += ct
+            totals["api_tokens"] += tt
+            totals["api_calls"] += 1
+        else:
+            b["webui_input_tokens"] += pt
+            b["webui_output_tokens"] += ct
+            b["webui_tokens"] += tt
+            b["webui_calls"] += 1
+            totals["webui_input_tokens"] += pt
+            totals["webui_output_tokens"] += ct
+            totals["webui_tokens"] += tt
+            totals["webui_calls"] += 1
+
+        mname = row.model_name or "unknown"
+        mt = model_totals[mname]
+        mt["model_name"] = mname
+        mt["input_tokens"] += pt
+        mt["output_tokens"] += ct
+        mt["total_tokens"] += tt
+        mt["calls"] += 1
+
+        uname = row.username or "anonymous"
+        ut = user_totals[uname]
+        ut["username"] = uname
+        ut["input_tokens"] += pt
+        ut["output_tokens"] += ct
+        ut["total_tokens"] += tt
+        ut["calls"] += 1
+
+    order = sorted(buckets.keys(), reverse=(granularity == "hour"))
+    if granularity in ("day", "week", "month"):
+        order = sorted(buckets.keys())
+
+    bucket_list = []
+    for key in order:
+        b = buckets[key]
+        # ``bucket`` carries the raw sortable key (e.g. "2025-11-25", "2025-W48");
+        # ``label`` carries the human-friendly rendering. Both are declared on
+        # ConsumptionBucket, so both must be supplied or pydantic raises
+        # "Field required".
+        bucket_list.append({
+            "label": _humanize_bucket_label(key, granularity),
+            "bucket": key,
+            **b,
+        })
+
+    model_share_base = totals["total_tokens"] or 1
+    model_list = sorted(model_totals.values(), key=lambda x: x["total_tokens"], reverse=True)[:top_n]
+    for m in model_list:
+        m["percentage"] = round((m["total_tokens"] / model_share_base) * 100, 1)
+        # Mirror ``model_name`` into the generic ``name`` field so the item
+        # validates against ``ConsumptionBreakdownItem`` while still exposing
+        # the semantic key the frontend template binds to.
+        m["name"] = m.get("model_name") or "unknown"
+
+    user_share_base = totals["total_tokens"] or 1
+    user_list = sorted(user_totals.values(), key=lambda x: x["total_tokens"], reverse=True)[:top_n]
+    for u in user_list:
+        u["percentage"] = round((u["total_tokens"] / user_share_base) * 100, 1)
+        u["name"] = u.get("username") or "anonymous"
+
+    ratio = "—"
+    if totals["output_tokens"] > 0:
+        ratio = f"{round(totals['input_tokens'] / totals['output_tokens'], 2)}:1"
+    avg_tokens_per_call = round(totals["total_tokens"] / totals["calls"], 1) if totals["calls"] else 0
+    avg_output_per_call = round(totals["output_tokens"] / totals["calls"], 1) if totals["calls"] else 0
+
+    peak_bucket_label = None
+    if bucket_list:
+        peak = max(bucket_list, key=lambda x: x["total_tokens"])
+        peak_bucket_label = peak["label"]
+
+    def _only(model_cls, data):
+        # Pass only the fields the pydantic model actually declares, so the
+        # endpoint can never 500 on an unexpected-attribute ValidationError if
+        # the response schema evolves independently of the aggregation code.
+        #
+        # ``required`` fields that the aggregation forgot to populate are
+        # backfilled with an empty-string default so a schema/aggregation drift
+        # degrades gracefully instead of taking down the whole report.
+        fields = getattr(model_cls, "model_fields", {}) or {}
+        allowed = set(fields)
+        filtered = {k: v for k, v in data.items() if k in allowed}
+        for name, field in fields.items():
+            if name in filtered:
+                continue
+            if not field.is_required():
+                continue
+            # Only strings are silently defaulted; a missing numeric/other
+            # required field is a genuine bug that should still surface loudly.
+            if field.annotation is str:
+                filtered[name] = ""
+            else:
+                raise ValueError(
+                    f"Missing required field '{name}' for {model_cls.__name__}"
+                )
+        return model_cls(**filtered)
+
+    totals_payload = {"energy_kwh": round(energy_kwh, 4), "co2_g": round(co2_g, 4), **totals}
+
+    # ConsumptionAnalyticsResponse declares ``granularity``, ``source`` AND
+    # ``days`` as REQUIRED fields. ``days`` must be forwarded from the query
+    # param or FastAPI's response validation fails with
+    # ``Missing required field 'days'`` (propagated as HTTP 500 by the
+    # ``_only`` helper). ``window_start`` / ``window_end`` are populated when a
+    # finite window was requested; ``None`` is acceptable for "all time".
+    window_start_iso = None
+    window_end_iso = None
+    if days and days > 0:
+        _end = datetime.utcnow()
+        _start = _end - timedelta(days=days)
+        window_start_iso = _start.isoformat()
+        window_end_iso = _end.isoformat()
+
+    # ``ConsumptionAnalyticsResponse`` declares ``by_model`` and ``by_user`` as
+    # ``List[dict]``. Building ``ConsumptionBreakdownItem`` instances here and
+    # then handing them to the response validator triggers
+    # ``Input should be a valid dictionary`` (a model instance is not a dict).
+    # Pass the aggregated dicts straight through; ``_only`` is reserved for the
+    # strictly-typed sub-objects (``buckets``, ``totals``) and the top-level
+    # response whose inner typing we *do* want to enforce.
+    response_payload = {
+        "granularity": granularity,
+        "source": source,
+        "days": days,
+        "window_start": window_start_iso,
+        "window_end": window_end_iso,
+        "buckets": [_only(ConsumptionBucket, b) for b in bucket_list],
+        "totals": _only(ConsumptionTotals, totals_payload),
+        "by_model": list(model_list),
+        "by_user": list(user_list),
+        "input_output_ratio": ratio,
+        "avg_tokens_per_call": avg_tokens_per_call,
+        "avg_output_per_call": avg_output_per_call,
+        "peak_bucket": peak_bucket_label,
+    }
+    return _only(ConsumptionAnalyticsResponse, response_payload)
+
+
+
 @system_management_router.get("/top-users", response_model=List[TopUserStat])
 async def get_top_users(
     source: Optional[str] = Query(None, description="Filter by source: 'chat' (WebUI), 'api', or omit for all"),
@@ -484,6 +868,218 @@ async def get_top_users(
         )
         for user_id, username, prompt_tokens, completion_tokens, total_tokens, calls in rows
     ]
+
+
+@system_management_router.get("/system/consumption-analytics/export")
+def export_consumption_analytics(
+    format: str = Query("html", pattern="^(html|pdf|docx|xlsx)$"),
+    granularity: str = Query("day", pattern="^(hour|day|week|month)$"),
+    source: str = Query("all"),
+    days: int = Query(30, ge=0, le=3650),
+    top_n: int = Query(10, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _admin: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """Export the consumption report.
+
+    Reuses ``get_consumption_analytics`` as the single source of truth so the
+    exported document always matches the on-screen view (no duplicate SQL that
+    could drift or fail). Supports html/pdf/docx/xlsx.
+    """
+    import io as _io
+    from datetime import datetime as _dt
+
+    # Defensive: generation_analytics returns a Pydantic model instance.
+    report = get_consumption_analytics(
+        granularity=granularity,
+        source=source,
+        days=days,
+        top_n=top_n,
+        db=db,
+        _admin=_admin,
+    )
+    data = report.model_dump() if hasattr(report, "model_dump") else report
+    data = report.dict() if not isinstance(data, dict) and hasattr(report, "dict") else data
+
+    stamp = _dt.now().strftime("%Y-%m-%d %H:%M")
+    title = "Token Consumption Report"
+    subtitle = f"Granularity: {granularity} · Source: {source} · Window: {days or 'all'} day(s) · Generated: {stamp}"
+
+    def _num(n):
+        try:
+            return f"{int(n):,}"
+        except Exception:
+            return str(n)
+
+    totals = data.get("totals", {})
+    buckets = data.get("buckets", [])
+    by_model = data.get("by_model", [])
+    by_user = data.get("by_user", [])
+
+    if format == "html":
+        rows = "".join(
+            f"<tr><td>{b.get('label','')}</td><td>{_num(b.get('input_tokens',0))}</td>"
+            f"<td>{_num(b.get('output_tokens',0))}</td><td>{_num(b.get('total_tokens',0))}</td>"
+            f"<td>{_num(b.get('calls',0))}</td></tr>"
+            for b in buckets
+        )
+        model_rows = "".join(
+            f"<tr><td>{m.get('model_name','')}</td><td>{_num(m.get('input_tokens',0))}</td>"
+            f"<td>{_num(m.get('output_tokens',0))}</td><td>{_num(m.get('total_tokens',0))}</td>"
+            f"<td>{m.get('percentage',0)}%</td></tr>"
+            for m in by_model
+        )
+        user_rows = "".join(
+            f"<tr><td>{u.get('username','')}</td><td>{_num(u.get('input_tokens',0))}</td>"
+            f"<td>{_num(u.get('output_tokens',0))}</td><td>{_num(u.get('total_tokens',0))}</td>"
+            f"<td>{u.get('percentage',0)}%</td></tr>"
+            for u in by_user
+        )
+        kpi = (
+            f"<div class='kpi'><b>Total tokens:</b> {_num(totals.get('total_tokens',0))} "
+            f"(<span style='color:#2563eb'>{_num(totals.get('input_tokens',0))} in</span> · "
+            f"<span style='color:#059669'>{_num(totals.get('output_tokens',0))} out</span>)</div>"
+            f"<div class='kpi'><b>Calls:</b> {_num(totals.get('calls',0))}</div>"
+            f"<div class='kpi'><b>WebUI / API tokens:</b> {_num(totals.get('webui_tokens',0))} / {_num(totals.get('api_tokens',0))}</div>"
+            f"<div class='kpi'><b>Energy:</b> {totals.get('energy_kwh',0)} kWh · {totals.get('co2_g',0)} g CO₂</div>"
+        )
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>{title}</title>
+<style>
+body{{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:32px;color:#1f2937;}}
+h1{{font-size:22px;margin:0 0 4px;}} .sub{{color:#6b7280;font-size:12px;margin-bottom:20px;}}
+.kpi{{padding:6px 0;font-size:13px;border-bottom:1px solid #eee;}}
+table{{border-collapse:collapse;width:100%;margin:12px 0 24px;font-size:12px;}}
+th,td{{border:1px solid #e5e7eb;padding:6px 8px;text-align:left;}}
+th{{background:#f3f4f6;font-weight:700;}}
+h2{{font-size:15px;margin:24px 0 4px;}}
+</style></head><body>
+<h1>{title}</h1><div class="sub">{subtitle}</div>
+<div>{kpi}</div>
+<h2>Consumption over time ({granularity})</h2>
+<table><thead><tr><th>Period</th><th>Input</th><th>Output</th><th>Total</th><th>Calls</th></tr></thead>
+<tbody>{rows or '<tr><td colspan="5">No data</td></tr>'}</tbody></table>
+<h2>Top models</h2>
+<table><thead><tr><th>Model</th><th>Input</th><th>Output</th><th>Total</th><th>Share</th></tr></thead>
+<tbody>{model_rows or '<tr><td colspan="5">No data</td></tr>'}</tbody></table>
+<h2>Top users</h2>
+<table><thead><tr><th>User</th><th>Input</th><th>Output</th><th>Total</th><th>Share</th></tr></thead>
+<tbody>{user_rows or '<tr><td colspan="5">No data</td></tr>'}</tbody></table>
+</body></html>"""
+        from fastapi import Response as _Resp
+        return _Resp(
+            content=html.encode("utf-8"),
+            media_type="text/html",
+            headers={"Content-Disposition": f'attachment; filename=\"token_consumption_{_dt.now().strftime("%Y%m%d_%H%M%S")}.html\"'},
+        )
+
+    if format == "xlsx":
+        from openpyxl import Workbook
+        from fastapi import Response as _Resp
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Summary"
+        ws.append(["Token Consumption Report"])
+        ws.append([subtitle])
+        ws.append([])
+        ws.append(["Metric", "Value"])
+        ws.append(["Total tokens", int(totals.get("total_tokens", 0))])
+        ws.append(["Input tokens", int(totals.get("input_tokens", 0))])
+        ws.append(["Output tokens", int(totals.get("output_tokens", 0))])
+        ws.append(["Calls", int(totals.get("calls", 0))])
+        ws.append(["WebUI tokens", int(totals.get("webui_tokens", 0))])
+        ws.append(["API tokens", int(totals.get("api_tokens", 0))])
+        ws.append(["Energy kWh", float(totals.get("energy_kwh", 0))])
+        ws.append(["CO2 g", float(totals.get("co2_g", 0))])
+
+        ws2 = wb.create_sheet("Timeline")
+        ws2.append(["Period", "Input", "Output", "Total", "Calls", "WebUI", "API"])
+        for b in buckets:
+            ws2.append([
+                b.get("label", ""), int(b.get("input_tokens", 0)), int(b.get("output_tokens", 0)),
+                int(b.get("total_tokens", 0)), int(b.get("calls", 0)),
+                int(b.get("webui_tokens", 0)), int(b.get("api_tokens", 0)),
+            ])
+
+        ws3 = wb.create_sheet("By Model")
+        ws3.append(["Model", "Input", "Output", "Total", "Share %"])
+        for m in by_model:
+            ws3.append([m.get("model_name", ""), int(m.get("input_tokens", 0)),
+                        int(m.get("output_tokens", 0)), int(m.get("total_tokens", 0)),
+                        float(m.get("percentage", 0))])
+
+        ws4 = wb.create_sheet("By User")
+        ws4.append(["User", "Input", "Output", "Total", "Share %"])
+        for u in by_user:
+            ws4.append([u.get("username", ""), int(u.get("input_tokens", 0)),
+                        int(u.get("output_tokens", 0)), int(u.get("total_tokens", 0)),
+                        float(u.get("percentage", 0))])
+
+        bio = _io.BytesIO()
+        wb.save(bio)
+        return _Resp(
+            content=bio.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename=\"token_consumption_{_dt.now().strftime("%Y%m%d_%H%M%S")}.xlsx\"'},
+        )
+
+    # ---- DOCX / PDF: build markdown-ish HTML then convert with shared helpers ----
+    from fastapi import Response as _Resp
+    md_lines = [f"# {title}", "", subtitle, "", "## Summary", ""]
+    md_lines += [
+        f"- **Total tokens:** {_num(totals.get('total_tokens',0))} "
+        f"({_num(totals.get('input_tokens',0))} in · {_num(totals.get('output_tokens',0))} out)",
+        f"- **Calls:** {_num(totals.get('calls',0))}",
+        f"- **WebUI / API tokens:** {_num(totals.get('webui_tokens',0))} / {_num(totals.get('api_tokens',0))}",
+        f"- **Energy:** {totals.get('energy_kwh',0)} kWh · {totals.get('co2_g',0)} g CO₂",
+        "",
+    ]
+    md_lines += ["## Consumption over time", "", f"| Period | Input | Output | Total | Calls |", "|---|---|---|---|---|"]
+    for b in buckets:
+        md_lines.append(f"| {b.get('label','')} | {_num(b.get('input_tokens',0))} | {_num(b.get('output_tokens',0))} | {_num(b.get('total_tokens',0))} | {_num(b.get('calls',0))} |")
+    md_lines += ["", "## Top models", "", "| Model | Input | Output | Total | Share |", "|---|---|---|---|---|"]
+    for m in by_model:
+        md_lines.append(f"| {m.get('model_name','')} | {_num(m.get('input_tokens',0))} | {_num(m.get('output_tokens',0))} | {_num(m.get('total_tokens',0))} | {m.get('percentage',0)}% |")
+    md_lines += ["", "## Top users", "", "| User | Input | Output | Total | Share |", "|---|---|---|---|---|"]
+    for u in by_user:
+        md_lines.append(f"| {u.get('username','')} | {_num(u.get('input_tokens',0))} | {_num(u.get('output_tokens',0))} | {_num(u.get('total_tokens',0))} | {u.get('percentage',0)}% |")
+    md_text = "\n".join(md_lines)
+
+    filename_base = f"token_consumption_{_dt.now().strftime('%Y%m%d_%H%M%S')}"
+
+    try:
+        from backend.routers.files import md2_to_html, html_to_docx_bytes, md_to_pdf_bytes, html_to_pdf_bytes
+    except Exception:
+        md2_to_html = html_to_docx_bytes = md_to_pdf_bytes = html_to_pdf_bytes = None
+
+    if format == "docx":
+        if html_to_docx_bytes is None:
+            from fastapi import HTTPException as _HE
+            raise _HE(status_code=501, detail="DOCX export requires python-docx (not available).")
+        html = md2_to_html(md_text) if md2_to_html else f"<pre>{md_text}</pre>"
+        content = html_to_docx_bytes(html)
+        return _Resp(
+            content=content,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.docx"'},
+        )
+
+    if format == "pdf":
+        if md_to_pdf_bytes is None and html_to_pdf_bytes is None:
+            from fastapi import HTTPException as _HE
+            raise _HE(status_code=501, detail="PDF export requires a PDF engine (not available).")
+        try:
+            content = md_to_pdf_bytes(md_text) if md_to_pdf_bytes else html_to_pdf_bytes(md2_to_html(md_text))
+        except Exception:
+            content = html_to_pdf_bytes(md2_to_html(md_text))
+        return _Resp(
+            content=content,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
+        )
+
+    from fastapi import HTTPException as _HE
+    raise _HE(status_code=400, detail=f"Unsupported export format: {format}")
+
 
 @system_management_router.get("/model-usage-stats", response_model=List[ModelUsageStat])
 async def get_model_usage_stats(db: Session = Depends(get_db)):

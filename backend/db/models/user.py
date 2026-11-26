@@ -19,6 +19,10 @@ from backend.db.models.image import UserImage, ImageAlbum
 
 class User(Base):
     __tablename__ = "users"
+    # Account taxonomy (see backend/account_types.py): "human" (default),
+    # "mesh" (peer instance bucket) or "agent" (AI/bot identity). Service
+    # principals share quota/metering but cannot log into the WebUI.
+    account_type = Column(String(16), nullable=False, default="human", server_default="human")
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     preferred_name = Column(String, nullable=True)

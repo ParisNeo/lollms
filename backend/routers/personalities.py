@@ -75,7 +75,12 @@ class GenerateIconRequest(BaseModel):
     prompt: str
 
 class HandbagCreate(BaseModel):
-    name: str = Field(..., min_length=1, max_length=128)
+    # ``name`` is optional: the "New Personality" action sends an empty/blank
+    # name and expects the server to auto-generate a usable slug. Previously a
+    # blank name failed Pydantic validation with a 422 *before* reaching the
+    # handler, so the UI "New" button silently did nothing. ``str = ""`` keeps
+    # the field present/typed while allowing the handler to default it.
+    name: str = Field(default="", max_length=128)
     display_name: Optional[str] = None
     description: Optional[str] = None
     author: Optional[str] = None
@@ -761,10 +766,38 @@ def create_handbag(payload: HandbagCreate,
                             detail="Only admins can create global personalities")
     root = (global_personalities_root() if payload.scope == "global"
             else user_personalities_root(db_user.username))
-    slug = slugify_handbag_name(payload.name)
-    if (root / slug).exists():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail=f"A handbag named '{slug}' already exists")
+    # Ensure the target root exists before we test membership on it — a missing
+    # root made ``(root / slug).exists()`` always False yet the later
+    # ``materialize_legacy_handbag`` write could still fail on the same absent
+    # parent, surfacing as an opaque 400.
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        trace_exception(exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Could not prepare personality storage: {exc}")
+
+    requested_name = (payload.name or "").strip()
+    explicit_name = bool(requested_name)
+    base_slug = slugify_handbag_name(requested_name) if explicit_name else ""
+    if not base_slug:
+        # Auto-name path: the "New" button sends no/blank name. Provide a
+        # stable human default and let the collision loop suffix it.
+        base_slug = "new-personality"
+        explicit_name = False
+
+    # Resolve a *unique* slug. Explicit duplicates stay a 409 (so a real rename
+    # clash is reported); auto-generated ones silently advance to the next free
+    # suffix so "New" always creates something.
+    slug = base_slug
+    counter = 1
+    while (root / slug).exists():
+        if explicit_name:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                                detail=f"A handbag named '{base_slug}' already exists")
+        counter += 1
+        slug = f"{base_slug}-{counter}"
+
     path = materialize_legacy_handbag(
         name=slug,
         prompt_text=payload.prompt_text or f"# {payload.display_name or slug}\n",

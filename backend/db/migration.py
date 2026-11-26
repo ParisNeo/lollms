@@ -372,7 +372,7 @@ def _bootstrap_lollms_user(connection):
                 "compress_images": False,
                 "image_compression_quality": 85,
                 "web_search_enabled": False,
-                "web_search_providers": ["google"],
+                "web_search_providers": json.dumps(["google"]),
                 "web_search_deep_analysis": False,
                 "artefacts_enabled": True,
                 "rlm_enabled": False,
@@ -915,6 +915,27 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 except Exception as e:
                     print(f"WARNING: Failed to add column {col_name} to users table: {e}")
                     connection.rollback()
+
+        # --- Account taxonomy: 'human' (default) | 'mesh' | 'agent' ---
+        # Declared on the User model; create_all does not ALTER existing tables,
+        # so add it explicitly for legacy DBs.
+        if 'account_type' not in user_columns_db:
+            try:
+                connection.execute(text(
+                    "ALTER TABLE users ADD COLUMN account_type VARCHAR(16) DEFAULT 'human' NOT NULL"
+                ))
+                connection.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_users_account_type ON users (account_type)"
+                ))
+                connection.execute(text(
+                    "UPDATE users SET account_type = 'human' WHERE account_type IS NULL OR account_type = ''"
+                ))
+                connection.commit()
+                user_columns_db.append('account_type')
+                print("INFO: Added 'account_type' column to 'users' table.")
+            except Exception as e:
+                print(f"WARNING: Failed to add 'account_type' column to users table: {e}")
+                connection.rollback()
 
         # --- Per-user token quota columns ---
         # NULL numeric columns inherit the global default; 0 means unlimited.

@@ -30,7 +30,7 @@ python-dotenv==1.2.4
 # --- LoLLMs Ecosystem & Client Library ---
 lollms-client==1.22.12
 ascii_colors==0.13.10
-pipmaster==1.2.2
+pipmaster==1.3.0
 openai==2.1.0
 tiktoken==0.14.0
 

@@ -348,15 +348,91 @@
                                 <button 
                                     v-for="ratio in currentRatios" 
                                     :key="ratio.name"
-                                    @click="imageSize = ratio.value"
+                                    @click="selectPresetSize(ratio.value)"
                                     class="p-2.5 rounded-2xl border flex flex-col items-center justify-center transition-all"
-                                    :class="imageSize === ratio.value ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-blue-500' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-800 text-gray-500 hover:border-gray-300'"
+                                    :class="(!customSizeActive && imageSize === ratio.value) ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-blue-500' : 'border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-800 text-gray-500 hover:border-gray-300'"
                                 >
                                     <div class="border-2 border-current rounded-md mb-1.5" :style="ratio.style"></div>
                                     <span class="text-[10px] font-black uppercase">{{ ratio.name }}</span>
                                     <span class="text-[8px] opacity-60 font-mono">{{ ratio.value }}</span>
                                 </button>
                             </div>
+
+                            <!-- ── CUSTOM WIDTH / HEIGHT ── -->
+                            <div class="transition-opacity duration-200" :class="{'opacity-30 pointer-events-none': isSelectionMode && keepOriginalSize}">
+                                <div class="flex items-center justify-between gap-2">
+                                    <button 
+                                        @click="toggleCustomSizePanel" 
+                                        class="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest transition-colors"
+                                        :class="customSizeActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'"
+                                    >
+                                        <IconAdjustmentsHorizontal class="w-3.5 h-3.5" />
+                                        <span>Custom Size</span>
+                                        <span 
+                                            v-if="customSizeActive" 
+                                            class="px-1.5 py-0.5 rounded-md bg-blue-600 text-white font-mono normal-case tracking-normal"
+                                        >{{ customSizeSummary }}</span>
+                                    </button>
+                                    <IconChevronUp 
+                                        class="w-3.5 h-3.5 text-gray-400 transition-transform cursor-pointer"
+                                        :class="{'rotate-180': !showCustomSize}"
+                                        @click="toggleCustomSizePanel"
+                                    />
+                                </div>
+
+                                <div v-show="showCustomSize" class="mt-2 p-2.5 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-900/40 space-y-2 animate-in fade-in">
+                                    <div class="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
+                                        <div>
+                                            <label class="text-[9px] font-black uppercase tracking-widest text-gray-400 block mb-1">Width</label>
+                                            <input 
+                                                type="number" 
+                                                :min="DIM_MIN" 
+                                                :max="DIM_MAX" 
+                                                step="8"
+                                                v-model.number="customWidth"
+                                                @input="onCustomSizeInput"
+                                                @change="applyCustomSize"
+                                                @blur="applyCustomSize"
+                                                class="input-field !py-1.5 !text-xs font-mono w-full text-center"
+                                            />
+                                        </div>
+                                        <span class="text-gray-400 font-black pb-2 select-none">×</span>
+                                        <div>
+                                            <label class="text-[9px] font-black uppercase tracking-widest text-gray-400 block mb-1">Height</label>
+                                            <input 
+                                                type="number" 
+                                                :min="DIM_MIN" 
+                                                :max="DIM_MAX" 
+                                                step="8"
+                                                v-model.number="customHeight"
+                                                @input="onCustomSizeInput"
+                                                @change="applyCustomSize"
+                                                @blur="applyCustomSize"
+                                                class="input-field !py-1.5 !text-xs font-mono w-full text-center"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center justify-between gap-2">
+                                        <div class="flex items-center gap-1">
+                                            <button 
+                                                v-for="swap in [{ label: 'Portrait', w: 768, h: 1344 }, { label: 'Landscape', w: 1344, h: 768 }, { label: 'Square', w: 1024, h: 1024 }]"
+                                                :key="swap.label"
+                                                @click="customWidth = swap.w; customHeight = swap.h; showCustomSize = true; applyCustomSize()"
+                                                class="px-2 py-0.5 text-[9px] font-bold rounded-md bg-gray-200/70 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 hover:text-blue-600 transition-colors"
+                                            >{{ swap.label }}</button>
+                                        </div>
+                                        <button 
+                                            @click="customWidth = clampDim(customHeight); applyCustomSize()"
+                                            class="text-[9px] font-bold text-blue-500 uppercase hover:underline"
+                                            title="Match height to width (square)"
+                                        >Square</button>
+                                    </div>
+                                    <p class="text-[9px] text-gray-400 leading-tight">
+                                        Rounded to multiples of 8 · {{ DIM_MIN }}–{{ DIM_MAX }} px
+                                    </p>
+                                </div>
+                            </div>
+
                             <p v-if="isSelectionMode && keepOriginalSize" class="text-[9px] font-bold text-blue-500/90 uppercase text-center tracking-wider">
                                 🔒 Aspect ratio locked · {{ Math.round(resolutionScale * 100) }}% scale
                             </p>
@@ -933,6 +1009,85 @@ const sidebarStyle = computed(() => ({
     width: window.innerWidth >= 1024 ? `${sidebarWidth.value}px` : undefined,
     minWidth: window.innerWidth >= 1024 ? '340px' : undefined
 }));
+
+// ── Custom width/height support ───────────────────────────────────────────
+// To save vertical dock space, the manual size inputs are collapsed behind a
+// toggle. ``customSizeActive`` tracks whether the user is currently driving
+// the generation size from the manual inputs rather than a preset tile.
+// Once a preset tile is clicked, ``customSizeActive`` is switched back off so
+// the two controls never disagree about which value is authoritative.
+const showCustomSize = ref(false);
+const customSizeActive = ref(false);
+const customWidth = ref(1024);
+const customHeight = ref(1024);
+
+// Generation models clamp internally to multiples of 8/16/64; snaps keep the
+// typed values valid for diffusion without surprising the user with silent
+// backend clamping.
+const DIM_MIN = 64;
+const DIM_MAX = 2048;
+
+function clampDim(value) {
+    const n = Math.round(Number(value) || 0);
+    if (!Number.isFinite(n) || n <= 0) return DIM_MIN;
+    return Math.max(DIM_MIN, Math.min(DIM_MAX, n));
+}
+
+function roundDimTo(value, step = 8) {
+    return Math.max(DIM_MIN, Math.round(clampDim(value) / step) * step);
+}
+
+// Live update fired on every keystroke. NEVER clamp or snap here — doing so
+// would rewrite the field mid-typing (e.g. typing "8" for "800" would snap
+// the value to 64 and fight every subsequent character). We only mirror the
+// raw numbers into the canonical `imageSize` string so generation stays in
+// sync with whatever the user has typed so far.
+function onCustomSizeInput() {
+    const w = Number(customWidth.value);
+    const h = Number(customHeight.value);
+    if (Number.isFinite(w) && w > 0 && Number.isFinite(h) && h > 0) {
+        imageSize.value = `${Math.round(w)}x${Math.round(h)}`;
+        customSizeActive.value = true;
+    }
+}
+
+// Commit fired on `@blur` / `@change` (user leaves the field). Here it is safe
+// to normalize: clamp into [DIM_MIN, DIM_MAX] and snap to a multiple of 8 for
+// diffusion-friendliness. This is the value that actually drives generation.
+function applyCustomSize() {
+    customWidth.value = roundDimTo(customWidth.value);
+    customHeight.value = roundDimTo(customHeight.value);
+    imageSize.value = `${customWidth.value}x${customHeight.value}`;
+    customSizeActive.value = true;
+}
+
+// Called by every preset tile: clicking a preset releases manual control.
+function selectPresetSize(value) {
+    imageSize.value = value;
+    customSizeActive.value = false;
+    const [w, h] = String(value).split('x').map(Number);
+    if (w && h) {
+        customWidth.value = w;
+        customHeight.value = h;
+    }
+}
+
+function toggleCustomSizePanel() {
+    showCustomSize.value = !showCustomSize.value;
+    // Pre-populate the inputs with the currently selected aspect ratio the
+    // first time the panel opens so the user edits real numbers rather than
+    // starting from a stale/arbitrary pair.
+    if (showCustomSize.value && !customSizeActive.value) {
+        const [w, h] = String(imageSize.value).split('x').map(Number);
+        customWidth.value = w || 1024;
+        customHeight.value = h || 1024;
+    }
+}
+
+const customSizeSummary = computed(() =>
+    customSizeActive.value ? `${customWidth.value}×${customHeight.value}` : null
+);
+
 
 const currentAlbumName = computed(() => {
     if (selectedAlbumId.value) {
@@ -1528,6 +1683,9 @@ async function handleGenerateOrApply() {
         } else if (keepOriginalSize.value && firstImage?.width && firstImage?.height) {
             w = firstImage.width;
             h = firstImage.height;
+        } else if (customSizeActive.value) {
+            w = customWidth.value;
+            h = customHeight.value;
         } else {
             [w, h] = imageSize.value.split('x').map(Number);
         }

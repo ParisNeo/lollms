@@ -8,6 +8,7 @@ from .content_management import content_management_router
 from .settings_management import settings_management_router
 from .system_management import system_management_router
 from .user_management import user_management_router
+from .account_management import account_management_router
 from .rag_management import rag_management_router
 from .rss_management import rss_management_router
 from .news_management import news_management_router
@@ -32,6 +33,7 @@ admin_router.include_router(content_management_router)
 admin_router.include_router(settings_management_router)
 admin_router.include_router(system_management_router)
 admin_router.include_router(user_management_router)
+admin_router.include_router(account_management_router)
 admin_router.include_router(rag_management_router)
 admin_router.include_router(rss_management_router)
 admin_router.include_router(bot_management_router)

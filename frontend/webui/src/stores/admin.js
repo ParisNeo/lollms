@@ -202,12 +202,27 @@ export const useAdminStore = defineStore('admin', () => {
         finally { isLoadingConnectedUsers.value = false; } 
     }
 
-    async function fetchGlobalGenerationStats() { 
-        if (globalGenerationStats.value) return; 
-        isLoadingGlobalGenerationStats.value = true; 
-        try { const response = await apiClient.get('/api/admin/global-generation-stats'); globalGenerationStats.value = response.data; } 
-        catch (error) { globalGenerationStats.value = null; } 
-        finally { isLoadingGlobalGenerationStats.value = false; } 
+    // Fetches the 30-day global telemetry feed consumed by GlobalStatsChart.
+    //
+    // ``force`` is respected so:
+    //   * First mount / first Overview open  -> cache-miss, will fetch.
+    //   * Manual "Refresh" button on the tab -> passes ``force=true`` so the
+    //     chart actually updates (the old unconditional early-return made
+    //     the refresh a silent no-op).
+    // A failed request clears the cache so the next refresh retries cleanly
+    // instead of caching a null and short-circuiting forever.
+    async function fetchGlobalGenerationStats(force = false) {
+        if (!force && globalGenerationStats.value) return;
+        isLoadingGlobalGenerationStats.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/global-generation-stats');
+            globalGenerationStats.value = response.data || null;
+        } catch (error) {
+            console.error('Failed to fetch global generation stats:', error);
+            globalGenerationStats.value = null;
+        } finally {
+            isLoadingGlobalGenerationStats.value = false;
+        }
     }
 
     async function fetchSystemStatus() { 
@@ -848,6 +863,67 @@ export const useAdminStore = defineStore('admin', () => {
         };
     });
 
+    // ── Consumption analytics (fine-grained token timeline + breakdowns) ──
+    // ``params`` matches the backend query: { granularity, source, days, top_n }.
+    // ``granularity`` ∈ {hour, day, week, month}; ``source`` ∈ {all, webui, api}.
+    const consumptionAnalytics = ref(null);
+    const isLoadingConsumptionAnalytics = ref(false);
+    const consumptionParams = ref({ granularity: 'day', source: 'all', days: 30, top_n: 10 });
+
+    async function fetchConsumptionAnalytics(overrides = {}) {
+        const merged = { ...consumptionParams.value, ...overrides };
+        consumptionParams.value = merged;
+        isLoadingConsumptionAnalytics.value = true;
+        try {
+            const { data } = await apiClient.get('/api/admin/system/consumption-analytics', {
+                params: {
+                    granularity: merged.granularity,
+                    source: merged.source,
+                    days: merged.days,
+                    top_n: merged.top_n,
+                },
+            });
+            // Only accept a payload that carries the `totals` block; anything
+            // else (e.g. a FastAPI error body) is treated as "no data" so the
+            // panel renders its explicit empty state instead of blank zeros.
+            consumptionAnalytics.value = data && data.totals ? data : null;
+            return data;
+        } catch (error) {
+            console.error('Failed to fetch consumption analytics:', error);
+            consumptionAnalytics.value = null;
+            return null;
+        } finally {
+            isLoadingConsumptionAnalytics.value = false;
+        }
+    }
+
+    // Streams an export document (html/docx/pdf/xlsx) using the exact same
+    // aggregation the on-screen report uses. Triggers a browser download.
+    async function exportConsumptionAnalytics(format = 'html', overrides = {}) {
+        const merged = { ...consumptionParams.value, ...overrides };
+        const response = await apiClient.get('/api/admin/system/consumption-analytics/export', {
+            params: {
+                format,
+                granularity: merged.granularity,
+                source: merged.source,
+                days: merged.days,
+                top_n: merged.top_n,
+            },
+            responseType: 'blob',
+        });
+        const blob = new Blob([response.data]);
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+        link.setAttribute('download', `token_consumption_${stamp}.${format}`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        return true;
+    }
+
     // --- COMPUTEDS (Declared AFTER functions) ---
     const modelDisplayMode = computed({
       get() {
@@ -931,6 +1007,7 @@ export const useAdminStore = defineStore('admin', () => {
         installedApps, isLoadingInstalledApps,
         systemStatus, isLoadingSystemStatus, connectedUsers, isLoadingConnectedUsers, serverInfo, isLoadingServerInfo, globalGenerationStats, isLoadingGlobalGenerationStats, modelUsageStats, isLoadingModelUsageStats,
         topUsers, isLoadingTopUsers, topUsersParams,
+        consumptionAnalytics, isLoadingConsumptionAnalytics, consumptionParams,
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories, newsArticles, isLoadingNewsArticles,
         isImporting, isEnhancingEmail, adminAvailableLollmsModels, isLoadingLollmsModels,
         appFilters, mcpFilters, promptFilters, personalityFilters, systemLogs, isLoadingSystemLogs,
@@ -943,6 +1020,8 @@ export const useAdminStore = defineStore('admin', () => {
         fetchDashboardStats, fetchAlertSummary, setAlertSummary, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
         fetchServiceDashboard, resetServiceUsage, 
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchTopUsers, fetchServerInfo, purgeUnusedUploads,
+        fetchConsumptionAnalytics, exportConsumptionAnalytics,
+        fetchConsumptionAnalytics, exportConsumptionAnalytics,
         fetchAllUsers, activateUser, disconnectUser, bulkActivateUsers, bulkDeactivateUsers, bulkDisconnectUsers, bulkSetRole,
         fetchUserStats, fetchUserTokenQuota, updateUserTokenQuota, updateGlobalTokenQuota, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,

@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue';
 import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import TokenConsumptionPanel from './TokenConsumptionPanel.vue';
 
 const props = defineProps({
   userId: { type: Number, required: true },
@@ -214,6 +215,11 @@ watch(() => props.userId, () => load(), { immediate: true });
           {{ isSaving ? 'Saving...' : 'Save quota' }}
         </button>
       </div>
+    </div>
+
+    <!-- ── Fine-grained consumption analytics (multi-granularity + export) ── -->
+    <div class="mt-6 pt-6" style="border-top: 1px solid var(--border-main);">
+      <TokenConsumptionPanel />
     </div>
   </div>
 </template>

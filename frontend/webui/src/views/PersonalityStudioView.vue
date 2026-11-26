@@ -38,6 +38,8 @@ const allowUserSkills = computed(() => hasGlobalAdminRights.value || !isLocked(A
 const allowUserTools = computed(() => hasGlobalAdminRights.value || !isLocked(ALLOW_USER_TOOLS_KEY));
 
 const catalog = ref({ global: [], personal: [], shared: [] });
+const catalogSearch = ref('');
+const catalogFilter = ref('all');
 const activePreference = ref(null);
 const isLoading = ref(true);
 const loadError = ref(null);
@@ -425,10 +427,38 @@ function closeEditor() {
   }
 }
 
-async function handleEditorSaved() {
+async function handleEditorSaved(saved) {
   closeEditor();
   await fetchCatalog();
-  if (selectedHandbag.value) await refreshDetail();
+
+  // Locate the personality that was just created or edited so the studio
+  // opens it instead of leaving the previous (or empty) selection in place.
+  const targetScope = saved?.scope || 'personal';
+  const targetName = saved?.handbag_name || saved?.name || null;
+  const savedItem = targetName
+    ? catalog.value[targetScope]?.find((item) => item.handbag_name === targetName)
+    : null;
+
+  if (savedItem) {
+    await fetchHandbagDetail(savedItem, { force: true });
+    router.replace({ name: 'PersonalityStudio', query: handbagQuery(savedItem) });
+    notifyCatalogChanged();
+    return;
+  }
+
+  // Edit-without-rename case: same handbag still selected, refresh it.
+  if (selectedHandbag.value) {
+    await refreshDetail();
+    return;
+  }
+
+  // Fallback: select the first available personality so the workspace is not empty.
+  const fallback = allCatalogItems.value.find((item) => isActive(item)) ||
+    catalog.value.personal[0] || catalog.value.global[0] || catalog.value.shared[0];
+  if (fallback) {
+    await fetchHandbagDetail(fallback, { force: true });
+    router.replace({ name: 'PersonalityStudio', query: handbagQuery(fallback) });
+  }
 }
 
 function openShare(item) {

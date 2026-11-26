@@ -1,575 +1,236 @@
-<script setup>
-import { computed, onMounted } from 'vue';
-import { storeToRefs } from 'pinia';
-import { Doughnut } from 'vue-chartjs';
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
-import { useAdminStore } from '../../stores/admin';
-import { useUiStore } from '../../stores/ui';
-
-ChartJS.register(ArcElement, Tooltip, Legend);
-
-// Analytics & Chart Components
-import GlobalStatsChart from './GlobalStatsChart.vue';
-import ModelUsageChart from './ModelUsageChart.vue';
-
-// Icons
-import IconUserGroup from '../../assets/icons/IconUserGroup.vue';
-import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
-import IconClock from '../../assets/icons/IconClock.vue';
-import IconPlus from '../../assets/icons/IconPlus.vue';
-import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
-import UserAvatar from '../ui/Cards/UserAvatar.vue';
-
-const emit = defineEmits(['navigate']);
-
-const adminStore = useAdminStore();
-const uiStore = useUiStore();
-
-const { 
-    dashboardStats, 
-    isLoadingDashboardStats,
-    globalGenerationStats,
-    isLoadingGlobalGenerationStats,
-    topUsers,
-    isLoadingTopUsers,
-    topUsersParams
-} = storeToRefs(adminStore);
-
-onMounted(() => {
-    refreshAllDashboardData();
-});
-
-function refreshAllDashboardData() {
-    adminStore.fetchDashboardStats();
-    adminStore.fetchGlobalGenerationStats();
-    adminStore.fetchModelUsageStats();
-    adminStore.fetchTopUsers();
-}
-
-// ── Top users leaderboard ─────────────────────────────────────────────────
-// The two filter axes are surfaced as pill groups: SOURCE scopes the query to
-// the WebUI chat surface vs. external API calls; METRIC selects the ranking
-// criterion. Both are independent of each other, so all 12 combinations work.
-const TOP_USER_SOURCES = [
-    { value: null, label: 'All' },
-    { value: 'webui', label: 'WebUI' },
-    { value: 'api', label: 'API' },
-];
-
-const TOP_USER_METRICS = [
-    { value: 'input_tokens', label: 'Input tokens' },
-    { value: 'output_tokens', label: 'Output tokens' },
-    { value: 'total_tokens', label: 'Total tokens' },
-    { value: 'calls', label: 'Calls' },
-];
-
-function setTopUsersSource(source) {
-    adminStore.fetchTopUsers({ source });
-}
-
-function setTopUsersMetric(metric) {
-    adminStore.fetchTopUsers({ metric });
-}
-
-function openUserStats(user) {
-    if (!user?.user_id) return;
-    uiStore.openModal('userStats', { userId: user.user_id, username: user.username });
-}
-
-// Returns the numeric value that should be shown on the leading right-hand
-// badge for a row, so the ranking is explicit even when many rows share a rank.
-function rowDisplayValue(user) {
-    if (!user) return 0;
-    switch (topUsersParams.value.metric) {
-        case 'calls': return Number(user.calls) || 0;
-        case 'input_tokens': return Number(user.prompt_tokens) || 0;
-        case 'output_tokens': return Number(user.completion_tokens) || 0;
-        default: return Number(user.total_tokens) || 0;
-    }
-}
-
-function metricLabel(m) {
-    const entry = TOP_USER_METRICS.find(x => x.value === m);
-    return entry ? entry.label : m;
-}
-
-function openPendingModal() {
-    uiStore.openModal('pendingUsers');
-}
-
-function navigateToUsers(statusFilter = null) {
-    if (statusFilter === 'pending_admin_validation') {
-        openPendingModal();
-    } else {
-        emit('navigate', { tab: 'user-table', filter: statusFilter });
-    }
-}
-
-const sourceRatioChartData = computed(() => {
-    const sb = globalGenerationStats.value?.source_breakdown;
-    const webui = sb?.webui_tokens || 0;
-    const api = sb?.api_tokens || 0;
-
-    return {
-        labels: ['WebUI Chat', 'API Endpoints'],
-        datasets: [{
-            data: [webui, api],
-            backgroundColor: ['#3B82F6', '#8B5CF6'],
-            hoverBackgroundColor: ['#2563EB', '#7C3AED'],
-            borderWidth: 0
-        }]
-    };
-});
-
-const sourceRatioChartOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    cutout: '70%',
-    plugins: {
-        legend: { display: false },
-        tooltip: {
-            callbacks: {
-                label: function(context) {
-                    const label = context.label || '';
-                    const val = context.raw || 0;
-                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                    const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
-                    return ` ${label}: ${val.toLocaleString()} tokens (${pct}%)`;
-                }
-            }
-        }
-    }
-};
-</script>
 
 <template>
-    <div class="space-y-6">
-        <!-- Metric Cards Header Grid -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            
-            <!-- 1. Total Registered Users -->
-            <div 
-                @click="navigateToUsers()"
-                class="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm hover:shadow-md hover:border-blue-500/50 cursor-pointer transition-all flex items-center justify-between group"
-            >
-                <div class="space-y-1 min-w-0">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400 block">Total Accounts</span>
-                    <div class="text-2xl font-black font-mono text-gray-900 dark:text-white">
-                        <IconAnimateSpin v-if="isLoadingDashboardStats && !dashboardStats" class="w-6 h-6 animate-spin text-blue-500" />
-                        <span v-else>{{ dashboardStats?.total_users ?? 0 }}</span>
-                    </div>
-                    <span class="text-[10px] text-gray-500 flex items-center gap-1">Registered members</span>
-                </div>
-                <div class="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                    <IconUserGroup class="w-6 h-6" />
-                </div>
-            </div>
-
-            <!-- 2. Active in Last 24h -->
-            <div 
-                @click="navigateToUsers()"
-                class="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm hover:shadow-md hover:border-emerald-500/50 cursor-pointer transition-all flex items-center justify-between group"
-            >
-                <div class="space-y-1 min-w-0">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400 block">Active Users (24h)</span>
-                    <div class="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
-                        <IconAnimateSpin v-if="isLoadingDashboardStats && !dashboardStats" class="w-6 h-6 animate-spin text-emerald-500" />
-                        <span v-else>{{ dashboardStats?.active_users_24h ?? 0 }}</span>
-                    </div>
-                    <span class="text-[10px] text-emerald-500 font-bold flex items-center gap-1">Online & interacting</span>
-                </div>
-                <div class="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                    <IconCheckCircle class="w-6 h-6" />
-                </div>
-            </div>
-
-            <!-- 3. New Registrations (7 Days) -->
-            <div 
-                @click="navigateToUsers()"
-                class="bg-white dark:bg-gray-800 p-5 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm hover:shadow-md hover:border-purple-500/50 cursor-pointer transition-all flex items-center justify-between group"
-            >
-                <div class="space-y-1 min-w-0">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400 block">New Users (7 Days)</span>
-                    <div class="text-2xl font-black font-mono text-purple-600 dark:text-purple-400">
-                        <IconAnimateSpin v-if="isLoadingDashboardStats && !dashboardStats" class="w-6 h-6 animate-spin text-purple-500" />
-                        <span v-else>{{ dashboardStats?.new_users_7d ?? 0 }}</span>
-                    </div>
-                    <span class="text-[10px] text-gray-500 flex items-center gap-1">Recent sign-ups</span>
-                </div>
-                <div class="w-12 h-12 rounded-2xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform">
-                    <IconPlus class="w-6 h-6" />
-                </div>
-            </div>
-
-            <!-- 4. PENDING APPROVAL (Interactive Card) -->
-            <div 
-                @click="openPendingModal"
-                class="p-5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between group relative overflow-hidden"
-                :class="[
-                    (dashboardStats?.pending_approval || 0) > 0 
-                        ? 'bg-amber-500/10 border-amber-400 dark:border-amber-600 text-amber-900 dark:text-amber-200 shadow-md ring-2 ring-amber-500/20 hover:bg-amber-500/20' 
-                        : 'bg-white dark:bg-gray-800 border-gray-200/80 dark:border-gray-700/80 hover:border-gray-300 dark:hover:border-gray-600'
-                ]"
-            >
-                <div class="space-y-1 min-w-0 z-10">
-                    <span class="text-[10px] font-black uppercase tracking-widest block" :class="(dashboardStats?.pending_approval || 0) > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-gray-400'">
-                        Pending Approval
-                    </span>
-                    <div class="text-2xl font-black font-mono" :class="(dashboardStats?.pending_approval || 0) > 0 ? 'text-amber-600 dark:text-amber-400 animate-pulse' : 'text-gray-900 dark:text-white'">
-                        <IconAnimateSpin v-if="isLoadingDashboardStats && !dashboardStats" class="w-6 h-6 animate-spin text-amber-500" />
-                        <span v-else>{{ dashboardStats?.pending_approval ?? 0 }}</span>
-                    </div>
-                    <span class="text-[10px] font-bold flex items-center gap-1" :class="(dashboardStats?.pending_approval || 0) > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'">
-                        {{ (dashboardStats?.pending_approval || 0) > 0 ? 'Click to validate & activate' : 'All users validated' }}
-                    </span>
-                </div>
-                <div class="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 z-10 group-hover:scale-110 transition-transform"
-                     :class="(dashboardStats?.pending_approval || 0) > 0 ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/30' : 'bg-gray-100 dark:bg-gray-700 text-gray-400'">
-                    <IconClock class="w-6 h-6" />
-                </div>
-            </div>
-
-        </div>
-
-        <!-- ── Top Users Leaderboard (per source & metric) ──
-             Moved up from below the Consumption Breakdown so it is immediately
-             visible on dashboard load — the previous position required scrolling
-             past two tall telemetry cards first, which made the feature appear
-             missing to admins who never scrolled that far. -->
-        <div class="p-6 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-4">
-            <div class="flex items-start justify-between flex-wrap gap-4 border-b dark:border-gray-700/80 pb-4">
-                <div>
-                    <h3 class="text-base font-black text-gray-900 dark:text-white tracking-tight flex items-center gap-2">
-                        <span>🏆</span>
-                        <span>Top Users</span>
-                    </h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                        Ranked by the chosen criterion within the chosen consumption channel.
-                    </p>
-                </div>
-            </div>
-
-            <!-- Filter axes: source + metric -->
-            <div class="flex flex-wrap items-center gap-4">
-                <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Source</span>
-                    <div class="flex items-center gap-1">
-                        <button
-                            v-for="s in TOP_USER_SOURCES"
-                            :key="String(s.value)"
-                            type="button"
-                            @click="setTopUsersSource(s.value)"
-                            class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors"
-                            :class="topUsersParams.source === s.value
-                                ? 'bg-indigo-600 text-white border-indigo-600'
-                                : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 hover:border-indigo-500/60'"
-                        >
-                            {{ s.label }}
-                        </button>
-                    </div>
-                </div>
-
-                <div class="flex items-center gap-2">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Metric</span>
-                    <div class="flex items-center gap-1">
-                        <button
-                            v-for="m in TOP_USER_METRICS"
-                            :key="m.value"
-                            type="button"
-                            @click="setTopUsersMetric(m.value)"
-                            class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors"
-                            :class="topUsersParams.metric === m.value
-                                ? 'bg-emerald-600 text-white border-emerald-600'
-                                : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 hover:border-emerald-500/60'"
-                        >
-                            {{ m.label }}
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Leaderboard -->
-            <div v-if="isLoadingTopUsers" class="flex justify-center items-center h-32">
-                <IconAnimateSpin class="w-6 h-6 text-blue-500" />
-            </div>
-            <div v-else-if="!topUsers || topUsers.length === 0" class="text-center py-10 text-sm italic text-gray-400 dark:text-gray-500 rounded-2xl border border-dashed dark:border-gray-700">
-                No consumption recorded yet for this scope.
-            </div>
-            <div v-else class="space-y-1.5">
-                <div
-                    v-for="(u, i) in topUsers"
-                    :key="u.user_id"
-                    @click="openUserStats(u)"
-                    class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors group"
-                >
-                    <span
-                        class="w-6 text-center font-black font-mono text-xs shrink-0"
-                        :class="i === 0 ? 'text-amber-500' : (i === 1 ? 'text-gray-400' : (i === 2 ? 'text-orange-500' : 'text-gray-500 dark:text-gray-400'))"
-                    >
-                        {{ i + 1 }}
-                    </span>
-                    <UserAvatar :icon="u.icon" :username="u.username" size-class="h-8 w-8" />
-                    <div class="flex-1 min-w-0">
-                        <div class="text-xs font-bold text-gray-900 dark:text-white truncate">@{{ u.username }}</div>
-                        <div class="text-[10px] font-mono text-gray-500 dark:text-gray-400 truncate">
-                            {{ (u.total_tokens || 0).toLocaleString() }} total
-                            <span class="opacity-60">· {{ (u.prompt_tokens || 0).toLocaleString() }} in</span>
-                            <span class="opacity-60">· {{ (u.completion_tokens || 0).toLocaleString() }} out</span>
-                            <span class="opacity-60">· {{ (u.calls || 0).toLocaleString() }} calls</span>
-                        </div>
-                    </div>
-                    <div class="text-right shrink-0">
-                        <div class="text-sm font-black font-mono text-gray-900 dark:text-white">
-                            {{ rowDisplayValue(u).toLocaleString() }}
-                        </div>
-                        <div class="text-[9px] font-bold uppercase text-gray-400">
-                            {{ metricLabel(topUsersParams.metric) }}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ── GLOBAL USAGE & ENVIRONMENTAL TELEMETRY ── -->
-        <div class="space-y-6">
-            <!-- Environmental Footprint & Global Consumption Banner -->
-            <div class="p-6 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/20 rounded-3xl border border-emerald-200/80 dark:border-emerald-800/60 shadow-sm space-y-4">
-                <div class="flex items-center justify-between flex-wrap gap-4 border-b border-emerald-200/60 dark:border-emerald-800/40 pb-4">
-                    <div class="flex items-center gap-3">
-                        <div class="w-10 h-10 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-lg shadow-emerald-500/30">
-                            <span class="text-xl">🌱</span>
-                        </div>
-                        <div>
-                            <h3 class="text-base font-black text-gray-900 dark:text-white tracking-tight">Global Energy & Carbon Footprint Telemetry</h3>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Estimated computation power, total token throughput, and environmental impact.</p>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-2 font-mono text-xs">
-                        <span class="px-3 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 font-bold border border-emerald-300 dark:border-emerald-700">
-                            {{ (globalGenerationStats?.total_tokens || 0).toLocaleString() }} Total Sum Tokens
-                        </span>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    <div class="p-4 bg-white/80 dark:bg-gray-850/80 rounded-2xl border border-emerald-100 dark:border-emerald-800/40">
-                        <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Total Energy</span>
-                        <p class="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
-                            {{ globalGenerationStats?.total_energy_kwh ?? 0 }} <span class="text-xs font-normal text-gray-500">kWh</span>
-                        </p>
-                        <p class="text-[10px] text-gray-400 mt-0.5">GPU Compute draw</p>
-                    </div>
-
-                    <div class="p-4 bg-white/80 dark:bg-gray-850/80 rounded-2xl border border-emerald-100 dark:border-emerald-800/40">
-                        <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Estimated CO2</span>
-                        <p class="text-xl font-black font-mono text-teal-600 dark:text-teal-400 mt-1">
-                            {{ (globalGenerationStats?.total_co2_g || 0) > 1000 ? ((globalGenerationStats?.total_co2_g || 0)/1000).toFixed(2) + ' kg' : (globalGenerationStats?.total_co2_g || 0) + ' g' }}
-                        </p>
-                        <p class="text-[10px] text-gray-400 mt-0.5">Carbon emissions</p>
-                    </div>
-
-                    <div class="p-4 bg-white/80 dark:bg-gray-850/80 rounded-2xl border border-emerald-100 dark:border-emerald-800/40">
-                        <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Car Travel Equivalent</span>
-                        <p class="text-xl font-black font-mono text-indigo-600 dark:text-indigo-400 mt-1">
-                            {{ globalGenerationStats?.co2_equivalents?.car_km ?? 0 }} <span class="text-xs font-normal text-gray-500">km</span>
-                        </p>
-                        <p class="text-[10px] text-gray-400 mt-0.5">Average petrol car</p>
-                    </div>
-
-                    <div class="p-4 bg-white/80 dark:bg-gray-850/80 rounded-2xl border border-emerald-100 dark:border-emerald-800/40">
-                        <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Phone Charges</span>
-                        <p class="text-xl font-black font-mono text-purple-600 dark:text-purple-400 mt-1">
-                            {{ globalGenerationStats?.co2_equivalents?.smartphone_charges ?? 0 }} <span class="text-xs font-normal text-gray-500">charges</span>
-                        </p>
-                        <p class="text-[10px] text-gray-400 mt-0.5">Smartphone cycles</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- ── CONSUMPTION BREAKDOWN: WEBUI VS API RATIO (CIRCLE GRAPH) ── -->
-            <div class="p-6 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-6">
-                <div class="flex items-center justify-between flex-wrap gap-4 border-b dark:border-gray-700/80 pb-4">
-                    <div>
-                        <h3 class="text-base font-black text-gray-900 dark:text-white tracking-tight flex items-center gap-2">
-                            <span>📊</span>
-                            <span>Consumption Breakdown: WebUI vs. API</span>
-                        </h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Compare token volumes, request counts, and load ratio between web users and external API clients.</p>
-                    </div>
-
-                    <!-- Sum Pill -->
-                    <div class="flex items-center gap-2">
-                        <div class="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-gray-700/50 border dark:border-gray-600 font-mono text-xs">
-                            <span class="text-gray-400 font-bold uppercase text-[9px]">Sum Total:</span>
-                            <span class="font-black text-gray-900 dark:text-white">{{ (globalGenerationStats?.source_breakdown?.total_tokens || globalGenerationStats?.total_tokens || 0).toLocaleString() }} Tokens</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                    <!-- Circle Graph (Doughnut) -->
-                    <div class="h-56 relative flex items-center justify-center">
-                        <Doughnut :data="sourceRatioChartData" :options="sourceRatioChartOptions" />
-                        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                            <span class="text-[9px] font-black uppercase text-gray-400 tracking-widest">Share Ratio</span>
-                            <span class="text-sm font-black font-mono text-gray-800 dark:text-gray-100">
-                                {{ globalGenerationStats?.source_breakdown?.webui_ratio || 0 }}% / {{ globalGenerationStats?.source_breakdown?.api_ratio || 0 }}%
-                            </span>
-                        </div>
-                    </div>
-
-                    <!-- Metrics Columns -->
-                    <div class="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <!-- WebUI Card -->
-                        <div class="p-5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/80 dark:border-blue-800/60 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <span class="flex items-center gap-2 font-bold text-xs text-blue-900 dark:text-blue-300">
-                                    <span class="w-3 h-3 rounded-full bg-blue-500"></span>
-                                    WebUI Chat
-                                </span>
-                                <span class="text-xs font-mono font-black text-blue-600 dark:text-blue-400">
-                                    {{ globalGenerationStats?.source_breakdown?.webui_ratio || 0 }}%
-                                </span>
-                            </div>
-                            <p class="text-2xl font-black font-mono text-blue-950 dark:text-blue-100">
-                                {{ (globalGenerationStats?.source_breakdown?.webui_tokens || 0).toLocaleString() }} <span class="text-xs font-normal text-blue-500">tokens</span>
-                            </p>
-                            <div class="pt-2 border-t border-blue-100 dark:border-blue-900/40 text-[10px] text-blue-700 dark:text-blue-400 flex justify-between font-mono">
-                                <span>{{ (globalGenerationStats?.source_breakdown?.webui_requests || 0).toLocaleString() }} Requests</span>
-                                <span>{{ globalGenerationStats?.source_breakdown?.webui_energy_kwh || 0 }} kWh</span>
-                            </div>
-                        </div>
-
-                        <!-- API Card -->
-                        <div class="p-5 rounded-2xl bg-purple-50/60 dark:bg-purple-950/20 border border-purple-200/80 dark:border-purple-800/60 space-y-2">
-                            <div class="flex items-center justify-between">
-                                <span class="flex items-center gap-2 font-bold text-xs text-purple-900 dark:text-purple-300">
-                                    <span class="w-3 h-3 rounded-full bg-purple-500"></span>
-                                    API Services
-                                </span>
-                                <span class="text-xs font-mono font-black text-purple-600 dark:text-purple-400">
-                                    {{ globalGenerationStats?.source_breakdown?.api_ratio || 0 }}%
-                                </span>
-                            </div>
-                            <p class="text-2xl font-black font-mono text-purple-950 dark:text-purple-100">
-                                {{ (globalGenerationStats?.source_breakdown?.api_tokens || 0).toLocaleString() }} <span class="text-xs font-normal text-purple-500">tokens</span>
-                            </p>
-                            <div class="pt-2 border-t border-purple-100 dark:border-purple-900/40 text-[10px] text-purple-700 dark:text-purple-400 flex justify-between font-mono">
-                                <span>{{ (globalGenerationStats?.source_breakdown?.api_requests || 0).toLocaleString() }} Requests</span>
-                                <span>{{ globalGenerationStats?.source_breakdown?.api_energy_kwh || 0 }} kWh</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Top Users Leaderboard (per source & metric) -->
-            <div class="p-6 bg-white dark:bg-gray-800 rounded-3xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm space-y-4">
-                <div class="flex items-start justify-between flex-wrap gap-4 border-b dark:border-gray-700/80 pb-4">
-                    <div>
-                        <h3 class="text-base font-black text-gray-900 dark:text-white tracking-tight flex items-center gap-2">
-                            <span>🏆</span>
-                            <span>Top Users</span>
-                        </h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                            Ranked by the chosen criterion within the chosen consumption channel.
-                        </p>
-                    </div>
-                </div>
-
-                <!-- Filter axes: source + metric -->
-                <div class="flex flex-wrap items-center gap-4">
-                    <div class="flex items-center gap-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Source</span>
-                        <div class="flex items-center gap-1">
-                            <button
-                                v-for="s in TOP_USER_SOURCES"
-                                :key="String(s.value)"
-                                type="button"
-                                @click="setTopUsersSource(s.value)"
-                                class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors"
-                                :class="topUsersParams.source === s.value
-                                    ? 'bg-indigo-600 text-white border-indigo-600'
-                                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 hover:border-indigo-500/60'"
-                            >
-                                {{ s.label }}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Metric</span>
-                        <div class="flex items-center gap-1">
-                            <button
-                                v-for="m in TOP_USER_METRICS"
-                                :key="m.value"
-                                type="button"
-                                @click="setTopUsersMetric(m.value)"
-                                class="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors"
-                                :class="topUsersParams.metric === m.value
-                                    ? 'bg-emerald-600 text-white border-emerald-600'
-                                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-600 hover:border-emerald-500/60'"
-                            >
-                                {{ m.label }}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Leaderboard -->
-                <div v-if="isLoadingTopUsers" class="flex justify-center items-center h-32">
-                    <IconAnimateSpin class="w-6 h-6 text-blue-500" />
-                </div>
-                <div v-else-if="!topUsers || topUsers.length === 0" class="text-center py-10 text-sm italic text-gray-400 dark:text-gray-500 rounded-2xl border border-dashed dark:border-gray-700">
-                    No consumption recorded yet for this scope.
-                </div>
-                <div v-else class="space-y-1.5">
-                    <div
-                        v-for="(u, i) in topUsers"
-                        :key="u.user_id"
-                        @click="openUserStats(u)"
-                        class="flex items-center gap-3 p-2.5 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors group"
-                    >
-                        <span
-                            class="w-6 text-center font-black font-mono text-xs shrink-0"
-                            :class="i === 0 ? 'text-amber-500' : (i === 1 ? 'text-gray-400' : (i === 2 ? 'text-orange-500' : 'text-gray-500 dark:text-gray-400'))"
-                        >
-                            {{ i + 1 }}
-                        </span>
-                        <UserAvatar :icon="u.icon" :username="u.username" size-class="h-8 w-8" />
-                        <div class="flex-1 min-w-0">
-                            <div class="text-xs font-bold text-gray-900 dark:text-white truncate">@{{ u.username }}</div>
-                            <div class="text-[10px] font-mono text-gray-500 dark:text-gray-400 truncate">
-                                {{ (u.total_tokens || 0).toLocaleString() }} total
-                                <span class="opacity-60">· {{ (u.prompt_tokens || 0).toLocaleString() }} in</span>
-                                <span class="opacity-60">· {{ (u.completion_tokens || 0).toLocaleString() }} out</span>
-                                <span class="opacity-60">· {{ (u.calls || 0).toLocaleString() }} calls</span>
-                            </div>
-                        </div>
-                        <div class="text-right shrink-0">
-                            <div class="text-sm font-black font-mono text-gray-900 dark:text-white">
-                                {{ rowDisplayValue(u).toLocaleString() }}
-                            </div>
-                            <div class="text-[9px] font-bold uppercase text-gray-400">
-                                {{ metricLabel(topUsersParams.metric) }}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Global Generation Frequency Chart with Props -->
-            <GlobalStatsChart 
-                :stats="globalGenerationStats" 
-                :is-loading="isLoadingGlobalGenerationStats" 
-            />
-
-            <!-- Model Usage & Token Distribution Chart -->
-            <ModelUsageChart />
-        </div>
+  <div class="dashboard-root">
+    <!-- Tab bar -->
+    <div class="dash-tabs">
+      <button
+        v-for="tab in tabs"
+        :key="tab.id"
+        :class="['dash-tab', { active: activeTab === tab.id }]"
+        @click="selectTab(tab.id)"
+      >
+        <component :is="tab.icon" class="w-4 h-4" />
+        <span>{{ tab.label }}</span>
+      </button>
+      <button class="dash-refresh" :disabled="refreshing" @click="refreshActive" title="Refresh">
+        <IconArrowPath :class="['w-4 h-4', { 'animate-spin': refreshing }]" />
+      </button>
     </div>
+
+    <!-- ── OVERVIEW ── -->
+    <section v-show="activeTab === 'overview'" class="tab-panel">
+      <div class="stat-grid">
+        <div class="stat-card" v-for="s in overviewStats" :key="s.key">
+          <div class="stat-icon" :style="{ color: s.color }">
+            <component :is="s.icon" class="w-5 h-5" />
+          </div>
+          <div class="stat-body">
+            <div class="stat-value">{{ s.value }}</div>
+            <div class="stat-label">{{ s.label }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <GlobalStatsChart
+          :stats="adminStore.globalGenerationStats"
+          :is-loading="adminStore.isLoadingGlobalGenerationStats"
+        />
+        <ModelUsageChart />
+      </div>
+    </section>
+
+    <!-- ── TOKEN CONSUMPTION ── -->
+    <section v-show="activeTab === 'consumption'" class="tab-panel">
+      <TokenConsumptionPanel />
+    </section>
+
+    <!-- ── TOP USERS ── -->
+    <section v-show="activeTab === 'topusers'" class="tab-panel">
+      <div class="topusers-controls">
+        <div class="control-group">
+          <label>Source</label>
+          <select :value="topUsersParams.source || 'all'" @change="onTopSource($event.target.value)">
+            <option value="all">All</option>
+            <option value="webui">WebUI</option>
+            <option value="api">API</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Metric</label>
+          <select :value="topUsersParams.metric" @change="onTopMetric($event.target.value)">
+            <option value="total_tokens">Total Tokens</option>
+            <option value="prompt_tokens">Input Tokens</option>
+            <option value="completion_tokens">Output Tokens</option>
+            <option value="calls">Calls</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Window</label>
+          <select :value="topUsersParams.days" @change="onTopDays(Number($event.target.value))">
+            <option :value="0">All time</option>
+            <option :value="1">24 hours</option>
+            <option :value="7">7 days</option>
+            <option :value="30">30 days</option>
+            <option :value="90">90 days</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-card">
+        <div v-if="isLoadingTopUsers" class="table-state">Loading…</div>
+        <div v-else-if="!topUsers.length" class="table-state">No usage recorded for this filter.</div>
+        <table v-else class="data-table">
+          <thead>
+            <tr>
+              <th>#</th><th>User</th><th class="num">Input</th>
+              <th class="num">Output</th><th class="num">Total</th><th class="num">Calls</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(u, i) in topUsers" :key="u.user_id || u.username">
+              <td class="rank">{{ i + 1 }}</td>
+              <td class="user-cell">{{ u.username }}</td>
+              <td class="num">{{ fmt(u.prompt_tokens) }}</td>
+              <td class="num">{{ fmt(u.completion_tokens) }}</td>
+              <td class="num strong">{{ fmt(u.total_tokens) }}</td>
+              <td class="num">{{ fmt(u.calls) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
 </template>
 
+<script setup>
+import { ref, computed, onMounted } from 'vue';
+import { useAdminStore } from '../../stores/admin';
+import GlobalStatsChart from './GlobalStatsChart.vue';
+import ModelUsageChart from './ModelUsageChart.vue';
+import TokenConsumptionPanel from './TokenConsumptionPanel.vue';
+
+import IconDashboard from '../../assets/icons/IconDashboard.vue';
+import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
+import IconUserGroup from '../../assets/icons/IconUserGroup.vue';
+import IconUser from '../../assets/icons/IconUser.vue';
+import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
+import IconServer from '../../assets/icons/IconServer.vue';
+import IconShieldCheck from '../../assets/icons/IconShieldCheck.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
+import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
+
+const props = defineProps({
+  onNavigate: { type: Function, default: null },
+});
+
+const adminStore = useAdminStore();
+const activeTab = ref('overview');
+const refreshing = ref(false);
+
+const tabs = [
+  { id: 'overview', label: 'Overview', icon: IconDashboard },
+  { id: 'consumption', label: 'Token Consumption', icon: IconPresentationChartBar },
+  { id: 'topusers', label: 'Top Users', icon: IconUserGroup },
+];
+
+const stats = computed(() => adminStore.dashboardStats || {});
+const topUsers = computed(() => adminStore.topUsers || []);
+const isLoadingTopUsers = computed(() => adminStore.isLoadingTopUsers);
+const topUsersParams = computed(() => adminStore.topUsersParams || { source: null, metric: 'total_tokens', days: 0, limit: 10 });
+
+function fmt(n) {
+  return (Number(n) || 0).toLocaleString();
+}
+function dash(label, icon, color) {
+  const v = stats.value?.[arguments[3]] ?? stats.value?.[label];
+  return { key: label, label, value: v ?? '—', icon, color };
+}
+
+const overviewStats = computed(() => {
+  const s = stats.value;
+  return [
+    { key: 'users', label: 'Total Users', value: s?.total_users ?? '—', icon: IconUserGroup, color: '#3b82f6' },
+    { key: 'active', label: 'Active Today', value: s?.active_today ?? '—', icon: IconSparkles, color: '#10b981' },
+    { key: 'discussions', label: 'Discussions', value: s?.total_discussions ?? '—', icon: IconChatBubbleLeftRight, color: '#8b5cf6' },
+    { key: 'messages', label: 'Messages', value: s?.total_messages ?? '—', icon: IconChatBubbleLeftRight, color: '#f59e0b' },
+    { key: 'connected', label: 'Connected', value: s?.connected_users ?? '—', icon: IconServer, color: '#0ea5e9' },
+    { key: 'admins', label: 'Admins', value: s?.admin_users ?? '—', icon: IconShieldCheck, color: '#ef4444' },
+  ];
+});
+
+async function refreshActive() {
+  refreshing.value = true;
+  try {
+    if (activeTab.value === 'overview') {
+      await Promise.all([
+        adminStore.fetchDashboardStats(),
+        // ``force=true`` so the Refresh button actually refreshes the chart
+        // instead of being a silent no-op when the cache is already warm.
+        adminStore.fetchGlobalGenerationStats(true),
+        adminStore.fetchModelUsageStats(),
+      ]);
+    } else if (activeTab.value === 'consumption') {
+      await adminStore.fetchConsumptionAnalytics();
+    } else if (activeTab.value === 'topusers') {
+      await adminStore.fetchTopUsers();
+    }
+  } finally {
+    refreshing.value = false;
+  }
+}
+
+function selectTab(id) {
+  activeTab.value = id;
+  // Load lazily the first time a tab is opened; cached store data short-circuits.
+  if (id === 'topusers' && !topUsers.value.length) adminStore.fetchTopUsers();
+  if (id === 'consumption' && !adminStore.consumptionAnalytics) adminStore.fetchConsumptionAnalytics();
+}
+
+function onTopSource(v) { adminStore.fetchTopUsers({ source: v === 'all' ? null : v }); }
+function onTopMetric(v) { adminStore.fetchTopUsers({ metric: v }); }
+function onTopDays(v) { adminStore.fetchTopUsers({ days: v }); }
+
+onMounted(() => {
+  // Fetch everything the Overview tab needs on first mount. Previously only
+  // ``fetchDashboardStats`` was called, leaving ``globalGenerationStats``
+  // forever null -> the GlobalStatsChart component received ``stats=null``
+  // and rendered its "Could not load statistics." empty state, even though
+  // the backend endpoint was healthy.
+  adminStore.fetchDashboardStats();
+  adminStore.fetchGlobalGenerationStats();
+  adminStore.fetchModelUsageStats();
+});
+</script>
+
 <style scoped>
-@reference "tailwindcss";
+.dashboard-root { display: flex; flex-direction: column; gap: 1rem; }
+.dash-tabs { display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; border-bottom: 1px solid var(--border-main, #e5e7eb); padding-bottom: 0.5rem; }
+.dash-tab {
+  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.9rem;
+  border-radius: 0.6rem; border: none; background: transparent; cursor: pointer;
+  font-size: 0.85rem; font-weight: 600; color: var(--text-dim, #6b7280); transition: all 0.15s ease;
+}
+.dash-tab.active { background: var(--bg-card, #fff); color: #3b82f6; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.dash-refresh { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; border-radius: 0.5rem; border: 1px solid var(--border-main, #e5e7eb); background: var(--bg-card, #fff); cursor: pointer; }
+.tab-panel { display: flex; flex-direction: column; gap: 1rem; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; }
+.stat-card { display: flex; align-items: center; gap: 0.75rem; padding: 0.85rem 1rem; border-radius: 0.75rem; background: var(--bg-card, #fff); border: 1px solid var(--border-main, #e5e7eb); }
+.stat-value { font-size: 1.4rem; font-weight: 800; }
+.stat-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-dim, #6b7280); font-weight: 700; }
+.chart-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.topusers-controls { display: flex; gap: 1rem; flex-wrap: wrap; }
+.control-group { display: flex; align-items: center; gap: 0.4rem; }
+.control-group label { font-size: 0.78rem; font-weight: 600; color: var(--text-dim, #6b7280); }
+.control-group select { padding: 0.35rem 0.6rem; border-radius: 0.5rem; font-size: 0.82rem; border: 1px solid var(--border-main, #d1d5db); background: var(--bg-card, #fff); }
+.table-card { padding: 1rem; border-radius: 0.75rem; background: var(--bg-card, #fff); border: 1px solid var(--border-main, #e5e7eb); }
+.table-state { text-align: center; color: var(--text-dim, #9ca3af); padding: 1.5rem; font-size: 0.85rem; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.data-table th, .data-table td { padding: 0.45rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border-main, #f3f4f6); }
+.data-table th { font-weight: 700; color: var(--text-dim, #6b7280); font-size: 0.72rem; text-transform: uppercase; }
+.data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.data-table .strong { font-weight: 700; }
+.rank { font-weight: 800; color: var(--text-dim, #9ca3af); width: 2rem; }
+.user-cell { font-weight: 600; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

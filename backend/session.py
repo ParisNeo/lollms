@@ -294,6 +294,30 @@ def get_current_db_user_from_token(
         if user is None:
             raise credentials_exception
 
+        # Service principals (mesh / agent) are API-only. A JWT is never a
+        # valid credential for them — they must authenticate through the
+        # OpenAI-compatible surface with an API key. This blocks any attempt
+        # to use a service account as an interactive WebUI session.
+        from backend.account_types import is_interactive
+
+        if not is_interactive(getattr(user, "account_type", "human")):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Service accounts cannot authenticate interactively. Use an API key.",
+            )
+
+        token_iat = payload.get("iat")
+        # valid credential for them: they must authenticate through the
+        # OpenAI-compatible surface with an API key. This blocks any attempt
+        # to use a service account as an interactive WebUI session, while the
+        # API-key path (openai_v1) is unaffected.
+        from backend.account_types import is_interactive
+        if not is_interactive(getattr(user, "account_type", "human")):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Service accounts cannot authenticate interactively. Use an API key.",
+            )
+
         token_iat = payload.get("iat")
         if user.password_changed_at is not None and token_iat is not None:
             pwd_changed = user.password_changed_at
