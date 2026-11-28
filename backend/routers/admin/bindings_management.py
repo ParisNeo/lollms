@@ -1212,6 +1212,116 @@ async def get_binding_models(binding_id: int, current_admin: UserAuthDetails = D
 
     return _get_modality_models_list(binding, "llm")
 
+
+def _normalize_model_profile_fields(desc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Normalizes a binding's ``description.yaml`` parameter groups into a stable
+    UI contract for the dynamic per-model configuration form.
+
+    We merge ``model_input_parameters`` (minimal model-selection fields) and
+    ``model_profiles_input_parameters`` (the per-model launch knobs) — the same
+    tiers documented for custom model configuration — and present each field as::
+
+        { name, label, type, default, description, options, mandatory, group }
+
+    ``type`` is one of: text, number, integer, float, boolean, select, list.
+    """
+    merged: List[Dict[str, Any]] = []
+    seen: set = set()
+
+    def _emit(group: List[Dict[str, Any]], group_name: str):
+        for spec in group or []:
+            if not isinstance(spec, dict):
+                continue
+            name = spec.get("name")
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            raw_type = (spec.get("type") or "str").lower()
+            options = spec.get("options") or spec.get("values") or []
+            # Map the YAML declared type onto a concrete form control.
+            if options:
+                ui_type = "select"
+            elif raw_type in ("int", "integer"):
+                ui_type = "integer"
+            elif raw_type in ("float", "double"):
+                ui_type = "float"
+            elif raw_type in ("bool", "boolean"):
+                ui_type = "boolean"
+            elif raw_type in ("list", "array", "tuple", "multiselect"):
+                ui_type = "list"
+            elif raw_type in ("text", "textarea", "multiline"):
+                ui_type = "text"
+            else:
+                ui_type = "text"
+            merged.append({
+                "name": name,
+                "label": spec.get("title") or spec.get("label") or name.replace("_", " ").title(),
+                "type": ui_type,
+                "raw_type": raw_type,
+                "default": spec.get("default"),
+                "description": spec.get("description") or spec.get("help") or "",
+                "options": options,
+                "mandatory": bool(spec.get("mandatory", False)),
+                "group": group_name,
+            })
+
+    # Profiles knobs first (the ones an admin tunes per model), then the minimal
+    # model-selection fields, so the form leads with the interesting settings.
+    _emit(desc.get("model_profiles_input_parameters"), "profile")
+    _emit(desc.get("model_input_parameters"), "model")
+    return merged
+
+
+@bindings_management_router.get("/bindings/{binding_id}/model-profile-schema", response_model=Dict[str, Any])
+async def get_binding_model_profile_schema(
+    binding_id: int,
+    modality: str = Query("llm", description="Modality type"),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db),
+):
+    """Returns the dynamic per-model configuration schema for a binding instance.
+
+    Reads the binding's ``description.yaml`` (via ``get_binding_desc``) and exposes
+    ``model_input_parameters`` + ``model_profiles_input_parameters`` so the admin
+    profile builder can render ``int/float/bool/str/select/list`` fields for ANY
+    binding without hard-coding names.
+    """
+    mod = (modality or "llm").lower()
+    binding_cls = DBLLMBinding
+    if mod == "tti":
+        binding_cls = DBTTIBinding
+    elif mod == "tts":
+        binding_cls = DBTTSBinding
+    elif mod == "stt":
+        binding_cls = DBSTTBinding
+    elif mod == "ttv":
+        binding_cls = DBTTVBinding
+    elif mod == "ttm":
+        binding_cls = DBTTMBinding
+    elif mod == "rag":
+        binding_cls = DBRAGBinding
+
+    binding = db.query(binding_cls).filter(binding_cls.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+
+    try:
+        raw_desc = get_binding_desc(binding.name, mod)
+        desc = _normalize_binding_desc(binding.name, raw_desc, mod)
+    except Exception as e:
+        trace_exception(e)
+        desc = {}
+
+    fields = _normalize_model_profile_fields(desc) if desc else []
+    return {
+        "binding_id": binding.id,
+        "binding_name": binding.name,
+        "binding_alias": binding.alias,
+        "modality": mod,
+        "fields": fields,
+        "count": len(fields),
+    }
+
 @bindings_management_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
 async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
@@ -1229,12 +1339,14 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
     alias_dict = payload.alias.model_dump()
     alias_dict["binding_profile_name"] = binding.alias
 
-    # ``target_key`` is the authoritative identity of the profile. It MUST equal
-    # the embedded ``model_name`` so downstream consumers (profile grid,
-    # availability checks, routing) never see a stale/duplicate entry — which is
-    # exactly what made edits look like they "didn't apply".
+    # ``target_key`` is the profile's IDENTITY (the dict key / display name),
+    # which the admin may rename independently of the engine model. The embedded
+    # ``model_name`` is the actual engine model to load and is preserved from the
+    # submitted alias. Only fall back to the key when the alias carries no model,
+    # so downstream consumers never see an empty target.
     target_key = payload.new_model_name or payload.original_model_name
-    alias_dict["model_name"] = target_key
+    if not alias_dict.get("model_name"):
+        alias_dict["model_name"] = alias_dict.get("original_model_name") or target_key
 
     # Write the new entry FIRST, then prune the old key only on a genuine rename
     # to a *different* identity. Writing before deleting guarantees the new
@@ -1665,7 +1777,8 @@ async def update_tti_model_alias(
     alias_dict = payload.alias.model_dump()
     alias_dict["binding_profile_name"] = binding.alias
     target_key = payload.new_model_name or payload.original_model_name
-    alias_dict["model_name"] = target_key
+    if not alias_dict.get("model_name"):
+        alias_dict["model_name"] = alias_dict.get("original_model_name") or target_key
 
     if payload.new_model_name and payload.new_model_name != payload.original_model_name:
         if payload.original_model_name in binding.model_aliases:
@@ -1896,7 +2009,8 @@ async def update_tts_model_alias(
     alias_dict = payload.alias.model_dump()
     alias_dict["binding_profile_name"] = binding.alias
     target_key = payload.new_model_name or payload.original_model_name
-    alias_dict["model_name"] = target_key
+    if not alias_dict.get("model_name"):
+        alias_dict["model_name"] = alias_dict.get("original_model_name") or target_key
 
     if payload.new_model_name and payload.new_model_name != payload.original_model_name:
         if payload.original_model_name in binding.model_aliases:

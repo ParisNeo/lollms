@@ -2,6 +2,53 @@
 import apiClient from '../../services/api';
 import { processSingleMessage } from './discussionProcessor';
 
+// ── Durable client-side generation errors ──────────────────────────────────
+// A generation can fail mid-stream (context overflow, engine crash, lost
+// connection). The server's persisted message does NOT know about these
+// client-observed failures, and `refreshActiveDiscussionMessages()` rebuilds
+// `messages.value` from server truth — which would silently wipe a top-level
+// field or a metadata blob we set on the temp message objects.
+//
+// This module-level registry keys the error by the FINAL message id and is
+// re-applied to `metadata.generation_error` every time the message array is
+// rebuilt. It stays alive for the page session, so the red error card renders
+// immediately AND keeps rendering after any refresh/reload of the discussion.
+const GENERATION_ERRORS = new Map();
+
+export function getGenerationErrorForMessage(messageId) {
+    if (!messageId) return null;
+    return GENERATION_ERRORS.get(String(messageId)) || null;
+}
+
+export function remapGenerationError(messageId) {
+    if (!messageId) return null;
+    return GENERATION_ERRORS.get(String(messageId)) || null;
+}
+
+// Attach an error to a message id and mirror it onto `metadata` so any consumer
+// reading `message.metadata.generation_error` sees the same value.
+export function setGenerationError(messageId, error) {
+    if (!messageId || !error) return;
+    const key = String(messageId);
+    if (GENERATION_ERRORS.has(key)) return; // first error wins (root cause)
+    GENERATION_ERRORS.set(key, error);
+}
+
+// Re-attach the registry entry to whichever message object currently represents
+// `messageId` after the messages array was rebuilt from server truth.
+export function rehydrateGenerationError(messageObj) {
+    if (!messageObj || !messageObj.id) return messageObj;
+    const err = GENERATION_ERRORS.get(String(messageObj.id));
+    if (!err) return messageObj;
+    if (!messageObj.metadata || typeof messageObj.metadata !== 'object') {
+        messageObj.metadata = {};
+    }
+    if (!messageObj.metadata.generation_error) {
+        messageObj.metadata.generation_error = err;
+    }
+    return messageObj;
+}
+
 export function useDiscussionGeneration(state, stores, getActions) {
     const { 
         discussions, 
@@ -162,7 +209,17 @@ export function useDiscussionGeneration(state, stores, getActions) {
         const processStreamData = (data) => {
             if (data.type === 'new_message_id') {
                 const aiIdx = messages.value.findIndex(m => m.id === tempAiMessage.id);
-                if (aiIdx !== -1) messages.value[aiIdx].id = data.content;
+                if (aiIdx !== -1) {
+                    const oldTempId = tempAiMessage.id;
+                    messages.value[aiIdx].id = data.content;
+                    tempAiMessage.id = data.content;
+                    // Move any error we already captured under the temp id so it
+                    // follows the message to its final server id.
+                    if (GENERATION_ERRORS.has(oldTempId)) {
+                        GENERATION_ERRORS.set(String(data.content), GENERATION_ERRORS.get(oldTempId));
+                        GENERATION_ERRORS.delete(oldTempId);
+                    }
+                }
                 return;
             }
 
@@ -302,7 +359,12 @@ export function useDiscussionGeneration(state, stores, getActions) {
                                 .trim();
                         }
                         messageToUpdate.tokens = finalAi.tokens || finalAi.token_count || 0;
+                        // `finalize` overwrites `metadata` with server truth.
+                        // Client-observed generation errors live in the durable
+                        // module registry (not in metadata), so re-apply them
+                        // onto the freshly-assigned metadata object here.
                         messageToUpdate.metadata = finalAi.metadata || {};
+                        rehydrateGenerationError(messageToUpdate);
                         if (finalAi.sources && finalAi.sources.length > 0) {
                             messageToUpdate.sources = finalAi.sources;
                             if (!messageToUpdate.metadata) messageToUpdate.metadata = {};
@@ -323,13 +385,78 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     break;
                     
+                case 'error':
+                case 'exception':
+                    if (!messageToUpdate.events) messageToUpdate.events = [];
+                    messageToUpdate.events.push(data);
+                    messageToUpdate.lastEvent = data;
+                    // Register the failure in the DURABLE module-level registry,
+                    // keyed by the current message id. The `finalize` event
+                    // replaces `metadata` wholesale and the post-generation
+                    // server refresh rebuilds `messages.value` from server
+                    // truth — neither knows about this client-observed error.
+                    // The registry is re-applied onto `metadata.generation_error`
+                    // by `rehydrateGenerationError()` after every rebuild, so the
+                    // red error card survives finalize AND reload.
+                    setGenerationError(tempAiMessage.id || messageToUpdate.id, {
+                        message: extractStreamErrorMessage(data) || 'Generation failed.',
+                        details: formatStreamErrorDetails(data),
+                        type: data.type,
+                        timestamp: new Date().toISOString(),
+                    });
+                    // Mirror onto the live object so the card renders IMMEDIATELY
+                    // (before any refresh/rehydrate pass).
+                    rehydrateGenerationError(messageToUpdate);
+
+
                 default:
-                    if (['tool_call', 'tool_output', 'step_start', 'step_end', 'info', 'warning', 'error', 'form_ready', 'form_submitted'].includes(data.type)) {
+                    if (['tool_call', 'tool_output', 'step_start', 'step_end', 'info', 'warning', 'form_ready', 'form_submitted'].includes(data.type)) {
                         if (!messageToUpdate.events) messageToUpdate.events = [];
                         messageToUpdate.events.push(data);
                         messageToUpdate.lastEvent = data;
                     }
             }
+        };
+
+        // Extract a human-readable one-line message from a stream error event.
+        const extractStreamErrorMessage = (data) => {
+            const content = data?.content ?? data?.message ?? data?.detail;
+            if (typeof content === 'string' && content.trim()) {
+                return content.trim().split('\n').find((l) => l.trim()) || content.trim();
+            }
+            if (content && typeof content === 'object') {
+                const nested = content.error || content.message || content.detail;
+                if (typeof nested === 'string' && nested.trim()) return nested.trim();
+                if (nested && typeof nested === 'object') {
+                    const m = nested.message || nested.detail;
+                    if (typeof m === 'string' && m.trim()) return m.trim();
+                }
+                try { return JSON.stringify(content); } catch { return ''; }
+            }
+            return '';
+        };
+
+        // Full multi-line details (traceback / structured payload) for the
+        // collapsible body of the error card.
+        const formatStreamErrorDetails = (data) => {
+            const parts = [];
+            const content = data?.content ?? data?.message ?? data?.detail;
+            if (content && typeof content === 'object') {
+                try {
+                    parts.push(JSON.stringify(content, null, 2));
+                } catch {
+                    parts.push(String(content));
+                }
+            } else if (typeof content === 'string') {
+                parts.push(content);
+            }
+            if (data?.traceback && typeof data.traceback === 'string') {
+                parts.push(data.traceback);
+            }
+            if (data?.error && typeof data.error === 'string' && !parts.includes(data.error)) {
+                parts.push(data.error);
+            }
+            return parts.join('\n\n').trim();
         };
 
         // --- Fetch Loop ---
@@ -365,7 +492,21 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 }
             }
         } catch (error) {
-            if (error.name !== 'AbortError') uiStore.addNotification('Connection error during generation.', 'error');
+            if (error.name !== 'AbortError') {
+                uiStore.addNotification('Connection error during generation.', 'error');
+                // Route transport-level failures through the SAME durable
+                // registry as server-reported errors so they render identically
+                // and survive both `finalize` and the post-generation refresh.
+                if (messageToUpdate) {
+                    setGenerationError(tempAiMessage.id || messageToUpdate.id, {
+                        message: error?.message ? `Connection error: ${error.message}` : 'Connection error during generation.',
+                        details: String(error?.stack || error?.message || error || ''),
+                        type: 'connection_error',
+                        timestamp: new Date().toISOString(),
+                    });
+                    rehydrateGenerationError(messageToUpdate);
+                }
+            }
         } finally {
             if (messageToUpdate) messageToUpdate.isStreaming = false;
             generationInProgress.value = false;

@@ -877,6 +877,15 @@ const timelineFailureCount = computed(() =>
     uniqueEvents.value.filter(evt => isFailureEvent(evt)).length
 );
 
+// Generation-level failure (stream / transport error). Stored on
+// `message.metadata.generation_error` so it survives the server `finalize`
+// event and any reload from the DB. Guarded against both missing metadata
+// and the alternate legacy snake/camel shapes.
+const generationError = computed(() => {
+    const meta = props.message?.metadata || {};
+    return meta.generation_error || meta.generationError || null;
+});
+
 const failureEvents = computed(() =>
     uniqueEvents.value
         .filter(evt => isFailureEvent(evt))
@@ -1441,6 +1450,24 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                              processing blocks. This surfaces every error event in one
                              clear banner so the user immediately sees WHAT failed and
                              WHY, without opening any log dump. -->
+                        <!-- ── Generation-level failure (stream/transport error) ──────
+                             The model/backend can fail mid-generation (context-size
+                             overflow, connection loss, engine crash). This renders a
+                             red, collapsible block with the message + full details so
+                             the user knows exactly what went wrong instead of seeing a
+                             silently truncated answer. -->
+                        <details v-if="generationError" class="generation-error-block my-3" open>
+                            <summary class="generation-error-summary">
+                                <IconError class="w-4 h-4 shrink-0" />
+                                <span class="generation-error-title">
+                                    {{ generationError.message || 'Generation failed' }}
+                                </span>
+                                <span class="generation-error-badge">ERROR</span>
+                                <IconChevronRight class="w-3 h-3 shrink-0 generation-error-arrow" />
+                            </summary>
+                            <pre class="generation-error-details">{{ generationError.details || generationError.message }}</pre>
+                        </details>
+
                         <div v-if="failureEvents.length > 0" class="failure-summary">
                             <div class="failure-summary-head">
                                 <IconError class="w-4 h-4 shrink-0" />
@@ -1951,6 +1978,73 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
 }
 
 /* ── Always-visible failure summary banner ─────────────────────────────── */
+/* ── Generation-level failure block (red, collapsible) ──────────────────── */
+.generation-error-block {
+    border-radius: 12px;
+    border: 1px solid #fca5a5;
+    border-left: 4px solid #ef4444;
+    background: #fef2f2;
+    overflow: hidden;
+}
+.dark .generation-error-block {
+    border-color: rgba(239,68,68,0.45);
+    border-left-color: #ef4444;
+    background: rgba(239,68,68,0.10);
+}
+.generation-error-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    list-style: none;
+    padding: 10px 14px;
+    font-size: 12.5px;
+    font-weight: 800;
+    color: #b91c1c;
+    user-select: none;
+}
+.dark .generation-error-summary { color: #fca5a5; }
+.generation-error-summary::-webkit-details-marker { display: none; }
+.generation-error-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.generation-error-badge {
+    flex-shrink: 0;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: #ef4444;
+    color: #fff;
+}
+.generation-error-arrow {
+    transition: transform 0.15s ease;
+    opacity: 0.7;
+}
+.generation-error-block[open] .generation-error-arrow { transform: rotate(90deg); }
+.generation-error-details {
+    margin: 0;
+    padding: 10px 14px 14px;
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 11.5px;
+    line-height: 1.55;
+    color: #991b1b;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 360px;
+    overflow: auto;
+    border-top: 1px solid #fca5a5;
+}
+.dark .generation-error-details {
+    color: #fca5a5;
+    border-top-color: rgba(239,68,68,0.45);
+}
+
 .failure-summary {
     margin: 12px 0;
     border-radius: 12px;

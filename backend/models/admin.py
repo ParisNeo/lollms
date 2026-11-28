@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field, EmailStr, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, ConfigDict, model_validator
 import datetime
 
 class ForceGlobalConfigPayload(BaseModel):
@@ -198,49 +198,24 @@ class ModelAlias(BaseModel):
 
 class TtiModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
-    model_name: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    allow_parameters_override: bool = True
-    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    model_name: Optional[str] = None
 class TtsModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
-    model_name: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    allow_parameters_override: bool = True
-    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    model_name: Optional[str] = None
 class SttModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
-    model_name: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    allow_parameters_override: bool = True
-    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    model_name: Optional[str] = None
 class TtvModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
-    model_name: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    allow_parameters_override: bool = True
-    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
+    model_name: Optional[str] = None
 class TtmModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+
     model_name: Optional[str] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    allow_parameters_override: bool = True
-    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    
 class RagModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
     model_name: Optional[str] = None

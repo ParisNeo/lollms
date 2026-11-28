@@ -249,7 +249,11 @@ const editorError = ref('');
 const editorForm = reactive({
     bindingId: null,
     bindingAlias: '',
+    // ``originalModelName`` = the ENGINE model to load (Model dropdown).
+    // ``profileName`` = the profile's identity / dict key (editable display name),
+    // which the admin may rename independently of the engine model.
     originalModelName: '',
+    profileName: '',
     profile: {},
 });
 
@@ -319,6 +323,81 @@ async function loadEditorModels() {
     } finally {
         isLoadingEditorModels.value = false;
     }
+}
+
+// ── Dynamic per-model configuration schema (from the binding's description.yaml) ─
+// Rendered as a typed form so ANY binding's custom knobs (int/float/bool/string/
+// select/list) become editable without hard-coding field names here.
+const editorSchemaFields = ref([]);
+const isLoadingSchema = ref(false);
+
+async function loadEditorSchema() {
+    const schemaFn = adminStore.fetchModelProfileSchema;
+    if (typeof schemaFn !== 'function' || !editorForm.bindingId) {
+        editorSchemaFields.value = [];
+        return;
+    }
+    isLoadingSchema.value = true;
+    try {
+        const data = await schemaFn.call(adminStore, editorForm.bindingId, props.bindingType);
+        // Exclude fields already rendered by the dedicated controls (the Model
+        // picker + the LLM Title/Description/Context/Vision block) so the
+        // dynamic section only adds genuinely custom knobs.
+        const alreadyRendered = new Set(['model_name', 'title', 'name', 'description']);
+        if (isLlm.value) {
+            alreadyRendered.add('ctx_size');
+            alreadyRendered.add('forced_context_size');
+            alreadyRendered.add('has_vision');
+            alreadyRendered.add('vision_enabled');
+        }
+        editorSchemaFields.value = (Array.isArray(data?.fields) ? data.fields : [])
+            .filter((f) => f && f.name && !alreadyRendered.has(f.name));
+        // Seed any missing profile values with the schema defaults so the form
+        // starts from sane, binding-declared values (e.g. ctx_size, flash_attn).
+        if (isEditorOpen.value) {
+            const profile = editorForm.profile;
+            for (const field of editorSchemaFields.value) {
+                if (profile[field.name] === undefined && field.default !== undefined && field.default !== null) {
+                    profile[field.name] = field.default;
+                }
+            }
+        }
+    } catch {
+        editorSchemaFields.value = [];
+    } finally {
+        isLoadingSchema.value = false;
+    }
+}
+
+// Turn a schema field's raw string/list input into a faithful JS value so the
+// stored profile matches the declared type (numbers stay numbers, lists stay arrays).
+function coerceSchemaValue(field, rawValue) {
+    if (field.type === 'integer') {
+        const n = parseInt(rawValue, 10);
+        return Number.isNaN(n) ? undefined : n;
+    }
+    if (field.type === 'float') {
+        const n = parseFloat(rawValue);
+        return Number.isNaN(n) ? undefined : n;
+    }
+    if (field.type === 'list') {
+        if (Array.isArray(rawValue)) return rawValue;
+        return String(rawValue || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+    }
+    return rawValue;
+}
+
+function setSchemaValue(field, rawValue) {
+    editorForm.profile[field.name] = coerceSchemaValue(field, rawValue);
+}
+
+// Human-friendly display for a list value inside a text input.
+function listValueToString(value) {
+    if (Array.isArray(value)) return value.join(', ');
+    return value == null ? '' : String(value);
 }
 
 // ── Multi-select state ───────────────────────────────────────────────────────
@@ -479,12 +558,14 @@ function openCreate() {
         ? props.binding.alias
         : (connections.value[0]?.alias ?? '');
     editorForm.originalModelName = '';
+    editorForm.profileName = '';
     editorForm.profile = {};
     editorOriginalKey.value = '';
     editorOriginalBindingId.value = null;
     editorOriginalBindingAlias.value = '';
     isEditorOpen.value = true;
     loadEditorModels();
+    loadEditorSchema();
 }
 
 function openEdit(row) {
@@ -492,13 +573,17 @@ function openEdit(row) {
     editorError.value = '';
     editorForm.bindingId = row.bindingId;
     editorForm.bindingAlias = row.bindingAlias;
-    editorForm.originalModelName = row.originalModelName;
+    editorForm.originalModelName = row.modelName || row.originalModelName;
+    // The profile's identity is its stored dict key (row.originalModelName),
+    // NOT necessarily the engine model (row.modelName).
+    editorForm.profileName = row.originalModelName;
     editorForm.profile = JSON.parse(JSON.stringify(row.alias || {}));
     editorOriginalKey.value = row.originalModelName;
     editorOriginalBindingId.value = row.bindingId;
     editorOriginalBindingAlias.value = row.bindingAlias;
     isEditorOpen.value = true;
     loadEditorModels();
+    loadEditorSchema();
 }
 
 // Reload the engine-model list whenever the target binding changes while the
@@ -507,14 +592,34 @@ watch(
     () => editorForm.bindingId,
     (val, oldVal) => {
         if (!isEditorOpen.value || !val || val === oldVal) return;
-        // Keep the alias label in sync with the newly chosen binding.
-        const target = connections.value.find((b) => b.id === val) || (props.binding?.id === val ? props.binding : null);
+        // Keep the alias label in sync with the newly chosen binding. Resolve
+        // against editorBindingOptions (the FULL list) — in scoped mode
+        // ``connections`` only contains the original binding, so the newly
+        // picked binding would otherwise never update its alias label.
+        const target =
+            editorBindingOptions.value.find((b) => b.id === val) ||
+            connections.value.find((b) => b.id === val) ||
+            (props.binding?.id === val ? props.binding : null);
         if (target?.alias) editorForm.bindingAlias = target.alias;
         // The new binding may serve different models — reload the picker and, if
         // the previous model isn't served there, clear it so the admin re-selects.
         editorAvailableModels.value = [];
         editorForm.originalModelName = '';
         loadEditorModels();
+        loadEditorSchema();
+    }
+);
+
+// On CREATE, default the Profile Name to the chosen engine model so a new
+// profile is immediately saveable. Never override a name the admin has typed
+// (nor touch it while editing an existing profile).
+watch(
+    () => editorForm.originalModelName,
+    (val, oldVal) => {
+        if (!isEditorOpen.value || !isNewProfile.value) return;
+        if (!editorForm.profileName || editorForm.profileName === oldVal) {
+            editorForm.profileName = val || '';
+        }
     }
 );
 
@@ -537,17 +642,19 @@ async function saveEditor() {
         editorError.value = 'A target binding must be selected.';
         return;
     }
-    const originalModelName = (editorForm.originalModelName || '').trim();
-    if (!originalModelName) {
-        editorError.value = 'Model name is required.';
+    // The ENGINE model to load (Model dropdown) and the PROFILE name (dict key)
+    // are independent. The profile name defaults to the model name when blank.
+    const engineModel = (editorForm.originalModelName || '').trim();
+    const profileName = (editorForm.profileName || '').trim() || engineModel;
+    if (!engineModel && !profileName) {
+        editorError.value = 'A model and profile name are required.';
         return;
     }
 
     const alias = JSON.parse(JSON.stringify(editorForm.profile || {}));
-    // The selected "Model" field is the authoritative target identity for both
-    // create and edit. It also drives ``model_name`` so the stored dict key and
-    // embedded model_name always agree (required by backend + consumers).
-    alias.model_name = originalModelName;
+    // ``model_name`` in the alias is the ENGINE model to load. It must never be
+    // silently replaced by the profile name — that would load the wrong model.
+    alias.model_name = engineModel || alias.model_name;
     if (isLlm.value) {
         if (alias.has_vision !== undefined) {
             alias.vision_enabled = Boolean(alias.has_vision);
@@ -561,7 +668,9 @@ async function saveEditor() {
     // ``original_model_name`` and the selection as ``new_model_name`` so the
     // backend performs a genuine rename (write new, delete old). When nothing
     // was renamed, both are the same key (a plain in-place update).
-    const sourceKey = isNewProfile.value ? originalModelName : (editorOriginalKey.value || originalModelName);
+    // The profile's stored dict key. On edit it is the original key; on create,
+    // or after a rename in the editor, it is ``profileName``.
+    const sourceKey = isNewProfile.value ? profileName : (editorOriginalKey.value || profileName);
 
     const deleteFn = adminStore[actions.value.deleteAlias];
     const moved = isEditorMoved.value && editorOriginalBindingId.value !== null;
@@ -569,12 +678,12 @@ async function saveEditor() {
     isSaving.value = true;
     editorError.value = '';
     try {
-        // For a move the profile lands on the NEW binding under the chosen model
-        // key. On the new binding there is no prior key to rename, so we save it
-        // as a fresh entry (sourceKey === target model name).
+        // ``new_model_name`` is the PROFILE IDENTITY (dict key / display name),
+        // independent of the engine model carried in ``alias.model_name``.
+        // For a move the profile lands on the NEW binding under ``profileName``.
         await saveFn.call(adminStore, binding.id, {
-            original_model_name: moved ? originalModelName : sourceKey,
-            new_model_name: originalModelName,
+            original_model_name: moved ? profileName : sourceKey,
+            new_model_name: profileName,
             alias,
         });
 
@@ -594,7 +703,7 @@ async function saveEditor() {
         }
 
         const verb = moved ? 'moved' : 'saved';
-        uiStore.addNotification(`Profile ${verb} for '${alias.title || originalModelName}'.`, 'success');
+        uiStore.addNotification(`Profile ${verb} for '${alias.title || profileName}'.`, 'success');
         closeEditor();
         await loadAllProfiles();
     } catch (e) {
@@ -1104,6 +1213,19 @@ watch(
                         </div>
 
                         <div>
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Profile Name</label>
+                            <input
+                                v-model="editorForm.profileName"
+                                type="text"
+                                class="input-field text-xs font-mono"
+                                placeholder="Profile identity / name (e.g. my-fast-coder)"
+                            />
+                            <p class="text-[10px] text-gray-400 mt-1">
+                                The unique name this profile is stored and referenced under. Independent of the engine model.
+                            </p>
+                        </div>
+
+                        <div>
                             <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Model</label>
                             <!-- Selectable list of the binding's own served models. Fall back
                                  to a free-text input only while the list is still loading or
@@ -1163,6 +1285,109 @@ watch(
                             >
                                 <span :class="[editorForm.profile.has_vision ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
+                        </div>
+
+                        <!-- Dynamic per-model configuration (from the binding's
+                             description.yaml). Any binding-declared knob is rendered
+                             with the right control (text / number / float / toggle /
+                             select / list) and written verbatim into the profile,
+                             so custom config survives save and drives the model. -->
+                        <div v-if="isLoadingSchema" class="flex items-center gap-2 text-xs text-gray-500 py-1">
+                            <IconAnimateSpin class="w-3.5 h-3.5 animate-spin" />
+                            <span>Loading model configuration…</span>
+                        </div>
+                        <div
+                            v-else-if="editorSchemaFields.length > 0"
+                            class="pt-2 border-t border-gray-200 dark:border-gray-700"
+                        >
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-2">
+                                Model Configuration
+                            </label>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                <div
+                                    v-for="field in editorSchemaFields"
+                                    :key="field.name"
+                                    class="flex flex-col gap-1"
+                                    :class="field.type === 'text' ? 'sm:col-span-2' : ''"
+                                >
+                                    <label class="text-[10px] font-bold uppercase tracking-wide text-gray-500 flex items-center gap-1">
+                                        {{ field.label }}
+                                        <span v-if="field.mandatory" class="text-red-500">*</span>
+                                        <span v-if="field.default !== undefined && field.default !== null" class="text-[9px] font-mono text-gray-400 normal-case">
+                                            (default: {{ field.default }})
+                                        </span>
+                                    </label>
+
+                                    <!-- boolean -->
+                                    <button
+                                        v-if="field.type === 'boolean'"
+                                        type="button"
+                                        @click="setSchemaValue(field, !editorForm.profile[field.name])"
+                                        :class="[editorForm.profile[field.name] ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors']"
+                                        :title="field.description"
+                                    >
+                                        <span :class="[editorForm.profile[field.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                                    </button>
+
+                                    <!-- select -->
+                                    <select
+                                        v-else-if="field.type === 'select'"
+                                        :value="editorForm.profile[field.name]"
+                                        @change="setSchemaValue(field, $event.target.value)"
+                                        class="input-field text-xs"
+                                        :title="field.description"
+                                    >
+                                        <option value="">—</option>
+                                        <option v-for="opt in field.options" :key="opt" :value="opt">{{ opt }}</option>
+                                    </select>
+
+                                    <!-- list (comma separated) -->
+                                    <input
+                                        v-else-if="field.type === 'list'"
+                                        :value="listValueToString(editorForm.profile[field.name])"
+                                        @change="setSchemaValue(field, $event.target.value)"
+                                        type="text"
+                                        class="input-field text-xs font-mono"
+                                        placeholder="comma, separated, values"
+                                        :title="field.description"
+                                    />
+
+                                    <!-- integer / float -->
+                                    <input
+                                        v-else-if="field.type === 'integer' || field.type === 'float'"
+                                        :value="editorForm.profile[field.name]"
+                                        @input="setSchemaValue(field, $event.target.value)"
+                                        type="number"
+                                        :step="field.type === 'float' ? 'any' : '1'"
+                                        class="input-field text-xs font-mono"
+                                        :title="field.description"
+                                    />
+
+                                    <!-- text / textarea -->
+                                    <textarea
+                                        v-else-if="field.raw_type === 'text' || field.raw_type === 'textarea'"
+                                        :value="editorForm.profile[field.name]"
+                                        @input="setSchemaValue(field, $event.target.value)"
+                                        rows="2"
+                                        class="input-field text-xs resize-none"
+                                        :title="field.description"
+                                    ></textarea>
+
+                                    <!-- plain string -->
+                                    <input
+                                        v-else
+                                        :value="editorForm.profile[field.name]"
+                                        @input="setSchemaValue(field, $event.target.value)"
+                                        type="text"
+                                        class="input-field text-xs font-mono"
+                                        :title="field.description"
+                                    />
+
+                                    <p v-if="field.description" class="text-[9px] text-gray-400 leading-tight">
+                                        {{ field.description }}
+                                    </p>
+                                </div>
+                            </div>
                         </div>
 
                         <p v-if="editorError" class="text-xs text-red-600 dark:text-red-400 font-bold">{{ editorError }}</p>

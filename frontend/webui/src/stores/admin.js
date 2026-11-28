@@ -467,6 +467,7 @@ export const useAdminStore = defineStore('admin', () => {
     
     // Aliases & Commands
     async function fetchBindingModels(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/models`); return r.data; }
+    async function fetchModelProfileSchema(bindingId, modality = 'llm') { const res = await apiClient.get(`/api/admin/bindings/${bindingId}/model-profile-schema`, { params: { modality } }); return res.data; }
     async function getModelCtxSize(id, name) { const r = await apiClient.post(`/api/admin/bindings/${id}/context-size`, { model_name: name }); return r.data.ctx_size; }
     async function saveModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}/alias`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(bindings.value[i], r.data); }
     async function deleteModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/bindings/${id}/alias`, { data: { original_model_name: name } }); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(bindings.value[i], r.data); }
@@ -1099,7 +1100,7 @@ export const useAdminStore = defineStore('admin', () => {
         uploadWelcomeLogo, removeWelcomeLogo, uploadSslFile, importOpenWebUIData, fetchAdminAvailableLollmsModels, generateIconForModel,
         
         autoCreateProfilesForBinding,
-        fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding, fetchBindingModels, getModelCtxSize, saveModelAlias, deleteModelAlias, executeBindingCommand,
+        fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding, fetchBindingModels, fetchModelProfileSchema, getModelCtxSize, saveModelAlias, deleteModelAlias, executeBindingCommand,
         fetchTtiBindings, fetchAvailableTtiBindingTypes, addTtiBinding, updateTtiBinding, deleteTtiBinding, fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias, executeTtiBindingCommand,
         fetchTtsBindings, fetchAvailableTtsBindingTypes, addTtsBinding, updateTtsBinding, deleteTtsBinding, fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias, executeTtsBindingCommand,
         fetchSttBindings, fetchAvailableSttBindingTypes, addSttBinding, updateSttBinding, deleteSttBinding, fetchSttBindingModels, saveSttModelAlias, deleteSttModelAlias, executeSttBindingCommand,
