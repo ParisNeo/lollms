@@ -342,6 +342,97 @@ async def analyze_logs(current_user: UserAuthDetails = Depends(get_current_admin
     )
     return db_task
 
+class ConsoleLogEntry(BaseModel):
+    """One row of the merged console log feed.
+
+    ``source`` distinguishes task logs from captured stdout/stderr so the admin
+    UI can filter visually. ``task_name`` is populated for task logs only.
+    """
+    id: str
+    timestamp: str
+    level: str
+    source: str
+    message: str
+    task_name: Optional[str] = None
+
+
+@system_management_router.get("/system/console-logs", response_model=List[ConsoleLogEntry])
+async def get_console_logs(
+    hours: int = Query(24, ge=1, le=168, description="Look-back window in hours (1..168)."),
+    limit: int = Query(500, ge=1, le=2000, description="Maximum number of rows to return."),
+    include_tasks: bool = Query(True, description="Merge background-task logs into the feed."),
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """Return the real server console output (stdout/stderr) for the last N hours.
+
+    Unlike ``/system/logs`` (which only surfaces ``DBTask.logs``), this endpoint
+    reads the process-level ring buffer populated by ``backend.log_buffer`` —
+    the same buffer that powers ``/system/process-logs``. It captures everything
+    printed to the console (``print``, ``ascii_colors`` panels, uvicorn
+    access/error lines, ``logging`` records) so the feed is never empty just
+    because no background task happened to run.
+
+    ``include_tasks`` optionally merges task logs (with ``source='task'``) so the
+    caller gets a single, chronologically sorted operations feed.
+    """
+    from backend.log_buffer import get_logs
+
+    merged: List[Dict[str, Any]] = []
+
+    # 1. Captured stdout/stderr (+ logging records) from the ring buffer.
+    # ``get_logs`` already strips ANSI/ascii_colors markup at capture time, so
+    # the message is plain text suitable for JSON/HTML rendering.
+    try:
+        for i, entry in enumerate(get_logs(hours=hours, limit=limit)):
+            merged.append({
+                "id": f"sb-{i}-{entry.get('timestamp', '')}",
+                "timestamp": entry.get("timestamp") or datetime.now(timezone.utc).isoformat(),
+                "level": entry.get("level") or "INFO",
+                "source": entry.get("source") or "stdout",
+                "message": entry.get("message") or "",
+                "task_name": None,
+            })
+    except Exception as e:
+        trace_exception(e)
+
+    # 2. Background-task logs, scoped to the same time window.
+    if include_tasks:
+        try:
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            recent_tasks = db.query(DBTask)\
+                .options(defer(DBTask.result), defer(DBTask.error))\
+                .filter(DBTask.updated_at >= cutoff)\
+                .order_by(desc(DBTask.updated_at))\
+                .limit(50)\
+                .all()
+            for t in recent_tasks:
+                if not t.logs:
+                    continue
+                for i, log in enumerate(t.logs):
+                    ts = log.get("timestamp") or datetime.now(timezone.utc).isoformat()
+                    merged.append({
+                        "id": f"task-{t.id}-{i}",
+                        "timestamp": ts,
+                        "level": (log.get("level") or "INFO").upper(),
+                        "source": "task",
+                        "message": log.get("message") or "",
+                        "task_name": t.name,
+                    })
+        except Exception as e:
+            trace_exception(e)
+
+    # Chronological sort (newest first) then apply the hard limit.
+    def _sort_key(row: Dict[str, Any]):
+        try:
+            return datetime.fromisoformat(str(row.get("timestamp")))
+        except (ValueError, TypeError):
+            return datetime.now(timezone.utc)
+
+    merged.sort(key=_sort_key, reverse=True)
+    return merged[:limit]
+
+
 @system_management_router.get("/system/logs", response_model=List[LogEntry])
 async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     recent_tasks = db.query(DBTask)\
@@ -371,6 +462,71 @@ async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), curre
     
     all_logs.sort(key=lambda x: x.timestamp, reverse=True)
     return all_logs[:limit]
+
+
+class ProcessLogEntry(BaseModel):
+    timestamp: str
+    level: str
+    source: str
+    message: str
+
+
+class ProcessLogsResponse(BaseModel):
+    entries: List[ProcessLogEntry]
+    window_hours: float
+    total_in_buffer: int
+    count: int
+
+
+@system_management_router.get("/system/process-logs", response_model=ProcessLogsResponse)
+async def get_process_logs(
+    hours: float = Query(24.0, ge=0, le=24 * 90, description="Time window in hours. 0 = everything retained."),
+    limit: int = Query(500, ge=1, le=5000, description="Maximum number of (newest) lines to return."),
+    level: Optional[str] = Query(None, description="Exact level filter (DEBUG/INFO/WARNING/ERROR/CRITICAL)."),
+    source: Optional[str] = Query(None, description="Exact source filter (stdout/stderr/app)."),
+    _admin: UserAuthDetails = Depends(get_current_admin_user),
+):
+    """Return this process's captured stdout/stderr/app output.
+
+    Complements ``/system/logs`` (background task logs). The raw console output
+    of the server — uvicorn lines, tracebacks, startup banners — is tee'd into
+    an in-memory ring buffer by ``backend.log_buffer`` and served here so the
+    admin "Live operations log" panel is never empty just because no background
+    task ran recently.
+    """
+    from backend.log_buffer import get_logs, buffer_size
+
+    try:
+        entries = get_logs(hours=hours, limit=limit, level=level, source=source)
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to read process logs: {e}")
+
+    # Defense-in-depth: strip any ANSI color codes / control characters that
+    # survived capture (ascii_colors and uvicorn emit "\x1b[..m" SGR codes).
+    # The buffer already sanitizes at write time, but re-cleaning here keeps the
+    # API honest if a line ever arrives through another capture path.
+    from backend.log_buffer import strip_ansi
+    cleaned = []
+    for e in entries:
+        row = dict(e)
+        row["message"] = strip_ansi(row.get("message") or "")
+        cleaned.append(ProcessLogEntry(**row))
+
+    return ProcessLogsResponse(
+        entries=cleaned,
+        window_hours=hours,
+        total_in_buffer=buffer_size(),
+        count=len(cleaned),
+    )
+
+
+@system_management_router.post("/system/process-logs/clear", response_model=Dict[str, int])
+async def clear_process_logs(_admin: UserAuthDetails = Depends(get_current_admin_user)):
+    """Empty the process-log ring buffer. Returns the number of dropped lines."""
+    from backend.log_buffer import clear_logs
+    return {"cleared": clear_logs()}
+
 
 @system_management_router.post("/system/kill-process")
 async def kill_process(payload: KillProcessRequest, current_user: UserAuthDetails = Depends(get_current_admin_user)):

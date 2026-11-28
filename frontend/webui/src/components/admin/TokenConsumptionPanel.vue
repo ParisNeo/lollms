@@ -1,3 +1,222 @@
+
+<script setup>
+import { computed } from 'vue';
+import { Bar, Doughnut } from 'vue-chartjs';
+import {
+  Chart as ChartJS, Title, Tooltip, Legend, BarElement, CategoryScale,
+  LinearScale, ArcElement,
+} from 'chart.js';
+import { useAdminStore } from '../../stores/admin';
+import { useUiStore } from '../../stores/ui';
+import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
+import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
+import IconError from '../../assets/icons/IconError.vue';
+
+ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ArcElement);
+
+const adminStore = useAdminStore();
+const uiStore = useUiStore();
+
+// ── Data plumbing (the panel reads the shared consumption analytics cache) ──
+// ``consumptionAnalytics`` is populated by adminStore.fetchConsumptionAnalytics
+// and is already keyed by { totals, buckets, by_model, by_user, ... }.
+const consolidated = computed(() => adminStore.consumptionAnalytics || null);
+const isLoading = computed(() => adminStore.isLoadingConsumptionAnalytics);
+const params = computed(() => adminStore.consumptionParams || { granularity: 'day', source: 'all', days: 30, top_n: 10 });
+
+const currentGranularity = computed(() => params.value.granularity);
+const currentSource = computed(() => params.value.source);
+const currentDays = computed(() => params.value.days);
+const errorMsg = computed(() => (consolidated.value ? '' : ''));
+
+const granularities = [
+  { value: 'hour', label: 'Hourly' },
+  { value: 'day', label: 'Daily' },
+  { value: 'week', label: 'Weekly' },
+  { value: 'month', label: 'Monthly' },
+];
+
+const sourceLabels = { all: 'All Sources', webui: 'WebUI Chat', api: 'API Only' };
+const currentSourceLabel = computed(() => sourceLabels[currentSource.value] || 'All Sources');
+
+const buckets = computed(() => consolidated.value?.buckets || []);
+const totals = computed(() => consolidated.value?.totals || {
+  input_tokens: 0, output_tokens: 0, total_tokens: 0, calls: 0,
+  webui_tokens: 0, api_tokens: 0, energy_kwh: 0, co2_g: 0,
+});
+const topModels = computed(() => consolidated.value?.by_model || []);
+const topUsers = computed(() => consolidated.value?.by_user || []);
+
+const isDark = computed(() => uiStore.currentTheme === 'dark');
+
+// ── Number formatting ─────────────────────────────────────────────────────
+function formatNumber(n) {
+  const v = Number(n) || 0;
+  return v.toLocaleString();
+}
+function formatCompact(n) {
+  const v = Number(n) || 0;
+  if (Math.abs(v) >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+  if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(v < 1e4 ? 1 : 0) + 'k';
+  return String(v);
+}
+
+const webuiApiRatio = computed(() => {
+  const w = Number(totals.value.webui_tokens) || 0;
+  const a = Number(totals.value.api_tokens) || 0;
+  const sum = w + a;
+  if (!sum) return '—';
+  return `${Math.round((w / sum) * 100)}% / ${Math.round((a / sum) * 100)}%`;
+});
+
+// ── Actions ───────────────────────────────────────────────────────────────
+function refresh() { adminStore.fetchConsumptionAnalytics(); }
+function changeGranularity(g) { adminStore.fetchConsumptionAnalytics({ granularity: g }); }
+function changeSource(s) { adminStore.fetchConsumptionAnalytics({ source: s }); }
+function changeDays(d) { adminStore.fetchConsumptionAnalytics({ days: d }); }
+
+async function exportReport(fmt) {
+  try {
+    await adminStore.exportConsumptionAnalytics(fmt);
+  } catch (e) {
+    uiStore.addNotification(`Export (${fmt}) failed.`, 'error');
+  }
+}
+
+// ── Shared chart theme ────────────────────────────────────────────────────
+const theme = computed(() => ({
+  grid: isDark.value ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+  tick: isDark.value ? '#cbd5e1' : '#4b5563',
+  legend: isDark.value ? '#cbd5e1' : '#4b5563',
+  title: isDark.value ? '#e5e7eb' : '#1f2937',
+  tooltipBg: isDark.value ? 'rgba(17,24,39,0.96)' : 'rgba(255,255,255,0.97)',
+  tooltipTitle: isDark.value ? '#f3f4f6' : '#111827',
+  tooltipBody: isDark.value ? '#e5e7eb' : '#374151',
+  tooltipBorder: isDark.value ? '#374151' : '#e5e7eb',
+}));
+
+const COLORS = {
+  input: '#0EA5E9',
+  output: '#F43F5E',
+  webui: '#3B82F6',
+  api: '#8B5CF6',
+  total: '#10B981',
+};
+
+function baseOptions(extra = {}) {
+  const t = theme.value;
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    animation: { duration: 500 },
+    plugins: {
+      legend: {
+        display: true, position: 'top', align: 'end',
+        labels: { color: t.legend, font: { weight: 'bold', size: 11 }, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'circle', padding: 14 },
+      },
+      tooltip: {
+        backgroundColor: t.tooltipBg, titleColor: t.tooltipTitle, bodyColor: t.tooltipBody,
+        borderColor: t.tooltipBorder, borderWidth: 1, padding: 10, cornerRadius: 8, usePointStyle: true,
+        callbacks: { label: (ctx) => `${ctx.dataset.label || ''}: ${formatNumber(ctx.parsed.y ?? ctx.parsed)}` },
+      },
+    },
+    scales: {
+      x: { stacked: extra.stacked, grid: { display: false }, ticks: { color: t.tick, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+      y: { stacked: extra.stacked, beginAtZero: true, grid: { color: t.grid }, border: { display: false }, ticks: { color: t.tick, callback: (v) => formatCompact(v) } },
+    },
+    ...(extra.opts || {}),
+  };
+}
+
+// ── Chart data: Volume over time (stacked input vs output) ─────────────────
+const volumeChartData = computed(() => ({
+  labels: buckets.value.map((b) => b.label),
+  datasets: [
+    { label: 'Input', data: buckets.value.map((b) => b.input_tokens || 0), backgroundColor: COLORS.input, borderRadius: 3, stack: 'v' },
+    { label: 'Output', data: buckets.value.map((b) => b.output_tokens || 0), backgroundColor: COLORS.output, borderRadius: 3, stack: 'v' },
+  ],
+}));
+const volumeChartOptions = computed(() => baseOptions({ stacked: true }));
+
+// ── Chart data: WebUI vs API over time (stacked) ──────────────────────────
+const channelChartData = computed(() => ({
+  labels: buckets.value.map((b) => b.label),
+  datasets: [
+    { label: 'WebUI', data: buckets.value.map((b) => b.webui_tokens || 0), backgroundColor: COLORS.webui, borderRadius: 3, stack: 'c' },
+    { label: 'API', data: buckets.value.map((b) => b.api_tokens || 0), backgroundColor: COLORS.api, borderRadius: 3, stack: 'c' },
+  ],
+}));
+const channelChartOptions = computed(() => baseOptions({ stacked: true }));
+
+// ── Chart data: WebUI vs API Doughnut (share of total tokens) ─────────────
+const splitDoughnutData = computed(() => ({
+  labels: ['WebUI', 'API'],
+  datasets: [{
+    data: [Number(totals.value.webui_tokens) || 0, Number(totals.value.api_tokens) || 0],
+    backgroundColor: [COLORS.webui, COLORS.api],
+    borderWidth: 0,
+    hoverOffset: 6,
+  }],
+}));
+const splitDoughnutOptions = computed(() => {
+  const t = theme.value;
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '62%',
+    plugins: {
+      legend: { position: 'bottom', labels: { color: t.legend, font: { weight: 'bold', size: 11 }, usePointStyle: true, pointStyle: 'circle', padding: 14 } },
+      tooltip: {
+        backgroundColor: t.tooltipBg, titleColor: t.tooltipTitle, bodyColor: t.tooltipBody,
+        borderColor: t.tooltipBorder, borderWidth: 1, padding: 10, cornerRadius: 8, usePointStyle: true,
+        callbacks: {
+          label: (ctx) => {
+            const total = ctx.dataset.data.reduce((a, b) => a + (Number(b) || 0), 0) || 1;
+            const pct = Math.round((Number(ctx.parsed) / total) * 100);
+            return `${ctx.label}: ${formatNumber(ctx.parsed)} (${pct}%)`;
+          },
+        },
+      },
+    },
+  };
+});
+
+// ── Chart data: Top models (horizontal bars) ──────────────────────────────
+const topModelsChartData = computed(() => ({
+  labels: topModels.value.map((m) => m.model_name || m.name || 'unknown'),
+  datasets: [{
+    label: 'Tokens',
+    data: topModels.value.map((m) => m.total_tokens || 0),
+    backgroundColor: COLORS.total,
+    borderRadius: 4,
+  }],
+}));
+const topModelsChartOptions = computed(() => {
+  const t = theme.value;
+  return {
+    indexAxis: 'y',
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: t.tooltipBg, titleColor: t.tooltipTitle, bodyColor: t.tooltipBody,
+        borderColor: t.tooltipBorder, borderWidth: 1, padding: 10, cornerRadius: 8,
+        callbacks: { label: (ctx) => `${formatNumber(ctx.parsed.x)} tokens (${ctx.raw} calls)` },
+      },
+    },
+    scales: {
+      x: { beginAtZero: true, grid: { color: t.grid }, border: { display: false }, ticks: { color: t.tick, callback: (v) => formatCompact(v) } },
+      y: { grid: { display: false }, ticks: { color: t.tick } },
+    },
+  };
+});
+
+const hasSplit = computed(() => (Number(totals.value.webui_tokens) || 0) + (Number(totals.value.api_tokens) || 0) > 0);
+</script>
+
 <template>
   <div class="token-consumption-panel">
     <!-- ─── Header / controls ─────────────────────────────────────────── -->
@@ -7,9 +226,14 @@
           <IconPresentationChartBar class="w-5 h-5" />
           <span>Token Consumption Analytics</span>
         </h3>
+        <div class="export-buttons">
+          <button class="btn-export" @click="exportReport('html')" title="Export HTML">HTML</button>
+          <button class="btn-export" @click="exportReport('xlsx')" title="Export Excel">XLSX</button>
+          <button class="btn-export" @click="exportReport('docx')" title="Export Word">DOCX</button>
+          <button class="btn-export" @click="exportReport('pdf')" title="Export PDF">PDF</button>
+        </div>
       </div>
 
-      <!-- Filters: granularity tabs, source scope, time window -->
       <div class="panel-controls">
         <div class="granularity-tabs">
           <button
@@ -49,42 +273,38 @@
       </div>
     </div>
 
-    <!-- ─── Loading / error states ─────────────────────────────────────── -->
+    <!-- ─── Loading / empty states ─────────────────────────────────────── -->
     <div v-if="isLoading" class="state-msg">
       <IconArrowPath class="w-5 h-5 animate-spin" />
       <span>Loading consumption analytics…</span>
-    </div>
-    <div v-else-if="errorMsg" class="state-msg error">
-      <IconError class="w-5 h-5" />
-      <span>{{ errorMsg }}</span>
     </div>
     <div v-else-if="!consolidated" class="state-msg">
       <IconError class="w-5 h-5 opacity-60" />
       <span>No consumption data available yet. Generate some tokens and refresh.</span>
     </div>
 
-    <template v-else-if="consolidated">
+    <template v-else>
       <!-- ─── KPI summary cards ────────────────────────────────────────── -->
       <div class="kpi-grid">
         <div class="kpi-card">
           <div class="kpi-label">Total Tokens</div>
-          <div class="kpi-value">{{ formatNumber(totals.total_tokens) }}</div>
+          <div class="kpi-value">{{ formatCompact(totals.total_tokens) }}</div>
           <div class="kpi-sub">
-            <span class="dot input"></span>{{ formatNumber(totals.input_tokens) }} in ·
-            <span class="dot output"></span>{{ formatNumber(totals.output_tokens) }} out
+            <span class="dot input"></span>{{ formatCompact(totals.input_tokens) }} in ·
+            <span class="dot output"></span>{{ formatCompact(totals.output_tokens) }} out
           </div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">Total Calls</div>
-          <div class="kpi-value">{{ formatNumber(totals.calls) }}</div>
+          <div class="kpi-value">{{ formatCompact(totals.calls) }}</div>
           <div class="kpi-sub">{{ consolidated?.avg_tokens_per_call ?? 0 }} tok / call</div>
         </div>
         <div class="kpi-card">
           <div class="kpi-label">WebUI vs API</div>
           <div class="kpi-value">{{ webuiApiRatio }}</div>
           <div class="kpi-sub">
-            <span class="dot webui"></span>{{ formatNumber(totals.webui_tokens) }} ·
-            <span class="dot api"></span>{{ formatNumber(totals.api_tokens) }}
+            <span class="dot webui"></span>{{ formatCompact(totals.webui_tokens) }} ·
+            <span class="dot api"></span>{{ formatCompact(totals.api_tokens) }}
           </div>
         </div>
         <div class="kpi-card">
@@ -104,400 +324,182 @@
         </div>
       </div>
 
-      <!-- ─── Timeline chart (stacked bars: input vs output) ───────────── -->
+      <!-- ─── Volume over time (stacked input vs output) ───────────────── -->
       <div class="chart-card">
         <div class="chart-header">
-          <h4>
-            Volume over time
-            <span class="chart-subtitle">({{ currentGranularity }} · {{ currentSourceLabel }})</span>
-          </h4>
-          <div class="chart-legend">
-            <span><span class="dot input"></span>Input</span>
-            <span><span class="dot output"></span>Output</span>
-          </div>
+          <h4>Volume over time <span class="chart-subtitle">({{ currentGranularity }} · {{ currentSourceLabel }})</span></h4>
         </div>
         <div class="chart-area">
           <div v-if="!buckets.length" class="chart-empty">No data in this window.</div>
-          <div
-            v-for="(b, idx) in buckets"
-            :key="idx"
-            class="bar-col"
-            :title="`${b.label}\nInput: ${formatNumber(b.input_tokens)}\nOutput: ${formatNumber(b.output_tokens)}\nTotal: ${formatNumber(b.total_tokens)}\nCalls: ${b.calls}`"
-          >
-            <div class="bar-stack">
-              <div class="bar-segment output" :style="{ height: barHeight(b.output_tokens) }"></div>
-              <div class="bar-segment input" :style="{ height: barHeight(b.input_tokens) }"></div>
-            </div>
-            <div class="bar-label">{{ compactLabel(b.label) }}</div>
+          <Bar v-else :data="volumeChartData" :options="volumeChartOptions" />
+        </div>
+      </div>
+
+      <!-- ─── WebUI vs API: over time (stacked) + split (doughnut) ─────── -->
+      <div class="chart-row">
+        <div class="chart-card grow">
+          <div class="chart-header">
+            <h4>WebUI vs API usage over time</h4>
+          </div>
+          <div class="chart-area">
+            <div v-if="!buckets.length" class="chart-empty">No data in this window.</div>
+            <Bar v-else :data="channelChartData" :options="channelChartOptions" />
+          </div>
+        </div>
+        <div class="chart-card split">
+          <div class="chart-header">
+            <h4>Channel share</h4>
+          </div>
+          <div class="chart-area doughnut-area">
+            <div v-if="!hasSplit" class="chart-empty">No WebUI/API split recorded.</div>
+            <Doughnut v-else :data="splitDoughnutData" :options="splitDoughnutOptions" />
           </div>
         </div>
       </div>
 
-      <!-- ─── WebUI vs API chart (grouped bars) ────────────────────────── -->
+      <!-- ─── Top models (horizontal bar + table) ─────────────────────── -->
       <div class="chart-card">
         <div class="chart-header">
-          <h4>WebUI vs API usage</h4>
-          <div class="chart-legend">
-            <span><span class="dot webui"></span>WebUI</span>
-            <span><span class="dot api"></span>API</span>
-          </div>
-        </div>
-        <div class="chart-area">
-          <div v-if="!buckets.length" class="chart-empty">No data in this window.</div>
-          <div
-            v-for="(b, idx) in buckets"
-            :key="idx"
-            class="bar-col"
-            :title="`${b.label}\nWebUI: ${formatNumber(b.webui_tokens)}\nAPI: ${formatNumber(b.api_tokens)}`"
-          >
-            <div class="bar-stack side-by-side">
-              <div class="bar-segment webui" :style="{ height: barHeight(b.webui_tokens, 'webuiApi') }"></div>
-              <div class="bar-segment api" :style="{ height: barHeight(b.api_tokens, 'webuiApi') }"></div>
-            </div>
-            <div class="bar-label">{{ compactLabel(b.label) }}</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- ─── Breakdowns: by model & by user ───────────────────────────── -->
-      <div class="breakdown-grid">
-        <div class="table-card">
           <h4>Top Models</h4>
-          <table class="data-table">
-            <thead>
-              <tr><th>Model</th><th class="num">Input</th><th class="num">Output</th><th class="num">Total</th><th class="num">Share</th></tr>
-            </thead>
-            <tbody>
-              <tr v-if="!byModel.length"><td colspan="5" class="empty-cell">No data.</td></tr>
-              <tr v-for="m in byModel" :key="m.model_name">
-                <td class="model-cell" :title="m.model_name">{{ m.model_name }}</td>
-                <td class="num">{{ formatNumber(m.input_tokens) }}</td>
-                <td class="num">{{ formatNumber(m.output_tokens) }}</td>
-                <td class="num strong">{{ formatNumber(m.total_tokens) }}</td>
-                <td class="num"><span class="pct-badge">{{ m.percentage }}%</span></td>
-              </tr>
-            </tbody>
-          </table>
         </div>
-
-        <div class="table-card">
-          <h4>Top Users</h4>
-          <table class="data-table">
+        <div v-if="!topModels.length" class="chart-empty">No model usage recorded.</div>
+        <div v-else class="chart-row">
+          <div class="chart-area grow">
+            <Bar :data="topModelsChartData" :options="topModelsChartOptions" />
+          </div>
+          <table class="mini-table">
             <thead>
-              <tr><th>User</th><th class="num">Input</th><th class="num">Output</th><th class="num">Total</th><th class="num">Share</th></tr>
+              <tr><th>Model</th><th class="num">Tokens</th><th class="num">Share</th></tr>
             </thead>
             <tbody>
-              <tr v-if="!byUser.length"><td colspan="5" class="empty-cell">No data.</td></tr>
-              <tr v-for="u in byUser" :key="u.username">
-                <td class="model-cell" :title="u.username">{{ u.username }}</td>
-                <td class="num">{{ formatNumber(u.input_tokens) }}</td>
-                <td class="num">{{ formatNumber(u.output_tokens) }}</td>
-                <td class="num strong">{{ formatNumber(u.total_tokens) }}</td>
-                <td class="num"><span class="pct-badge">{{ u.percentage }}%</span></td>
+              <tr v-for="m in topModels" :key="m.model_name || m.name">
+                <td class="trunc">{{ m.model_name || m.name || 'unknown' }}</td>
+                <td class="num">{{ formatCompact(m.total_tokens) }}</td>
+                <td class="num">{{ m.percentage }}%</td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- ─── Export actions (bottom bar) ──────────────────────────────── -->
-      <div class="export-footer">
-        <span class="export-footer-label">Export report</span>
-        <div class="export-actions">
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('html')" title="Export as HTML">
-            <IconDocumentText class="w-4 h-4" /><span>HTML</span>
-          </button>
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('pdf')" title="Export as PDF">
-            <IconFileText class="w-4 h-4" /><span>PDF</span>
-          </button>
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('docx')" title="Export as Word Document">
-            <IconDocumentText class="w-4 h-4" /><span>DOCX</span>
-          </button>
-          <button class="btn-export" :disabled="!consolidated" @click="doExport('xlsx')" title="Export as Excel Workbook">
-            <IconTable class="w-4 h-4" /><span>XLSX</span>
-          </button>
+      <!-- ─── Top users table ─────────────────────────────────────────── -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <h4>Top Users</h4>
         </div>
+        <div v-if="!topUsers.length" class="chart-empty">No user usage recorded.</div>
+        <table v-else class="mini-table wide">
+          <thead>
+            <tr><th>User</th><th class="num">Input</th><th class="num">Output</th><th class="num">Total</th><th class="num">Share</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="u in topUsers" :key="u.username || u.name">
+              <td class="trunc">{{ u.username || u.name || 'anonymous' }}</td>
+              <td class="num">{{ formatCompact(u.input_tokens) }}</td>
+              <td class="num">{{ formatCompact(u.output_tokens) }}</td>
+              <td class="num strong">{{ formatCompact(u.total_tokens) }}</td>
+              <td class="num">{{ u.percentage }}%</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </template>
   </div>
 </template>
 
-<script setup>
-import { ref, computed, onMounted } from 'vue';
-import { useAdminStore } from '../../stores/admin';
-import { useUiStore } from '../../stores/ui';
-
-import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
-import IconDocumentText from '../../assets/icons/IconDocumentText.vue';
-import IconFileText from '../../assets/icons/IconFileText.vue';
-import IconTable from '../../assets/icons/IconTable.vue';
-import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
-import IconError from '../../assets/icons/IconError.vue';
-
-const adminStore = useAdminStore();
-const uiStore = useUiStore();
-
-const granularities = [
-  { value: 'hour', label: 'Hourly' },
-  { value: 'day', label: 'Daily' },
-  { value: 'week', label: 'Weekly' },
-  { value: 'month', label: 'Monthly' },
-];
-
-const errorMsg = ref('');
-
-// Only treat a payload that actually carries a `totals` block as rendered
-// data. This prevents the panel from showing an entirely blank/unstyled shell
-// on a validation error (which returns a bare FastAPI error object, not our
-// ConsumptionAnalyticsResponse), and correctly falls back to the empty-state
-// message instead of silently rendering zeros as if there were no data.
-const consolidated = computed(() => {
-  const data = adminStore.consumptionAnalytics;
-  return data && data.totals ? data : null;
-});
-
-// Defensive totals: the backend may return a partial/error-shaped payload
-// (e.g. an auth or validation error body without `totals`). Never assume the
-// shape is complete, or the whole render crashes on `totals.total_tokens`.
-const totals = computed(() => consolidated.value?.totals || {
-  input_tokens: 0, output_tokens: 0, total_tokens: 0, calls: 0,
-  webui_input_tokens: 0, webui_output_tokens: 0, webui_tokens: 0, webui_calls: 0,
-  api_input_tokens: 0, api_output_tokens: 0, api_tokens: 0, api_calls: 0,
-  energy_kwh: 0, co2_g: 0,
-});
-const buckets = computed(() => consolidated.value?.buckets || []);
-// The backend serializes ``by_model``/``by_user`` as typed
-// ``ConsumptionBreakdownItem`` objects carrying both the generic ``name``
-// field and the semantic ``model_name``/``username`` aliases. Normalize here
-// so the template can consume either shape without breaking.
-const byModel = computed(() =>
-  (consolidated.value?.by_model || []).map((m) => ({
-    model_name: m.model_name || m.name || '—',
-    input_tokens: m.input_tokens || 0,
-    output_tokens: m.output_tokens || 0,
-    total_tokens: m.total_tokens || 0,
-    calls: m.calls || 0,
-    percentage: typeof m.percentage === 'number' ? m.percentage : 0,
-  }))
-);
-const byUser = computed(() =>
-  (consolidated.value?.by_user || []).map((u) => ({
-    username: u.username || u.name || '—',
-    input_tokens: u.input_tokens || 0,
-    output_tokens: u.output_tokens || 0,
-    total_tokens: u.total_tokens || 0,
-    calls: u.calls || 0,
-    percentage: typeof u.percentage === 'number' ? u.percentage : 0,
-  }))
-);
-const isLoading = computed(() => adminStore.isLoadingConsumptionAnalytics);
-
-const currentGranularity = computed(() => adminStore.consumptionParams.granularity);
-const currentSource = computed(() => adminStore.consumptionParams.source);
-const currentDays = computed(() => adminStore.consumptionParams.days);
-
-const currentSourceLabel = computed(() => {
-  switch (currentSource.value) {
-    case 'webui': return 'WebUI chat';
-    case 'api': return 'API';
-    default: return 'All sources';
-  }
-});
-
-const webuiApiRatio = computed(() => {
-  const t = totals.value;
-  if (!t || !t.total_tokens) return '—';
-  return `${Math.round((t.webui_tokens / t.total_tokens) * 100)}% / ${Math.round((t.api_tokens / t.total_tokens) * 100)}%`;
-});
-
-// Compute a max value across buckets for the timeline (input vs output chart).
-const maxTimeline = computed(() => {
-  const buckets = consolidated.value?.buckets || [];
-  return buckets.reduce((mx, b) => Math.max(mx, b.input_tokens || 0, b.output_tokens || 0), 0) || 1;
-});
-
-// Compute a max value across buckets for the webui/api chart.
-const maxWebuiApi = computed(() => {
-  const buckets = consolidated.value?.buckets || [];
-  return buckets.reduce((mx, b) => Math.max(mx, b.webui_tokens || 0, b.api_tokens || 0), 0) || 1;
-});
-
-function barHeight(value, mode = 'timeline') {
-  const max = mode === 'webuiApi' ? maxWebuiApi.value : maxTimeline.value;
-  const pct = Math.min(100, Math.round(((value || 0) / max) * 100));
-  return `${pct}%`;
-}
-
-function compactLabel(label) {
-  if (!label) return '';
-  return label.length > 10 ? label.slice(0, 10) + '…' : label;
-}
-
-function formatNumber(n) {
-  if (n === null || n === undefined) return '0';
-  return Number(n).toLocaleString();
-}
-
-async function refresh() {
-  errorMsg.value = '';
-  const result = await adminStore.fetchConsumptionAnalytics();
-  if (!result) errorMsg.value = 'Failed to load consumption analytics.';
-}
-
-function changeGranularity(g) {
-  if (g === currentGranularity.value) return;
-  adminStore.fetchConsumptionAnalytics({ granularity: g });
-}
-
-function changeSource(src) {
-  if (src === currentSource.value) return;
-  adminStore.fetchConsumptionAnalytics({ source: src });
-}
-
-function changeDays(d) {
-  if (d === currentDays.value) return;
-  adminStore.fetchConsumptionAnalytics({ days: d });
-}
-
-async function doExport(format) {
-  try {
-    await adminStore.exportConsumptionAnalytics(format);
-    uiStore.addNotification(`Export (${format.toUpperCase()}) downloaded.`, 'success');
-  } catch (e) {
-    console.error('Export failed:', e);
-    uiStore.addNotification(`Export failed: ${e.message || e}`, 'error');
-  }
-}
-
-onMounted(() => {
-  // Only fetch if we have nothing yet, so panel switching stays snappy.
-  if (!consolidated.value) refresh();
-});
-</script>
-
 <style scoped>
-.token-consumption-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  padding: 0;
-  color: var(--text-color, #1f2937);
-}
+.token-consumption-panel { display: flex; flex-direction: column; gap: 16px; }
 
-/* Header */
-.panel-header { display: flex; flex-direction: column; gap: 0.75rem; }
-.panel-title-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; }
-.panel-title { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-size: 1.15rem; font-weight: 700; }
-
-.export-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-.export-footer {
-  display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem;
-  padding: 0.85rem 1rem; border-radius: 0.75rem;
-  background: var(--bg-elev, #fff); border: 1px solid var(--border-color, #e5e7eb);
+.panel-header {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 16px 20px;
+  background: var(--bg-secondary, #fff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
 }
-.export-footer-label {
-  font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
-  color: var(--text-muted, #6b7280);
-}
+.panel-title-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
+.panel-title { display: flex; align-items: center; gap: 8px; font-size: 1rem; font-weight: 700; margin: 0; color: var(--text-primary, #1e293b); }
+.export-buttons { display: flex; gap: 6px; }
 .btn-export {
-  display: inline-flex; align-items: center; gap: 0.35rem;
-  padding: 0.35rem 0.7rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 600;
-  border: 1px solid var(--border-color, #d1d5db);
-  background: var(--bg-elev, #fff); color: var(--text-color, #1f2937);
-  cursor: pointer; transition: all 0.15s ease;
+  padding: 5px 10px; border-radius: 7px; font-size: 0.72rem; font-weight: 700;
+  border: 1px solid var(--border-color, #e2e8f0); background: var(--bg-primary, #fff);
+  color: var(--text-secondary, #475569); cursor: pointer;
 }
-.btn-export:hover:not(:disabled) { background: var(--accent, #3b82f6); color: #fff; border-color: var(--accent, #3b82f6); }
-.btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-export:hover { background: var(--bg-hover, #f1f5f9); }
 
-/* Controls */
-.panel-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.granularity-tabs {
-  display: inline-flex; padding: 0.2rem; border-radius: 0.6rem;
-  background: var(--bg-sunken, #f3f4f6); gap: 0.2rem;
-}
+.panel-controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.granularity-tabs { display: inline-flex; gap: 3px; padding: 3px; background: var(--bg-hover, #f1f5f9); border-radius: 9px; }
 .gran-tab {
-  padding: 0.35rem 0.85rem; border-radius: 0.45rem; border: none;
-  background: transparent; color: var(--text-muted, #6b7280);
-  font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.15s ease;
+  border: none; background: transparent; cursor: pointer;
+  font-size: 0.74rem; font-weight: 700; padding: 5px 12px; border-radius: 7px;
+  color: var(--text-secondary, #64748b); transition: all 0.15s ease;
 }
-.gran-tab.active { background: var(--bg-elev, #fff); color: var(--accent, #3b82f6); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-
-.control-group { display: flex; align-items: center; gap: 0.4rem; }
-.control-label { font-size: 0.78rem; font-weight: 600; color: var(--text-muted, #6b7280); }
+.gran-tab.active { background: var(--bg-secondary, #fff); color: #10B981; box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+.control-group { display: flex; flex-direction: column; gap: 3px; }
+.control-label { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; color: var(--text-secondary, #94a3b8); }
 .panel-select {
-  padding: 0.35rem 0.6rem; border-radius: 0.5rem; font-size: 0.82rem;
-  border: 1px solid var(--border-color, #d1d5db);
-  background: var(--bg-elev, #fff); color: var(--text-color, #1f2937);
+  padding: 6px 10px; border-radius: 7px; font-size: 0.8rem;
+  border: 1px solid var(--border-color, #e2e8f0); background: var(--bg-primary, #fff); color: var(--text-primary, #334155);
 }
 .btn-refresh {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 2rem; height: 2rem; border-radius: 0.5rem;
-  border: 1px solid var(--border-color, #d1d5db);
-  background: var(--bg-elev, #fff); cursor: pointer;
+  width: 34px; height: 34px; border-radius: 8px;
+  border: 1px solid var(--border-color, #e2e8f0); background: transparent;
+  color: var(--text-secondary, #64748b); cursor: pointer;
 }
+.btn-refresh:hover { background: var(--bg-hover, #f1f5f9); }
 
-/* State */
-.state-msg { display: flex; align-items: center; gap: 0.5rem; padding: 2rem; justify-content: center; color: var(--text-muted, #6b7280); }
-.state-msg.error { color: #dc2626; }
+.state-msg {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 40px 20px; color: var(--text-secondary, #64748b); font-size: 0.9rem;
+}
+.state-msg.error { color: #e11d48; }
 
-/* KPI cards */
-.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; }
+/* KPI grid */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
 .kpi-card {
-  padding: 0.85rem 1rem; border-radius: 0.75rem;
-  background: var(--bg-elev, #fff); border: 1px solid var(--border-color, #e5e7eb);
+  padding: 16px 18px; border-radius: 12px;
+  background: var(--bg-secondary, #fff); border: 1px solid var(--border-color, #e2e8f0);
 }
-.kpi-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted, #6b7280); font-weight: 700; }
-.kpi-value { font-size: 1.5rem; font-weight: 800; margin-top: 0.25rem; }
+.kpi-label { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary, #94a3b8); }
+.kpi-value { font-size: 1.5rem; font-weight: 800; margin-top: 4px; color: var(--text-primary, #1e293b); line-height: 1.1; }
 .kpi-value.small { font-size: 1rem; }
-.kpi-sub { font-size: 0.78rem; color: var(--text-muted, #6b7280); margin-top: 0.25rem; display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap; }
+.kpi-sub { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 6px; font-size: 0.72rem; color: var(--text-secondary, #64748b); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.input { background: #0EA5E9; }
+.dot.output { background: #F43F5E; }
+.dot.webui { background: #3B82F6; }
+.dot.api { background: #8B5CF6; }
 
-/* Dots */
-.dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; }
-.dot.input { background: #3b82f6; }
-.dot.output { background: #10b981; }
-.dot.webui { background: #8b5cf6; }
-.dot.api { background: #f59e0b; }
-
-/* Charts */
+/* Chart cards */
 .chart-card {
-  padding: 1rem; border-radius: 0.75rem;
-  background: var(--bg-elev, #fff); border: 1px solid var(--border-color, #e5e7eb);
+  padding: 16px 18px; border-radius: 12px;
+  background: var(--bg-secondary, #fff); border: 1px solid var(--border-color, #e2e8f0);
 }
-.chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem; }
-.chart-header h4 { margin: 0; font-size: 0.95rem; font-weight: 700; }
-.chart-subtitle { font-weight: 400; color: var(--text-muted, #6b7280); font-size: 0.8rem; }
-.chart-legend { display: flex; gap: 1rem; font-size: 0.78rem; color: var(--text-muted, #6b7280); }
-.chart-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.chart-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.chart-header h4 { margin: 0; font-size: 0.9rem; font-weight: 700; color: var(--text-primary, #1e293b); }
+.chart-subtitle { font-size: 0.74rem; font-weight: 500; color: var(--text-secondary, #94a3b8); }
+.chart-area { height: 300px; position: relative; }
+.doughnut-area { height: 240px; }
+.chart-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary, #94a3b8); font-size: 0.85rem; }
 
-.chart-area {
-  display: flex; align-items: flex-end; gap: 3px;
-  height: 180px; overflow-x: auto; padding-top: 0.5rem;
+.chart-row { display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap; }
+.chart-row .grow { flex: 1 1 360px; min-width: 0; }
+.chart-card.split { flex: 0 0 300px; }
+@media (max-width: 760px) {
+  .chart-card.split { flex: 1 1 100%; }
 }
-.bar-col { display: flex; flex-direction: column; align-items: center; min-width: 29px; flex: 1 0 auto; height: 100%; justify-content: flex-end; }
-.bar-stack { display: flex; flex-direction: column; justify-content: flex-end; width: 70%; height: 100%; }
-.bar-stack.side-by-side { flex-direction: row; align-items: flex-end; gap: 2px; width: 100%; }
-.bar-segment { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.25s ease; min-height: 1px; }
-.bar-segment.input { background: #3b82f6; }
-.bar-segment.output { background: #10b981; }
-.bar-segment.webui { background: #8b5cf6; }
-.bar-segment.api { background: #f59e0b; }
-.bar-label { font-size: 0.62rem; color: var(--text-muted, #9ca3af); margin-top: 0.25rem; white-space: nowrap; transform: rotate(-35deg); transform-origin: center; height: 1.5rem; }
-.chart-empty { margin: auto; color: var(--text-muted, #9ca3af); font-size: 0.85rem; }
 
-/* Breakdown tables */
-.breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
-@media (max-width: 900px) { .breakdown-grid { grid-template-columns: 1fr; } }
-.table-card { padding: 1rem; border-radius: 0.75rem; background: var(--bg-elev, #fff); border: 1px solid var(--border-color, #e5e7eb); }
-.table-card h4 { margin: 0 0 0.6rem; font-size: 0.95rem; font-weight: 700; }
-.data-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-.data-table th, .data-table td { padding: 0.4rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border-color, #f3f4f6); }
-.data-table th { font-weight: 700; color: var(--text-muted, #6b7280); font-size: 0.72rem; text-transform: uppercase; }
-.data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-.data-table .strong { font-weight: 700; }
-.model-cell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pct-badge {
-  display: inline-block; padding: 0.1rem 0.45rem; border-radius: 0.75rem;
-  background: var(--bg-sunken, #f3f4f6); font-size: 0.72rem; font-weight: 700;
+/* Mini tables */
+.mini-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; align-self: flex-start; }
+.mini-table.wide { margin-top: 4px; }
+.mini-table th {
+  text-align: left; padding: 8px 10px; font-size: 0.66rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-secondary, #94a3b8);
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
 }
-.empty-cell { text-align: center; color: var(--text-muted, #9ca3af); padding: 1rem; }
+.mini-table td { padding: 7px 10px; border-bottom: 1px solid var(--border-color, #f1f5f9); color: var(--text-primary, #334155); }
+.mini-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.mini-table .strong { font-weight: 700; }
+.mini-table .trunc { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

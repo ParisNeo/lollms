@@ -253,7 +253,73 @@ const editorForm = reactive({
     profile: {},
 });
 
+// When editing, track the profile's original dict key so a model re-point can
+// be saved as a proper rename (backend deletes the old key only on a genuine
+// key change). ``editorModelRenamed`` drives the saveEditor branch.
+const editorOriginalKey = ref('');
+// Track the profile's original binding so a binding change in the editor can be
+// saved as a true MOVE (write to the new binding, then delete from the old one).
+const editorOriginalBindingId = ref(null);
+const editorOriginalBindingAlias = ref('');
+const isEditorMoved = computed(
+    () =>
+        !isNewProfile.value &&
+        editorOriginalBindingId.value !== null &&
+        editorForm.bindingId !== editorOriginalBindingId.value
+);
+const editorModelRenamed = computed(
+    () => !isNewProfile.value && editorForm.originalModelName !== editorOriginalKey.value
+);
+
 const editorFields = computed(() => cfg.value?.aliasFields || []);
+
+// All bindings the editor can attach the profile to. Even when the grid is
+// scoped to one card, we expose every connection of this modality so a profile
+// can be MOVED to another binding — the select drives editorForm.bindingId and
+// saveEditor performs the move.
+const editorBindingOptions = computed(() => {
+    const list = allConnections.value.length ? allConnections.value : (props.binding ? [props.binding] : []);
+    if (props.binding && !list.some((b) => b.id === props.binding.id)) {
+        return [props.binding, ...list];
+    }
+    return list;
+});
+
+// ── Available engine models for the selected binding (drives the model picker) ─
+// The editor must let the admin SELECT a model from the binding's own served
+// list rather than free-typing a name. We load the models whenever the editor
+// is open and the target binding changes, and always union in the row's current
+// model name so an existing profile never disappears from its own dropdown.
+const editorAvailableModels = ref([]);
+const isLoadingEditorModels = ref(false);
+
+const editorModelOptions = computed(() => {
+    const names = new Set(editorAvailableModels.value.map((m) => m?.original_model_name || m?.name || m).filter(Boolean));
+    // Include detected-but-unaliased models too, so a fresh model can be chosen.
+    for (const row of detectedRows.value) {
+        if (row.connectionId === editorForm.bindingId && row.name) names.add(row.name);
+    }
+    // Always keep the currently-edited model selectable.
+    if (editorForm.originalModelName) names.add(editorForm.originalModelName);
+    return Array.from(names).sort((a, b) => String(a).localeCompare(String(b)));
+});
+
+async function loadEditorModels() {
+    const fetchFn = resolveBindingAction(adminStore, props.bindingType, 'fetchModels');
+    if (!fetchFn || !editorForm.bindingId) {
+        editorAvailableModels.value = [];
+        return;
+    }
+    isLoadingEditorModels.value = true;
+    try {
+        const models = await fetchFn(editorForm.bindingId);
+        editorAvailableModels.value = Array.isArray(models) ? models : [];
+    } catch {
+        editorAvailableModels.value = [];
+    } finally {
+        isLoadingEditorModels.value = false;
+    }
+}
 
 // ── Multi-select state ───────────────────────────────────────────────────────
 const selectedKeys = ref(new Set());
@@ -414,7 +480,11 @@ function openCreate() {
         : (connections.value[0]?.alias ?? '');
     editorForm.originalModelName = '';
     editorForm.profile = {};
+    editorOriginalKey.value = '';
+    editorOriginalBindingId.value = null;
+    editorOriginalBindingAlias.value = '';
     isEditorOpen.value = true;
+    loadEditorModels();
 }
 
 function openEdit(row) {
@@ -424,8 +494,29 @@ function openEdit(row) {
     editorForm.bindingAlias = row.bindingAlias;
     editorForm.originalModelName = row.originalModelName;
     editorForm.profile = JSON.parse(JSON.stringify(row.alias || {}));
+    editorOriginalKey.value = row.originalModelName;
+    editorOriginalBindingId.value = row.bindingId;
+    editorOriginalBindingAlias.value = row.bindingAlias;
     isEditorOpen.value = true;
+    loadEditorModels();
 }
+
+// Reload the engine-model list whenever the target binding changes while the
+// editor is open (e.g. the admin switches which binding to attach the profile to).
+watch(
+    () => editorForm.bindingId,
+    (val, oldVal) => {
+        if (!isEditorOpen.value || !val || val === oldVal) return;
+        // Keep the alias label in sync with the newly chosen binding.
+        const target = connections.value.find((b) => b.id === val) || (props.binding?.id === val ? props.binding : null);
+        if (target?.alias) editorForm.bindingAlias = target.alias;
+        // The new binding may serve different models — reload the picker and, if
+        // the previous model isn't served there, clear it so the admin re-selects.
+        editorAvailableModels.value = [];
+        editorForm.originalModelName = '';
+        loadEditorModels();
+    }
+);
 
 function closeEditor() {
     isEditorOpen.value = false;
@@ -438,7 +529,10 @@ async function saveEditor() {
         editorError.value = 'Saving profiles is not supported for this modality.';
         return;
     }
-    const binding = connections.value.find((b) => b.id === editorForm.bindingId) || props.binding;
+    const binding =
+        editorBindingOptions.value.find((b) => b.id === editorForm.bindingId) ||
+        connections.value.find((b) => b.id === editorForm.bindingId) ||
+        (props.binding?.id === editorForm.bindingId ? props.binding : null);
     if (!binding?.id) {
         editorError.value = 'A target binding must be selected.';
         return;
@@ -450,7 +544,10 @@ async function saveEditor() {
     }
 
     const alias = JSON.parse(JSON.stringify(editorForm.profile || {}));
-    alias.model_name = alias.model_name || originalModelName;
+    // The selected "Model" field is the authoritative target identity for both
+    // create and edit. It also drives ``model_name`` so the stored dict key and
+    // embedded model_name always agree (required by backend + consumers).
+    alias.model_name = originalModelName;
     if (isLlm.value) {
         if (alias.has_vision !== undefined) {
             alias.vision_enabled = Boolean(alias.has_vision);
@@ -459,15 +556,45 @@ async function saveEditor() {
         }
     }
 
+    // On EDIT, when the model was changed, ``originalModelName`` is the NEW
+    // identity while the row's OLD key must be deleted. Send the old key as
+    // ``original_model_name`` and the selection as ``new_model_name`` so the
+    // backend performs a genuine rename (write new, delete old). When nothing
+    // was renamed, both are the same key (a plain in-place update).
+    const sourceKey = isNewProfile.value ? originalModelName : (editorOriginalKey.value || originalModelName);
+
+    const deleteFn = adminStore[actions.value.deleteAlias];
+    const moved = isEditorMoved.value && editorOriginalBindingId.value !== null;
+
     isSaving.value = true;
     editorError.value = '';
     try {
+        // For a move the profile lands on the NEW binding under the chosen model
+        // key. On the new binding there is no prior key to rename, so we save it
+        // as a fresh entry (sourceKey === target model name).
         await saveFn.call(adminStore, binding.id, {
-            original_model_name: originalModelName,
-            new_model_name: alias.model_name,
+            original_model_name: moved ? originalModelName : sourceKey,
+            new_model_name: originalModelName,
             alias,
         });
-        uiStore.addNotification(`Profile saved for '${alias.title || originalModelName}'.`, 'success');
+
+        // True move: remove the stale profile from its original binding. Use the
+        // ORIGINAL model key there (editorOriginalKey) — that binding never knew
+        // about the new key.
+        if (moved && typeof deleteFn === 'function') {
+            try {
+                await deleteFn.call(adminStore, editorOriginalBindingId.value, editorOriginalKey.value);
+            } catch (delErr) {
+                // The new copy exists; a failed cleanup must not lose the save.
+                uiStore.addNotification(
+                    `Profile copied to '${editorForm.bindingAlias}' but could not be removed from '${editorOriginalBindingAlias.value}'. Please delete it manually.`,
+                    'warning'
+                );
+            }
+        }
+
+        const verb = moved ? 'moved' : 'saved';
+        uiStore.addNotification(`Profile ${verb} for '${alias.title || originalModelName}'.`, 'success');
         closeEditor();
         await loadAllProfiles();
     } catch (e) {
@@ -965,23 +1092,45 @@ watch(
                             <select
                                 v-model="editorForm.bindingId"
                                 class="input-field text-xs"
-                                :disabled="isScopedToBinding"
                             >
-                                <option v-for="b in (isScopedToBinding ? [props.binding] : connections)" :key="b.id" :value="b.id">
+                                <option v-for="b in editorBindingOptions" :key="b.id" :value="b.id">
                                     {{ b.alias }} ({{ b.name }})
                                 </option>
                             </select>
+                            <p v-if="isEditorMoved" class="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                                Saving will move this profile from <strong>{{ editorOriginalBindingAlias }}</strong>
+                                to <strong>{{ editorForm.bindingAlias }}</strong>.
+                            </p>
                         </div>
 
                         <div>
-                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Original Model Name</label>
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Model</label>
+                            <!-- Selectable list of the binding's own served models. Fall back
+                                 to a free-text input only while the list is still loading or
+                                 when the engine exposes no models, so the admin is never stuck. -->
+                            <div v-if="isLoadingEditorModels" class="flex items-center gap-2 text-xs text-gray-500 py-2">
+                                <IconAnimateSpin class="w-3.5 h-3.5 animate-spin" />
+                                <span>Loading models…</span>
+                            </div>
+                            <select
+                                v-else-if="editorModelOptions.length > 0"
+                                v-model="editorForm.originalModelName"
+                                class="input-field text-xs font-mono"
+                            >
+                                <option value="" disabled>Select a model…</option>
+                                <option v-for="name in editorModelOptions" :key="name" :value="name">{{ name }}</option>
+                            </select>
                             <input
+                                v-else
                                 v-model="editorForm.originalModelName"
                                 type="text"
                                 class="input-field text-xs font-mono"
-                                :disabled="!isNewProfile"
                                 placeholder="e.g. gpt-4o"
                             />
+                            <p v-if="!isNewProfile" class="text-[10px] text-gray-400 mt-1">
+                                Change the model to re-point this profile to a different engine model
+                                (the profile's title, description and settings are kept).
+                            </p>
                         </div>
 
                         <div>

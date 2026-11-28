@@ -98,6 +98,3 @@ with open(path, "w", encoding="utf-8") as f:
     f.write(src)
 
 print("OK: store repaired. New length:", len(src.splitlines()))
-</｜DSML｜ parameter>
-</｜DSML｜ invoke>
-</｜DSML｜ calls>

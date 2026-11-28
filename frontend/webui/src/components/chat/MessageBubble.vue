@@ -1,6 +1,6 @@
 <!-- [UPDATE] frontend/webui/src/components/chat/MessageBubble.vue -->
 <script setup>
-import { computed, ref, onMounted, watch, markRaw, nextTick } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, markRaw, nextTick } from 'vue';
 import { marked } from 'marked';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
@@ -11,6 +11,7 @@ import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import StepDetail from './StepDetail.vue';
+import WaitingIndicator from './WaitingIndicator.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
@@ -37,6 +38,7 @@ import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
+import IconDocumentText from '../../assets/icons/IconDocumentText.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
@@ -45,6 +47,7 @@ import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 import IconMagnifyingGlass from '../../assets/icons/IconMagnifyingGlass.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../assets/icons/IconCircle.vue';
+import IconClock from '../../assets/icons/IconClock.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue'; 
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import IconGather from '../../assets/icons/IconGather.vue';
@@ -70,25 +73,376 @@ const isComplexContent = (event) => {
     return false;
 };
 
-// Wraps raw code in markdown blocks if it isn't already, so the renderer highlights it
-const formatTimelineContent = (content) => {
-    const str = String(content || '').trim();
-    if ((str.startsWith('<') || str.startsWith('{')) && !str.startsWith('```')) {
-        return `\`\`\`\n${str}\n\`\`\``;
-    }
-    return str;
+// ── Execution-timeline helpers ───────────────────────────────────────────
+// Drop purely decorative separator/punctuation lines ("----", "====", "…").
+const isNoiseLine = (content) => {
+    const s = String(content ?? '').trim();
+    if (!s) return true;
+    return /^[-=_*~.#\s]+$/.test(s) || /^[\u2500-\u257F\s]+$/.test(s);
 };
+
+// Tokens that indicate a line is the *actual* failure message inside a noisy
+// multi-line payload (traceback, pip output, subprocess stderr, ...).
+const ERROR_HINT_PATTERN = /\b(error|exception|traceback|failed|failure|fatal|critical|cannot|can't|unable|refused|denied|not found|invalid|timed out|timeout|terminated with error|exit code|nonzero|errno|raise\b)/i;
+
+// Keys (in priority order) that carry the human-meaningful failure text when an
+// event payload is a JSON object/envelope.
+const ERROR_KEYS = ['error', 'message', 'detail', 'reason', 'stderr', 'traceback', 'exception', 'output', 'result'];
+
+// Keys that carry a tool/event label.
+const NAME_KEYS = ['tool_name', 'toolName', 'tool', 'name', 'label', 'operation', 'action'];
+
+// Keys that carry tool arguments.
+const ARGS_KEYS = ['arguments', 'args', 'parameters', 'params', 'input', 'kwargs'];
+
+// Keys that carry the successful result body.
+const RESULT_KEYS = ['result', 'output', 'response', 'data', 'return', 'value', 'content'];
+
+// Keys that carry timing information.
+const TIMING_KEYS = ['timing', 'duration', 'duration_ms', 'latency', 'elapsed', 'elapsed_ms', 'time', 'took', 'took_ms'];
+
+// Pretty-print any value for display: objects become indented JSON, strings
+// pass through, and null/undefined become empty strings.
+const prettyValue = (value) => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'string') return value;
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return String(value);
+    }
+};
+
+// Does the multi-line text contain at least one line that looks like a real
+// error? Used both for status detection and to pick the right line to surface.
+const findMeaningfulErrorLine = (text) => {
+    const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return '';
+    // Prefer the last line that looks like an error (tracebacks put the most
+    // specific message last), ignoring pure separator noise.
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (isNoiseLine(lines[i])) continue;
+        if (ERROR_HINT_PATTERN.test(lines[i])) return lines[i];
+    }
+    // Fall back to the last non-noise line.
+    for (let i = lines.length - 1; i >= 0; i--) {
+        if (!isNoiseLine(lines[i])) return lines[i];
+    }
+    return '';
+};
+
+// Recursively probe an object/array for the most specific error text. Handles
+// nested envelopes like { error: { message: '...' } } or { detail: {...} }.
+const probeErrorFromObject = (obj, depth = 0) => {
+    if (!obj || typeof obj !== 'object' || depth > 4) return null;
+    for (const key of ERROR_KEYS) {
+        const v = obj[key];
+        if (typeof v === 'string' && v.trim()) {
+            const line = findMeaningfulErrorLine(v) || v.trim();
+            return line;
+        }
+        if (v && typeof v === 'object') {
+            const nested = probeErrorFromObject(v, depth + 1);
+            if (nested) return nested;
+        }
+    }
+    return null;
+};
+
+// Pull a value by trying a list of candidate keys on an object.
+const pickField = (obj, keys) => {
+    if (!obj || typeof obj !== 'object') return undefined;
+    for (const key of keys) {
+        if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') return obj[key];
+    }
+    return undefined;
+};
+
+
+// Visual identity per event type: human label, icon and colour tone.
+const EVENT_TYPE_META = {
+    thought:          { label: 'Thinking',          icon: IconThinking,          tone: 'thought' },
+    tool_call:        { label: 'Tool call',         icon: IconWrenchScrewdriver, tone: 'tool' },
+    tool_output:      { label: 'Tool output',       icon: IconCheckCircle,       tone: 'tool' },
+    observation:      { label: 'Observation',       icon: IconObservation,       tone: 'info' },
+    scratchpad:       { label: 'Scratchpad',        icon: IconScratchpad,        tone: 'info' },
+    code_exec:        { label: 'Code execution',    icon: IconCode,              tone: 'tool' },
+    search:           { label: 'Search',            icon: IconMagnifyingGlass,   tone: 'info' },
+    step_start:       { label: 'Step started',      icon: IconCog,               tone: 'step' },
+    step_end:         { label: 'Step finished',     icon: IconStepEnd,           tone: 'step' },
+    artefact_create:  { label: 'Building artefact', icon: IconCode,              tone: 'artefact' },
+    artefact_update:  { label: 'Updating artefact', icon: IconCode,              tone: 'artefact' },
+    info:             { label: 'Info',              icon: IconInfo,              tone: 'info' },
+    warning:          { label: 'Warning',           icon: IconInfo,              tone: 'warning' },
+    error:            { label: 'Error',             icon: IconError,             tone: 'error' },
+    exception:        { label: 'Exception',         icon: IconError,             tone: 'error' },
+};
+const DEFAULT_EVENT_META = { label: 'Event', icon: IconEventDefault, tone: 'info' };
+
+const eventMeta = (event) => {
+    const type = String(event?.type || '').toLowerCase();
+    if (EVENT_TYPE_META[type]) return EVENT_TYPE_META[type];
+    if (type.startsWith('artefact')) return EVENT_TYPE_META.artefact_create;
+    if (type.startsWith('tool')) return EVENT_TYPE_META.tool_output;
+    if (type.includes('error') || type.includes('exception') || type.includes('fail')) return EVENT_TYPE_META.error;
+    if (type.includes('warning')) return EVENT_TYPE_META.warning;
+    return DEFAULT_EVENT_META;
+};
+
+// ── Artefact operation identity ──────────────────────────────────────────
+// Artefact writes come in two very different flavours and must NEVER look the
+// same in the timeline:
+//   * FULL REWRITE  — the whole file is (re)generated from scratch. Risky,
+//     wholesale replacement. Distinct icon (document), violet tone, "REWRITE"
+//     badge.
+//   * PATCH / EDIT  — only a targeted portion is modified (search/replace,
+//     surgical edit). Amber tone, wrench icon, "PATCH" badge.
+// Detection is best-effort across the many shapes the backend / LLM tool
+// emits: an explicit ``operation`` field, a nested envelope, or an
+// "operation: full_rewrite" fragment embedded in the textual content.
+const ARTEFACT_OPERATION_META = {
+    rewrite: {
+        kind: 'rewrite',
+        label: 'Full rewrite',
+        badge: 'REWRITE',
+        icon: IconDocumentText,
+        tone: 'artefact-rewrite',
+    },
+    patch: {
+        kind: 'patch',
+        label: 'Patch',
+        badge: 'PATCH',
+        icon: IconWrenchScrewdriver,
+        tone: 'artefact-patch',
+    },
+};
+
+// Normalise a raw operation token ("full_rewrite", "apply_patch", "patch",
+// "rewrite", "overwrite", "edit", ...) into 'rewrite' | 'patch' | ''.
+const classifyOperation = (raw) => {
+    const token = String(raw ?? '').toLowerCase().trim();
+    if (!token) return '';
+    if (/full[_ -]?rewrite|rewrite|overwrite|regenerate|create/.test(token)) return 'rewrite';
+    if (/patch|apply[_ -]?patch|search[_ -]?replace|edit|surgical|diff|modify|update/.test(token)) return 'patch';
+    return '';
+};
+
+// Extract the operation kind for an artefact event from every plausible source:
+// explicit event/envelope fields first, then a textual "operation: X" fragment.
+const deriveArtefactOperation = (event, envelope) => {
+    const explicit =
+        pickField(envelope, ['operation', 'op', 'mode', 'edit_mode']) ??
+        pickField(event, ['operation', 'op', 'mode', 'edit_mode']);
+    let kind = classifyOperation(explicit);
+    if (!kind && envelope && typeof envelope.tool_input === 'object') {
+        kind = classifyOperation(envelope.tool_input?.operation || envelope.tool_input?.mode);
+    }
+    if (!kind) {
+        const blob = typeof event?.content === 'string' ? event.content : prettyValue(event?.content);
+        const m = blob.match(/\b(?:operation|action|mode)\s*[:=]\s*([a-z_ -]+)/i);
+        if (m) kind = classifyOperation(m[1]);
+    }
+    // Fallback: the raw textual blobs that the artefact builder prints.
+    if (!kind) {
+        const blob = (typeof event?.content === 'string' ? event.content : prettyValue(event?.content)).toLowerCase();
+        if (/\bfull[_ -]?rewrite\b|\boverwrit/.test(blob)) kind = 'rewrite';
+        else if (/\bpatch(?:ing|ed)?\b|\bsearch[ _-]?replace\b|\bappl(?:y|ied) patch/.test(blob)) kind = 'patch';
+    }
+    return kind ? ARTEFACT_OPERATION_META[kind] : null;
+};
+
+// Try to JSON-parse an event payload (string or object) into a plain object,
+// returning null when it is not a structured value.
+const parsePayload = (raw) => {
+    if (raw && typeof raw === 'object') return raw;
+    const str = String(raw || '').trim();
+    if (str.startsWith('{') || str.startsWith('[')) {
+        try { return JSON.parse(str); } catch { /* not JSON */ }
+    }
+    return null;
+};
+
+// Does the event represent a failure (status field, tone, or text heuristic)?
+const isFailureEvent = (event) => normalizeEvent(event).status === 'error';
+
+// Extract the real, human-meaningful error message from a string/JSON payload.
+const extractErrorMessage = (raw) => {
+    if (raw == null) return '';
+    const parsed = parsePayload(raw);
+    if (parsed) {
+        const fromObj = probeErrorFromObject(parsed);
+        if (fromObj) return fromObj;
+    }
+    const str = typeof raw === 'string' ? raw : prettyValue(raw);
+    const meaningful = findMeaningfulErrorLine(str);
+    return meaningful || str.trim();
+};
+
+// Short single-line summary used for the collapsed/failure banner.
+const eventSummary = (event) => {
+    const normalized = normalizeEvent(event);
+    if (normalized.summary) return normalized.summary;
+    const str = normalized.error || normalized.result || prettyValue(event?.content);
+    const first = String(str).split('\n').find((l) => l.trim() && !isNoiseLine(l)) || '';
+    return first.length > 200 ? first.slice(0, 200) + '…' : first;
+};
+
+// Core: turn a raw timeline event into a fully-structured, render-ready card.
+// Expected raw shape (all optional):
+//   { type, content, status?, tool_name?, arguments?, result?, error?,
+//     duration?, timestamp?, ... }
+// ``content`` may itself be a JSON envelope carrying any of those fields.
+const normalizeEvent = (event) => {
+    const parsed = parsePayload(event?.content) || {};
+    const envelope = (parsed && typeof parsed === 'object') ? parsed : {};
+
+    // Resolve the base visual identity, then refine it for artefact events so
+    // a full rewrite and a patch never look alike.
+    const baseMeta = eventMeta(event);
+    const eventTypeLower = String(event?.type || '').toLowerCase();
+    const isArtefactEvent =
+        eventTypeLower.startsWith('artefact') || baseMeta.tone === 'artefact';
+    const artefactOp = isArtefactEvent ? deriveArtefactOperation(event, envelope) : null;
+
+    // Operation-aware meta: same shape as eventMeta (label/icon/tone) so every
+    // existing consumer (status tone checks, dot colour, icon, label) keeps
+    // working unchanged. The badge text and operation kind are read from
+    // ``artefactOp`` directly in the template.
+    const meta = artefactOp
+        ? { label: artefactOp.label, icon: artefactOp.icon, tone: artefactOp.tone }
+        : baseMeta;
+
+    // ── Status ────────────────────────────────────────────────────────
+    const rawStatus = String(
+        event?.status || envelope.status || ''
+    ).toLowerCase();
+    const textBlob = typeof event?.content === 'string'
+        ? event.content
+        : prettyValue(event?.content);
+    const textLooksLikeError =
+        /\b(failed|failure|terminated with errors|traceback|exception)\b/i.test(textBlob);
+    const hasErrorField = Boolean(
+        event?.error || envelope.error
+    );
+    let status = 'ok';
+    if (['failed', 'failure', 'error', 'errored', 'cancelled', 'canceled'].includes(rawStatus)) {
+        status = 'error';
+    } else if (meta.tone === 'error') {
+        status = 'error';
+    } else if (meta.tone === 'warning' || rawStatus === 'warning') {
+        status = 'warning';
+    } else if (
+        hasErrorField ||
+        (textLooksLikeError && (event?.error || envelope.error ||
+            findMeaningfulErrorLine(textBlob)))
+    ) {
+        status = 'error';
+    }
+
+    // ── Identity / tool name ─────────────────────────────────────────
+    const toolName =
+        pickField(envelope, NAME_KEYS) ||
+        pickField(event, NAME_KEYS) ||
+        (typeof envelope.operation === 'string' ? envelope.operation : undefined) ||
+        '';
+
+    // ── Arguments ────────────────────────────────────────────────────
+    const argsRaw =
+        pickField(envelope, ARGS_KEYS) ||
+        pickField(event, ARGS_KEYS);
+    const args = argsRaw !== undefined ? prettyValue(argsRaw) : '';
+
+    // ── Result & error ───────────────────────────────────────────────
+    const explicitError =
+        (event?.error !== undefined ? event.error : undefined) ??
+        (envelope.error !== undefined ? envelope.error : undefined);
+    let error = '';
+    if (explicitError !== undefined && explicitError !== null) {
+        const parsedErr = parsePayload(explicitError);
+        error = parsedErr ? (probeErrorFromObject(parsedErr) || prettyValue(parsedErr)) : prettyValue(explicitError);
+    }
+    if (!error && status === 'error') {
+        error = extractErrorMessage(event?.content);
+    }
+
+    let result = '';
+    if (status !== 'error') {
+        const resultRaw =
+            pickField(envelope, RESULT_KEYS) ??
+            pickField(event, RESULT_KEYS);
+        if (resultRaw !== undefined) result = prettyValue(resultRaw);
+        else if (typeof event?.content === 'string') result = event.content;
+        else result = prettyValue(event?.content);
+    }
+
+    // ── Timing ───────────────────────────────────────────────────────
+    let timing = '';
+    const timingRaw =
+        pickField(envelope, TIMING_KEYS) ??
+        pickField(event, TIMING_KEYS) ??
+        event?.timing ?? event?.duration ?? event?.elapsed;
+    if (timingRaw !== undefined && timingRaw !== null && timingRaw !== '') {
+        if (typeof timingRaw === 'number') {
+            timing = timingRaw < 1000 ? `${timingRaw} ms` : `${(timingRaw / 1000).toFixed(2)} s`;
+        } else {
+            timing = String(timingRaw);
+        }
+    } else if (event?.timestamp) {
+        timing = String(event.timestamp);
+    }
+
+    // ── Summary line for the card header ─────────────────────────────
+    let summary = '';
+    if (toolName) {
+        summary = toolName;
+    } else if (status === 'error' && error) {
+        summary = findMeaningfulErrorLine(error) || error;
+    } else if (result) {
+        summary = String(result).split('\n').find((l) => l.trim() && !isNoiseLine(l)) || '';
+    } else if (typeof event?.content === 'string') {
+        summary = event.content.split('\n').find((l) => l.trim() && !isNoiseLine(l)) || '';
+    }
+    if (summary.length > 240) summary = summary.slice(0, 240) + '…';
+
+    return {
+        meta,
+        status,
+        toolName: String(toolName || ''),
+        args,
+        result,
+        error,
+        timing,
+        summary,
+        artefactOp,
+        raw: typeof event?.content === 'string' ? event.content : prettyValue(event?.content),
+    };
+};
+
 
 const uniqueEvents = computed(() => {
     if (!props.message.events?.length) return [];
     const seen = new Set();
-    return props.message.events.filter(event => {
+    const result = [];
+    for (const event of props.message.events) {
+        // Drop decorative-only events, but never drop a real failure even if its
+        // content is terse (e.g. an error event whose payload is just "timeout").
+        const normalized = normalizeEvent(event);
+        const isFailure = normalized.status === 'error' || normalized.status === 'warning';
+        if (!isFailure && isNoiseLine(event.content)) continue;
         const key = `${event.type}-${String(event.content || '').trim()}`;
-        if (seen.has(key)) return false;
+        if (seen.has(key)) continue;
         seen.add(key);
-        return true;
-    });
+        result.push({
+            ...event,
+            norm: normalized,
+            contentLineCount: String(event.content || '').split('\n').length,
+            multilineRaw: normalized.raw.split('\n').length > 1,
+        });
+    }
+    return result;
 });
+
+
 
 const mathPlaceholders = new Map();
 let mathCounter = 0;
@@ -518,6 +872,24 @@ const senderName = computed(() => {
 });
 
 const hasEvents = computed(() => (props.message.events && props.message.events.length > 0) || (props.message.metadata?.events && props.message.metadata.events.length > 0));
+
+const timelineFailureCount = computed(() =>
+    uniqueEvents.value.filter(evt => isFailureEvent(evt)).length
+);
+
+const failureEvents = computed(() =>
+    uniqueEvents.value
+        .filter(evt => isFailureEvent(evt))
+        .map(evt => {
+            const normalized = normalizeEvent(evt);
+            return {
+                label: normalized.toolName || normalized.meta.label,
+                message: normalized.error || normalized.summary || 'Execution failed.',
+            };
+        })
+);
+
+
 const sortedSources = computed(() => {
     let raw = props.message.sources || props.message.metadata?.sources;
     if ((!raw || !raw.length) && Array.isArray(props.message.events)) {
@@ -550,9 +922,172 @@ watch(hasSources, (has) => {
     if (has) isSourcesVisible.value = true;
 }, { immediate: true });
 
+// ── Human-readable activity label for the waiting indicator ─────────────────
+// Instead of exposing technical noise ("ttft: 9729ms"), we tell the user WHAT is
+// happening right now. The label is derived ONLY from data this message already
+// carries (events, content markup, streaming flag), so it needs no cross-store
+// plumbing. Priority order reflects how far the generation has progressed:
+//   1. A concrete running tool/step event.
+//   2. Structural markup currently open in `content` (artefact/processing/etc).
+//   3. The model is
+// ── Human-readable activity label for the waiting indicator ─────────────────
+// Instead of exposing raw technical noise ("ttft: 9729ms"), we tell the user
+// WHAT is happening right now. The label is derived ONLY from data this message
+// already carries (events, content markup, streaming flag) so it needs no
+// cross-store plumbing. Priority reflects how far the generation has progressed.
+const ARTEFACT_TAG_RE = /<lollms_(?:building|working)\b([^>]*)>/i;
+const classifyPendingArtefactOp = (attrs) => {
+    const a = String(attrs || '').toLowerCase();
+    if (/\b(?:patch|edit|update|modif|search[ _-]?replace|apply)/.test(a)) return 'patch';
+    if (/\b(?:build|create|rewrite|regenerat|overwrit|new)/.test(a)) return 'create';
+    return 'build';
+};
+
+// Convert a raw millisecond TTFT into a short, readable duration
+// ("0.8s", "8.0s", "1m 12s"). Returns '' for missing/invalid values so the
+// template can skip the whole chip cleanly.
+function formatTtft(ms) {
+    const v = Number(ms);
+    if (!Number.isFinite(v) || v <= 0) return '';
+    if (v < 1000) return `${Math.round(v)}ms`;
+    const s = v / 1000;
+    if (s < 60) return `${s.toFixed(1)}s`;
+    const m = Math.floor(s / 60);
+    const rem = Math.round(s - m * 60);
+    return `${m}m ${rem}s`;
+}
+
+const isWaitingDetail = computed(() => {
+    const events = Array.isArray(props.message.events) ? props.message.events : [];
+
+    // 1. A concrete RUNNING tool/step event (most specific, most useful).
+    for (let i = events.length - 1; i >= 0; i--) {
+        const evt = events[i];
+        const type = String(evt?.type || '').toLowerCase();
+        if (!type) continue;
+        if (type === 'step_end' || type === 'tool_output') continue; // completed, keep looking back
+        if (type === 'tool_call') {
+            const name = normalizeEvent(evt).toolName;
+            return name ? `Executing tool: ${name}` : 'Summoning the demon… 😈🔥';
+        }
+        if (type === 'search') return 'Scouring the seven seas… 🌊🔍';
+        if (type === 'code_exec') return 'Firing up the engine… 🏎️💨';
+        if (type === 'step_start') {
+            const name = normalizeEvent(evt).summary;
+            return name ? `Working: ${name}` : 'Waking the dragon… 🐉';
+        }
+        if (type.startsWith('artefact')) {
+            const op = normalizeEvent(evt).artefactOp;
+            if (op?.kind === 'patch') return 'Stitching the patchwork… 🧵';
+            if (op?.kind === 'rewrite') return 'Forging the artefact… 🔨';
+            return 'Forging a new artefact… 🔨';
+        }
+    }
+
+
+    // 2. Structural markup currently open in the streamed content.
+    const raw = String(props.message.content || '');
+    const artefactMatch = raw.match(ARTEFACT_TAG_RE);
+    if (artefactMatch) {
+        const op = classifyPendingArtefactOp(artefactMatch[1]);
+        if (op === 'patch') return 'Stitching the patchwork… 🧵';
+        if (op === 'create') return 'Forging an artefact… 🔨';
+        return 'Forging an artefact… 🔨';
+    }
+    if (/<processing\b[^>]*type=["'](?:tool|tool_execution|code_execution)/i.test(raw)) {
+        return 'Priming the mainframe… 🖥️⚡';
+    }
+    if (/<processing\b/i.test(raw)) return 'Aligning the ley lines… ✨';
+
+    // 3. Reasoning present, no answer yet.
+    if (hasThoughtContent.value) return 'Untangling the neural spaghetti… 🍝';
+
+    // 4. Plain streaming with nothing else to report.
+    if (props.message.isStreaming) return 'Warming up the engine… 🏎️💨';
+
+    // 5. Fallback.
+    return 'Summoning the demon… 😈🔥';
+
+});
+
+// ── Waiting-for-first-token visibility ───────────────────────────────────────
+// The WaitingIndicator must cover the exact window the user described: from
+// send-click until the first ACTUAL answer text paints. Streaming "scaffolding"
+// produced along the way — <processing>…</processing> blocks, HTML status
+// comments, streaming reasoning (thoughts), and tool-call cards — is feedback
+// in its own right. But the <processing> tags also land in `content`, so a plain
+// `!message.content` check dismissed the indicator while the user still had no
+// readable answer, which is exactly the unsettling gap we're fixing.
+// True only when there is REAL, user-readable prose to look at — NOT just
+// streaming scaffolding (processing blocks, tool/artefact/building tags, HTML
+// comments, code fences markers). This keeps the waiting indicator visible
+// across the gap between "bytes started arriving" and "something is painted",
+// which is exactly the empty interval the user reported. Once genuine prose
+// lands, the indicator dismisses (with the short grace delay below).
+const hasAnswerContent = computed(() => {
+    const raw = String(props.message.content || '');
+    if (!raw) return false;
+
+    // Remove every structural block the renderer turns into a card/indicator,
+    // not into prose — including *unclosed* tags (mid-stream).
+    const stripped = raw
+        .replace(/<processing\b[^>]*>[\s\S]*?<\/processing>/gi, '')
+        .replace(/<processing\b[^>]*>[\s\S]*$/i, '')          // open, unclosed
+        .replace(/<\/?processing\b[^>]*>/gi, '')
+        .replace(/<lollms_(?:working|building)\b[^>]*>/gi, '')
+        .replace(/<lollms_form\b[^>]*>[\s\S]*?<\/lollms_form>/gi, '')
+        .replace(/<lollms_inline\b[^>]*>[\s\S]*?<\/lollms_inline>/gi, '')
+        .replace(/<lollms_widget\b[^>]*\/?>/gi, '')
+        .replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi, '')
+        .replace(/<tool_call\b[^>]*>[\s\S]*$/i, '')           // open, unclosed
+        .replace(/<round\b[^>]*>[\s\S]*?<\/round>/gi, '')
+        .replace(/```[\s\S]*?```/g, '')                        // fenced code has its own block
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<\/?(?:note|skill|annotate|generate_image|edit_image|schedule_task)\b[^>]*>/gi, '')
+        .replace(/\[!\]\(\s*[^)\s]+\s*\)/g, '')                // inline artefact image calls
+        .trim();
+
+    return stripped.length > 0;
+});
+
+const hasThoughtContent = computed(() => {
+    const t = props.message.thoughts || props.message.metadata?.thoughts || props.message.metadata?.reasoning_content;
+    return !!(t && String(t).trim());
+});
+
+const shouldShowWaitingAnimation = computed(() => {
+    if (!props.message.isStreaming) return false;
+    if (allImages.value.length > 0) return false;
+    if (hasAnswerContent.value) return false;
+    if (hasThoughtContent.value) return false;
+    return true;
+});
+
+// Delay the hide by ~200 ms after content arrives so we do not flash an empty
+// region between the indicator unmounting and the first chunk hitting the DOM.
+const showWaiting = ref(false);
+let _hideWaitingTimer = null;
+
+watch(shouldShowWaitingAnimation, (shouldShow) => {
+    if (shouldShow) {
+        if (_hideWaitingTimer) { clearTimeout(_hideWaitingTimer); _hideWaitingTimer = null; }
+        showWaiting.value = true;
+    } else if (showWaiting.value) {
+        if (_hideWaitingTimer) clearTimeout(_hideWaitingTimer);
+        _hideWaitingTimer = setTimeout(() => {
+            showWaiting.value = false;
+            _hideWaitingTimer = null;
+        }, 200);
+    }
+}, { immediate: true });
+
+onUnmounted(() => {
+    if (_hideWaitingTimer) { clearTimeout(_hideWaitingTimer); _hideWaitingTimer = null; }
+});
+
 const lastEventSummary = computed(() => {
     if (!hasEvents.value) return '';
-    
+
     // Filter for descriptive events that signify progress to a user
     const displayEvents = props.message.events.filter(e => {
         const type = e.type?.toLowerCase();
@@ -864,11 +1399,25 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                         <div v-if="isAi && message.model_name" class="flex items-center gap-2">
                             <span class="modal-tag !mb-0 opacity-60">{{ message.model_name }}</span>
                             
-                            <template v-if="message.metadata && (message.metadata.ttft !== undefined || message.metadata.tps !== undefined)">
+                            <!-- Human-friendly activity / performance chip.
+                                 While the response is still streaming we show the
+                                 current activity (e.g. "Streaming…", "Executing a
+                                 tool") instead of a raw "ttft: 8021ms" code that
+                                 reads like an error. Once complete we surface a
+                                 softly-worded latency + throughput summary. -->
+                            <span
+                                v-if="message.isStreaming"
+                                class="activity-chip"
+                                title="What the model is doing right now"
+                            >
+                                <span class="activity-pulse"></span>
+                                {{ isWaitingDetail }}
+                            </span>
+                            <template v-else-if="message.metadata && (message.metadata.ttft !== undefined || message.metadata.tps !== undefined)">
                                 <span class="text-[9px] font-mono text-gray-400 italic">
-                                    <span v-if="message.metadata.ttft">{{ message.metadata.ttft }}ms</span>
-                                    <span v-if="message.metadata.ttft && message.metadata.tps" class="mx-1">/</span>
-                                    <span v-if="message.metadata.tps">{{ message.metadata.tps.toFixed(1) }} t/s</span>
+                                    <span v-if="formatTtft(message.metadata.ttft)">First token in {{ formatTtft(message.metadata.ttft) }}</span>
+                                    <span v-if="formatTtft(message.metadata.ttft) && message.metadata.tps" class="mx-1">·</span>
+                                    <span v-if="message.metadata.tps">{{ message.metadata.tps.toFixed(1) }} tok/s</span>
                                 </span>
                             </template>
                         </div>
@@ -887,6 +1436,26 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                 <!-- Content Wrapper -->
                 <div class="message-content-wrapper">
                     <div v-if="!isEditing">
+                        <!-- ── Always-visible failure summary ────────────────────────
+                             Tool runs and artefact builds fail deep inside collapsed
+                             processing blocks. This surfaces every error event in one
+                             clear banner so the user immediately sees WHAT failed and
+                             WHY, without opening any log dump. -->
+                        <div v-if="failureEvents.length > 0" class="failure-summary">
+                            <div class="failure-summary-head">
+                                <IconError class="w-4 h-4 shrink-0" />
+                                <span>
+                                    {{ failureEvents.length }} error{{ failureEvents.length > 1 ? 's' : '' }} during execution
+                                </span>
+                            </div>
+                            <ul class="failure-list">
+                                <li v-for="(f, i) in failureEvents" :key="i" class="failure-item">
+                                    <span class="failure-tag">{{ f.label }}</span>
+                                    <span class="failure-msg">{{ f.message }}</span>
+                                </li>
+                            </ul>
+                        </div>
+
                         <!-- Text Content -->
                         <MessageContentRenderer
                             :content="message.content"
@@ -906,57 +1475,105 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             @citation-click="handleCitationClick"
                         />
 
-                        <!-- ── [NEW] Editorial Execution Timeline ── -->
+                        <!-- ── Execution Timeline ───────────────────────────────
+                             Redesigned so tool runs and artefact builds are legible:
+                             each event is a colour-coded, icon-labelled card, errors
+                             surface in a red banner with the real message, and noisy
+                             log fragments are cleaned / summarised. -->
                         <div v-if="hasEvents" class="mt-8">
-                            <button 
+                            <button
                                 @click="isEventsCollapsed = !isEventsCollapsed"
                                 class="utility-link group/link mb-4"
                             >
                                 <IconCog class="w-3 h-3" :class="{'animate-spin': message.isStreaming}" />
                                 <span>Execution Timeline</span>
+                                <span v-if="timelineFailureCount > 0" class="chip-failure">{{ timelineFailureCount }} error{{ timelineFailureCount > 1 ? 's' : '' }}</span>
                                 <IconChevronRight class="w-2.5 h-2.5 transition-transform" :class="{'rotate-90': !isEventsCollapsed}" />
                             </button>
 
                             <Transition
                                 enter-active-class="transition-all duration-500 ease-out"
                                 enter-from-class="max-h-0 opacity-0 -translate-y-2"
-                                enter-to-class="max-h-[800px] opacity-100 translate-y-0"
+                                enter-to-class="max-h-[2400px] opacity-100 translate-y-0"
                             >
-                                <div v-if="!isEventsCollapsed" class="ml-1.5 pl-4 border-l border-secondary space-y-6">
-                                    <div v-for="(event, idx) in uniqueEvents" :key="idx" class="relative group/step">
+                                <div v-if="!isEventsCollapsed" class="ml-1.5 pl-4 border-l border-secondary space-y-3">
+                                    <div
+                                        v-for="(event, idx) in uniqueEvents"
+                                        :key="idx"
+                                        class="timeline-card"
+                                        :class="[
+                                            event.norm.artefactOp ? `op-${event.norm.artefactOp.kind}` : `tone-${event.norm.status}`,
+                                            event.norm.status === 'error' ? 'is-error' : '',
+                                            event.norm.status === 'warning' ? 'is-warning' : ''
+                                        ]"
+                                    >
                                         <!-- Timeline Dot -->
-                                        <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full border-2 surface-1 transition-colors"
-                                             :class="idx === uniqueEvents.length - 1 && message.isStreaming ? 'border-accent animate-pulse' : 'border-primary'"></div>
-                                        
-                                        <div class="flex flex-col gap-1">
-                                            <span class="text-[10px] font-black uppercase tracking-widest text-secondary opacity-60">{{ event.type.replace('_', ' ') }}</span>
-                                            
-                                            <!-- Complex Content: Collapsible Renderer -->
-                                            <div v-if="isComplexContent(event)" class="mt-1">
-                                                <details class="group/event-detail">
-                                                    <summary class="utility-link !lowercase opacity-70 hover:opacity-100">
-                                                        <IconChevronRight class="w-2.5 h-2.5 transition-transform group-open/event-detail:rotate-90" />
-                                                        <span>show details</span>
-                                                    </summary>
-                                                    <div class="mt-3 p-4 card shadow-inner overflow-hidden">
-                                                        <MessageContentRenderer 
-                                                            :content="formatTimelineContent(event.content)" 
-                                                            class="!text-[11px]"
-                                                        />
-                                                    </div>
-                                                </details>
-                                            </div>
+                                        <div
+                                            class="timeline-dot"
+                                            :class="[
+                                                `dot-${event.norm.meta.tone}`,
+                                                idx === uniqueEvents.length - 1 && message.isStreaming ? 'animate-pulse' : ''
+                                            ]"
+                                        ></div>
 
-                                            <!-- Simple Content: Inline -->
-                                            <div v-else class="max-w-3xl">
-                                                <p class="text-[11px] text-secondary leading-relaxed font-mono italic">{{ event.content }}</p>
+                                        <!-- ── Card header: status icon + label + tool name + timing ── -->
+                                        <div class="timeline-card-head">
+                                            <div class="timeline-card-title">
+                                                <component :is="event.norm.meta.icon" class="w-3.5 h-3.5 shrink-0" />
+                                                <span class="timeline-card-label">{{ event.norm.meta.label }}</span>
+                                                <!-- Artefact operation badge: visually distinguishes a
+                                                     full rewrite (whole-file) from a surgical patch. -->
+                                                <span
+                                                    v-if="event.norm.artefactOp"
+                                                    class="timeline-card-op"
+                                                    :class="`op-badge-${event.norm.artefactOp.kind}`"
+                                                >{{ event.norm.artefactOp.badge }}</span>
+                                                <span
+                                                    v-if="event.norm.toolName"
+                                                    class="timeline-card-tool"
+                                                >{{ event.norm.toolName }}</span>
+                                                <span
+                                                    class="timeline-card-status"
+                                                    :class="`status-${event.norm.status}`"
+                                                >{{ event.norm.status === 'error' ? 'FAILED' : (event.norm.status === 'warning' ? 'WARNING' : 'OK') }}</span>
                                             </div>
+                                            <span v-if="event.norm.timing" class="timeline-card-timing">
+                                                <IconClock class="w-3 h-3" />
+                                                {{ event.norm.timing }}
+                                            </span>
                                         </div>
+
+                                        <!-- ── Error: the real, prominent failure message ── -->
+                                        <div v-if="event.norm.status === 'error' && event.norm.error" class="timeline-card-error">
+                                            <IconError class="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                            <pre class="timeline-card-error-text">{{ event.norm.error }}</pre>
+                                        </div>
+
+                                        <!-- ── Arguments ── -->
+                                        <div v-if="event.norm.args" class="timeline-card-field">
+                                            <span class="timeline-field-label">Arguments</span>
+                                            <pre class="timeline-field-value">{{ event.norm.args }}</pre>
+                                        </div>
+
+                                        <!-- ── Result (only when not an error) ── -->
+                                        <div v-if="event.norm.status !== 'error' && event.norm.result && !isNoiseLine(event.norm.result)" class="timeline-card-field">
+                                            <span class="timeline-field-label">Result</span>
+                                            <pre class="timeline-field-value result">{{ event.norm.result }}</pre>
+                                        </div>
+
+                                        <!-- ── Raw payload: collapsible, for full context ── -->
+                                        <details class="timeline-card-raw" :open="event.norm.status === 'error' && event.multilineRaw">
+                                            <summary class="timeline-raw-summary">
+                                                <IconChevronRight class="w-2.5 h-2.5 transition-transform" />
+                                                <span>Raw payload · {{ event.contentLineCount }} line{{ event.contentLineCount === 1 ? '' : 's' }}</span>
+                                            </summary>
+                                            <pre class="timeline-raw-pre">{{ event.norm.raw }}</pre>
+                                        </details>
                                     </div>
-                                    
-                                    <div v-if="message.isStreaming" class="flex items-center gap-2 text-[10px] text-accent/60 font-mono italic animate-pulse">
+
+                                    <div v-if="message.isStreaming" class="flex items-center gap-2 text-[10px] text-accent/60 font-mono italic animate-pulse pl-1">
                                         <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
-                                        Synchronizing next milestone...
+                                        Working…
                                     </div>
                                 </div>
                             </Transition>
@@ -1068,8 +1685,20 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             </div>
                         </div>
 
-                        <div v-if="message.isStreaming && !message.content && (!allImages || allImages.length === 0)" class="typing-indicator">
-                            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                        <!-- Waiting-for-first-token indicator: a green→amber→red
+                             progress bar + rotating status. Driven by `showWaiting`
+                             (not `!content`) so `<processing>`/thought scaffolding
+                             does not prematurely dismiss it while the user still
+                             has no readable answer, and the un-mount is delayed
+                             ~200 ms so the first chunk paints before the animation
+                             disappears (no flash). -->
+                        <div
+                            v-if="showWaiting"
+                            class="my-2"
+                        >
+                            <WaitingIndicator
+                                :detail="isWaitingDetail"
+                            />
                         </div>
                     </div>
                     <!-- Editing Mode -->
@@ -1289,4 +1918,251 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     transition-duration: 150ms;
 }
 .step-card:hover { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
+
+/* ── Live activity chip (replaces raw "ttft: Nms" breadcrumb) ───────────── */
+.activity-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--brand-primary, #6366f1);
+    background: var(--brand-primary-light, rgba(99, 102, 241, 0.12));
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    white-space: nowrap;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.activity-pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: currentColor;
+    animation: activity-pulse 1.2s ease-in-out infinite;
+}
+@keyframes activity-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.7); }
+}
+
+/* ── Always-visible failure summary banner ─────────────────────────────── */
+.failure-summary {
+    margin: 12px 0;
+    border-radius: 12px;
+    border: 1px solid #fca5a5;
+    background: #fef2f2;
+    overflow: hidden;
+}
+.dark .failure-summary { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.1); }
+.failure-summary-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px;
+    font-size: 12.5px; font-weight: 800;
+    color: #b91c1c;
+    border-bottom: 1px solid #fca5a5;
+}
+.dark .failure-summary-head { color: #fca5a5; border-bottom-color: rgba(239,68,68,0.4); }
+.failure-list { list-style: none; margin: 0; padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+.failure-item { display: flex; flex-direction: column; gap: 3px; }
+.failure-tag {
+    align-self: flex-start;
+    padding: 1px 7px; border-radius: 999px;
+    font-size: 9px; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase;
+    background: #ef4444; color: #fff;
+}
+.failure-msg {
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 11.5px; line-height: 1.55;
+    color: #991b1b;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.dark .failure-msg { color: #fca5a5; }
+
+/* ── Execution Timeline ────────────────────────────────────────────────── */
+.chip-failure {
+    display: inline-flex; align-items: center;
+    padding: 1px 7px; border-radius: 999px;
+    font-size: 9px; font-weight: 800; letter-spacing: 0.04em;
+    background: #fee2e2; color: #b91c1c;
+}
+.dark .chip-failure { background: rgba(239,68,68,0.18); color: #fca5a5; }
+
+/* ── Execution Timeline: structured cards ──────────────────────────────── */
+.timeline-card {
+    position: relative;
+    border-radius: 12px;
+    padding: 12px 14px 12px 16px;
+    border: 1px solid var(--brand-border-muted, #e2e8f0);
+    border-left-width: 4px;
+    background: var(--brand-bg-card, #fff);
+    transition: box-shadow 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.timeline-card:hover { box-shadow: 0 2px 8px rgba(15,23,42,0.06); }
+
+.timeline-card.tone-error { border-left-color: #ef4444; background: #fff5f5; border-color: #fecaca; }
+.timeline-card.tone-warning { border-left-color: #f59e0b; background: #fffbeb; border-color: #fde68a; }
+.timeline-card.tone-tool { border-left-color: #6366f1; }
+.timeline-card.tone-artefact { border-left-color: #0ea5e9; }
+.timeline-card.tone-step { border-left-color: #10b981; }
+.timeline-card.tone-thought { border-left-color: #a855f7; }
+.timeline-card.tone-info { border-left-color: #94a3b8; }
+.timeline-card.tone-ok { border-left-color: #10b981; }
+
+.dark .timeline-card.tone-error { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.3); }
+.dark .timeline-card.tone-warning { background: rgba(245,158,11,0.08); border-color: rgba(245,158,11,0.3); }
+
+/* ── Artefact operation variants: full rewrite vs patch ─────────────────── */
+/* Full rewrite: whole file replaced. Violet identity, document styling. */
+.timeline-card.op-rewrite {
+    border-left-color: #7c3aed;
+    background: #f7f4ff;
+    border-color: #ddd6fe;
+}
+.dark .timeline-card.op-rewrite {
+    background: rgba(124,58,237,0.10);
+    border-color: rgba(124,58,237,0.35);
+}
+/* Patch: surgical/targeted edit. Amber identity, tool/wrench styling. */
+.timeline-card.op-patch {
+    border-left-color: #d97706;
+    background: #fffaeb;
+    border-color: #fde68a;
+}
+.dark .timeline-card.op-patch {
+    background: rgba(217,119,6,0.10);
+    border-color: rgba(217,119,6,0.35);
+}
+
+/* Status precedence: a failed patch/rewrite must still read as an error.
+   Declared AFTER the op tints so background AND left border flip to the
+   error/warning colour, while the operation badge still shows REWRITE/PATCH. */
+.timeline-card.is-error { background: #fff5f5; border-color: #fecaca; border-left-color: #ef4444; }
+.timeline-card.is-warning { background: #fffbeb; border-color: #fde68a; border-left-color: #f59e0b; }
+.dark .timeline-card.is-error { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.35); }
+.dark .timeline-card.is-warning { background: rgba(245,158,11,0.10); border-color: rgba(245,158,11,0.35); }
+
+/* Operation badge (REWRITE / PATCH) shown in the card header. */
+.timeline-card-op {
+    font-size: 9px; font-weight: 900; letter-spacing: 0.06em;
+    padding: 1px 8px; border-radius: 6px; text-transform: uppercase;
+    border: 1px solid transparent;
+}
+.op-badge-rewrite { background: #ede9fe; color: #6d28d9; border-color: #c4b5fd; }
+.op-badge-patch { background: #fef3c7; color: #b45309; border-color: #fcd34d; }
+.dark .op-badge-rewrite { background: rgba(124,58,237,0.2); color: #c4b5fd; border-color: rgba(124,58,237,0.5); }
+.dark .op-badge-patch { background: rgba(217,119,6,0.2); color: #fcd34d; border-color: rgba(217,119,6,0.5); }
+
+.timeline-dot {
+    position: absolute;
+    left: -23px; top: 14px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--brand-bg-card, #fff);
+    background: #94a3b8;
+}
+.timeline-dot.dot-error { background: #ef4444; }
+.timeline-dot.dot-warning { background: #f59e0b; }
+.timeline-dot.dot-tool { background: #6366f1; }
+.timeline-dot.dot-artefact { background: #0ea5e9; }
+.timeline-dot.dot-artefact-rewrite { background: #7c3aed; }
+.timeline-dot.dot-artefact-patch { background: #d97706; }
+.timeline-dot.dot-step { background: #10b981; }
+.timeline-dot.dot-thought { background: #a855f7; }
+.timeline-dot.dot-info { background: #94a3b8; }
+
+/* Card header row */
+.timeline-card-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap;
+}
+.timeline-card-title { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-width: 0; }
+.timeline-card-label {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--brand-text-dim, #64748b);
+}
+.timeline-card.tone-error .timeline-card-label { color: #b91c1c; }
+.timeline-card.tone-warning .timeline-card-label { color: #b45309; }
+.timeline-card-tool {
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 12px; font-weight: 700; color: var(--brand-text-main, #1e293b);
+    background: var(--brand-bg-hover, #f1f5f9);
+    padding: 1px 8px; border-radius: 6px;
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.timeline-card-status {
+    font-size: 9px; font-weight: 900; letter-spacing: 0.05em;
+    padding: 1px 8px; border-radius: 999px;
+}
+.timeline-card-status.status-ok { background: #dcfce7; color: #166534; }
+.timeline-card-status.status-warning { background: #fef3c7; color: #b45309; }
+.timeline-card-status.status-error { background: #ef4444; color: #fff; }
+.dark .timeline-card-status.status-ok { background: rgba(16,185,129,0.18); color: #6ee7b7; }
+
+.timeline-card-timing {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10.5px; font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    color: var(--brand-text-dim, #94a3b8); flex-shrink: 0;
+}
+
+/* Prominent error box */
+.timeline-card-error {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 10px 12px; border-radius: 9px;
+    background: #fee2e2; border: 1px solid #fca5a5; color: #991b1b;
+}
+.dark .timeline-card-error { background: rgba(239,68,68,0.16); border-color: rgba(239,68,68,0.4); color: #fca5a5; }
+.timeline-card-error-text {
+    margin: 0; font-size: 12px; line-height: 1.55;
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 220px; overflow: auto;
+}
+
+/* Labelled fields (Arguments / Result) */
+.timeline-card-field { display: flex; flex-direction: column; gap: 3px; }
+.timeline-field-label {
+    font-size: 9px; font-weight: 800; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--brand-text-dim, #94a3b8);
+}
+.timeline-field-value {
+    margin: 0; font-size: 11.5px; line-height: 1.5;
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    color: var(--brand-text-main, #334155);
+    background: var(--brand-bg-hover, #f8fafc);
+    padding: 8px 10px; border-radius: 8px;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 260px; overflow: auto;
+}
+.timeline-field-value.result { border: 1px solid var(--brand-border-muted, #e2e8f0); }
+
+/* Raw payload disclosure */
+.timeline-card-raw { margin-top: 2px; }
+.timeline-raw-summary {
+    display: inline-flex; align-items: center; gap: 5px;
+    cursor: pointer; list-style: none;
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--brand-text-dim, #94a3b8);
+}
+.timeline-raw-summary::-webkit-details-marker { display: none; }
+.timeline-card-raw[open] .timeline-raw-summary .w-2\\.5 { transform: rotate(90deg); }
+.timeline-raw-summary .transition-transform { transition: transform 0.15s ease; }
+.timeline-raw-pre {
+    margin: 6px 0 0; padding: 10px 12px;
+    font-family: ui-monospace, 'SF Mono', Consolas, monospace;
+    font-size: 11px; line-height: 1.5;
+    color: #e2e8f0; background: #0f172a;
+    border: 1px solid #1e293b; border-radius: 8px;
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 360px; overflow: auto;
+}
+
 </style>

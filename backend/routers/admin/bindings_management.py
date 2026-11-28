@@ -1228,18 +1228,25 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
 
     alias_dict = payload.alias.model_dump()
     alias_dict["binding_profile_name"] = binding.alias
+
+    # ``target_key`` is the authoritative identity of the profile. It MUST equal
+    # the embedded ``model_name`` so downstream consumers (profile grid,
+    # availability checks, routing) never see a stale/duplicate entry — which is
+    # exactly what made edits look like they "didn't apply".
     target_key = payload.new_model_name or payload.original_model_name
+    alias_dict["model_name"] = target_key
 
-    if payload.alias.model_name:
-        alias_dict["model_name"] = payload.alias.model_name
-    else:
-        alias_dict["model_name"] = alias_dict.get("model_name") or target_key
-
-    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
-        if payload.original_model_name in binding.model_aliases:
-            del binding.model_aliases[payload.original_model_name]
-
+    # Write the new entry FIRST, then prune the old key only on a genuine rename
+    # to a *different* identity. Writing before deleting guarantees the new
+    # entry always exists even when keys collide or the old key is absent.
     binding.model_aliases[target_key] = alias_dict
+    if (
+        payload.new_model_name
+        and payload.new_model_name != payload.original_model_name
+        and payload.original_model_name != target_key
+        and payload.original_model_name in binding.model_aliases
+    ):
+        del binding.model_aliases[payload.original_model_name]
     flag_modified(binding, "model_aliases")
 
     db.commit()

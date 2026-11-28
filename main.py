@@ -657,6 +657,15 @@ def _stall_watchdog_thread():
 async def startup_event():
     global broadcast_listener_task, rss_scheduler, _stall_thread_started
 
+    # Capture this process's stdout/stderr into the bounded in-memory buffer
+    # served by /api/admin/system/process-logs. Installed first so even startup
+    # output is retrievable from the admin "Live operations log" panel.
+    try:
+        from backend.log_buffer import install_stream_capture
+        install_stream_capture()
+    except Exception as _log_capture_err:  # never block startup on diagnostics
+        ASCIIColors.warning(f"Stream log capture unavailable: {_log_capture_err}")
+
     ASCIIColors.info(f"[pid {os.getpid()}] worker starting...")
     # If startup stalls, every thread's stack is printed every 60s until it finishes.
     faulthandler.dump_traceback_later(60, repeat=True, file=sys.stderr)

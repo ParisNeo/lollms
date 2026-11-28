@@ -1327,20 +1327,28 @@ async def admin_bulk_activate(
     payload: Dict[str, List[int]],
     request: Request,
     db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
 ):
     """
-    Activate every user in ``user_ids`` in one call. Returns per-id results so
-    the UI can surface individual failures (missing user, etc.) without the
-    whole batch rolling back. Welcome emails are sent (non-blocking) only for
-    users that made a genuine inactive→active transition.
+    Activate every user in ``user_ids`` in one call. Skips the current admin and
+    the super-admin (mirrors bulk-deactivate). Returns per-id results so the UI
+    can surface individual failures without the whole batch rolling back.
+    Welcome emails are sent (non-blocking) only for non-skipped users that made
+    a genuine inactive→active transition.
     """
     ids = payload.get("user_ids") or []
     if not ids:
         raise HTTPException(status_code=400, detail="No user IDs provided.")
     users = db.query(DBUser).filter(DBUser.id.in_(ids)).all()
     updated = []
+    skipped = []
     transitioned = []
     for u in users:
+        # Never let a bulk operation re-activate the acting admin or the
+        # environment's root super-admin account.
+        if u.id == current_admin.id or u.username == INITIAL_ADMIN_USER_CONFIG.get("username"):
+            skipped.append(u.id)
+            continue
         # Only users moving into the active state qualify for a welcome email.
         was_active = bool(u.is_active) and u.status == "active"
         u.is_active = True
@@ -1362,6 +1370,7 @@ async def admin_bulk_activate(
 
     return {
         "updated": updated,
+        "skipped": skipped,
         "count": len(updated),
         "welcome_emails_queued": welcome_queued,
     }

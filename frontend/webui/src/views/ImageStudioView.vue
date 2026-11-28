@@ -786,6 +786,26 @@
                                     <span>{{ isSelected(selectedImageObjectsForMenu.id) ? 'Unstage from Edit' : 'Stage for Edit' }}</span>
                                 </button>
 
+                                <!-- Send to chat: current discussion (instant) + picker -->
+                                <div class="h-px bg-white/10"></div>
+                                <button
+                                    @click.stop="sendToCurrentDiscussion(selectedImageObjectsForMenu); closeImageMenu()"
+                                    :disabled="isSendingToDiscussion || !discussionsStore.currentDiscussionId"
+                                    class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-blue-600/40 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                    :title="discussionsStore.currentDiscussionId ? `Send to: ${currentDiscussionTitle}` : 'No active discussion'"
+                                >
+                                    <IconSend class="w-3.5 h-3.5 shrink-0" />
+                                    <span class="truncate">Send to Current Chat</span>
+                                </button>
+                                <button
+                                    @click.stop="openSendToDiscussionPicker(selectedImageObjectsForMenu); closeImageMenu()"
+                                    :disabled="isSendingToDiscussion"
+                                    class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs text-white hover:bg-indigo-600/40 transition-colors disabled:opacity-40"
+                                >
+                                    <IconSend class="w-3.5 h-3.5 shrink-0 rotate-45" />
+                                    <span>Send to Another Chat…</span>
+                                </button>
+
                                 <button
                                     v-if="ttvAvailable"
                                     @click.stop="handleSendToVideoStudio(selectedImageObjectsForMenu); closeImageMenu()"
@@ -910,6 +930,19 @@ const router = useRouter();
 // Tracks a "Send to Video Studio" operation so we can disable the trigger
 // while the project + first-frame upload are in flight.
 const isSendingToVideo = ref(false);
+
+// Tracks an in-flight "Send to Discussion" so the gallery menu disables
+// duplicate taps while the image bytes are being copied to the workspace.
+const isSendingToDiscussion = ref(false);
+
+// Human-readable title of the currently active discussion, surfaced in the
+// overflow menu item that sends an image straight into the current chat.
+const currentDiscussionTitle = computed(() => {
+    const id = discussionsStore.currentDiscussionId;
+    if (!id) return '';
+    const d = discussionsStore.sortedDiscussions?.find(x => x.id === id);
+    return d?.title || 'Current Discussion';
+});
 
 // Whether the server currently has a Text-to-Video binding active. Gates both
 // the batch action and the per-image menu entry — there is no point offering
@@ -1850,6 +1883,40 @@ async function sendImagesToVideoStudio(images) {
 
 function handleSendToVideoStudio(image) {
     return sendImagesToVideoStudio([image]);
+}
+
+// ── Send to Discussion ──────────────────────────────────────────────────
+// Direct path into the *currently active* chat, no picker round-trip.
+async function sendToCurrentDiscussion(image) {
+    if (isSendingToDiscussion.value) return;
+    const targetId = discussionsStore.currentDiscussionId;
+    if (!targetId) {
+        uiStore.addNotification('Open a discussion first to send an image.', 'warning');
+        return;
+    }
+    if (!image) return;
+    isSendingToDiscussion.value = true;
+    try {
+        await imageStore.moveImagesToDiscussionBatch([image.id], targetId);
+        uiStore.addNotification(
+            `Image sent to "${currentDiscussionTitle.value}".`,
+            'success', 2200
+        );
+    } catch (e) {
+        uiStore.addNotification(
+            e?.response?.data?.detail || 'Failed to send image to discussion.',
+            'error'
+        );
+    } finally {
+        isSendingToDiscussion.value = false;
+    }
+}
+
+// Opens a searchable, sortable, paginated discussion picker for choosing
+// the destination chat when the user doesn't want the active one.
+function openSendToDiscussionPicker(image) {
+    if (!image) return;
+    uiStore.openModal('sendImageToDiscussion', { imageIds: [image.id] });
 }
 
 function handleSendManyToVideoStudio() {

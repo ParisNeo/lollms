@@ -198,7 +198,12 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 }
 
                 case 'ttft':
-                    generationState.value = { status: 'streaming', details: `ttft: ${data.content}ms` };
+                    // The model finished its prefill pass and is now emitting
+                    // tokens. Expose a human status — never the raw technical
+                    // "ttft: NNNNms" which means nothing to the user and looked
+                    // like an error code. Actual timing lives in message.metadata
+                    // for anyone who wants the technical detail.
+                    generationState.value = { status: 'streaming', details: 'Streaming the response…' };
                     break;
 
                 case 'processing_open':

@@ -145,6 +145,14 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingLollmsModels = ref(false);
     const systemLogs = ref([]);
     const isLoadingSystemLogs = ref(false);
+
+    // Process (stdout/stderr) logs — the server's own console output, tee'd
+    // into a bounded in-memory buffer by backend.log_buffer. Distinct from
+    // systemLogs (background task logs). Filtered by a selectable time window.
+    const processLogs = ref([]);
+    const isLoadingProcessLogs = ref(false);
+    const processLogsParams = ref({ hours: 24, limit: 500, level: null, source: null });
+    const processLogsMeta = ref({ window_hours: 24, total_in_buffer: 0, count: 0 });
     
     // Requirements
     const systemRequirements = ref([]);
@@ -237,6 +245,40 @@ export const useAdminStore = defineStore('admin', () => {
         try { const response = await apiClient.get('/api/admin/system/logs'); systemLogs.value = response.data; } 
         catch (error) { uiStore.addNotification('Failed to fetch system logs.', 'error'); } 
         finally { isLoadingSystemLogs.value = false; } 
+    }
+
+    // Fetch captured process stdout/stderr logs. ``overrides`` merges into the
+    // cached params so callers can pivot one axis (e.g. time window) without
+    // repeating the rest of the filter state. A failed request clears the list
+    // so the panel renders its explicit empty state instead of stale data.
+    async function fetchProcessLogs(overrides = {}) {
+        const merged = { ...processLogsParams.value, ...overrides };
+        processLogsParams.value = merged;
+        isLoadingProcessLogs.value = true;
+        try {
+            const params = { hours: merged.hours, limit: merged.limit };
+            if (merged.level) params.level = merged.level;
+            if (merged.source) params.source = merged.source;
+            const { data } = await apiClient.get('/api/admin/system/process-logs', { params });
+            processLogs.value = Array.isArray(data?.entries) ? data.entries : [];
+            processLogsMeta.value = {
+                window_hours: data?.window_hours ?? merged.hours,
+                total_in_buffer: data?.total_in_buffer ?? 0,
+                count: data?.count ?? 0,
+            };
+        } catch (error) {
+            console.error('Failed to fetch process logs:', error);
+            processLogs.value = [];
+        } finally {
+            isLoadingProcessLogs.value = false;
+        }
+    }
+
+    async function clearProcessLogs() {
+        await apiClient.post('/api/admin/system/process-logs/clear');
+        processLogs.value = [];
+        processLogsMeta.value = { ...processLogsMeta.value, total_in_buffer: 0, count: 0 };
+        uiStore.addNotification('Process log buffer cleared.', 'success');
     }
 
     async function fetchServerInfo() { 
@@ -694,7 +736,11 @@ export const useAdminStore = defineStore('admin', () => {
     // refreshes the list once at the end so the poll/list stays in sync.
     async function bulkActivateUsers(userIds) {
         const r = await apiClient.post('/api/admin/users/bulk-activate', { user_ids: userIds });
-        uiStore.addNotification(`${r.data.count} user(s) activated.`, 'success');
+        if (r.data.skipped?.length) {
+            uiStore.addNotification(`${r.data.count} activated · ${r.data.skipped.length} skipped (protected).`, 'warning');
+        } else {
+            uiStore.addNotification(`${r.data.count} user(s) activated.`, 'success');
+        }
         await fetchAllUsers(); return r.data;
     }
     async function bulkDeactivateUsers(userIds) {
@@ -1034,6 +1080,8 @@ export const useAdminStore = defineStore('admin', () => {
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories, newsArticles, isLoadingNewsArticles,
         isImporting, isEnhancingEmail, adminAvailableLollmsModels, isLoadingLollmsModels,
         appFilters, mcpFilters, promptFilters, personalityFilters, systemLogs, isLoadingSystemLogs,
+        processLogs, isLoadingProcessLogs, processLogsParams, processLogsMeta,
+        processLogs, isLoadingProcessLogs, processLogsParams, processLogsMeta,
         systemRequirements, isLoadingRequirements,
         modelDisplayMode,
         personalityCategories, personalityZooStats,
@@ -1076,6 +1124,8 @@ export const useAdminStore = defineStore('admin', () => {
 
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact, createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, exportCategory, importFunFacts, importCategoryFromFile, generateFunFacts,
         fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles, fetchSystemLogs,
+        fetchProcessLogs, clearProcessLogs,
+        fetchProcessLogs, clearProcessLogs,
         
         sendEmailToUsers, sendEmailToUser, enhanceEmail, composeEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
         fetchBindingZoo, installLlmFromZoo, fetchTtiBindingZoo, installTtiFromZoo, fetchTtsBindingZoo, installTtsFromZoo, fetchSttBindingZoo, installSttFromZoo,

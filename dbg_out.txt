@@ -1,0 +1,99 @@
+﻿    r"""
+    \x1b\[[0-?]*[ -/]*[@-~]      # CSI sequences (colors, cursor moves, clears)
+    | \x1b\][^\x07\x1b]*(?:\x07|\x1b\\)  # OSC sequences (hyperlinks, window title)
+    | \x1b[@-_]                   # other two-byte escapes
+    | [\x00-\x08\x0b\x0c\x0e-\x1f]  # stray control chars (keep \t, \n already split)
+    """,
+    re.VERBOSE,
+)
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes and stray control characters from a line.
+
+    Kept public because the admin endpoint re-sanitizes defensively in case a
+    line was captured through another path (e.g. an explicit ``log_app`` call
+    that embedded a pre-colored string).
+    """
+    if not text:
+        return text
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+# Maximum number of captured lines retained in memory. Old lines are evicted.
+# Sized so a multi-day window (24-48h) is realistically servable on a chatty
+# server: a busy instance emits a few thousand lines/hour, so 50k lines holds
+# roughly 1-2 days of history. Override with LOLLMS_LOG_BUFFER_MAX_LINES.
+_MAX_LINES = int(os.getenv("LOLLMS_LOG_BUFFER_MAX_LINES", "50000") or 50000)
+
+# A single ``Lock`` serialises writes (from arbitrary threads) and reads.
+_lock = threading.Lock()
+
+# Each entry: {timestamp: str, level: str, source: str, message: str}
+_buffer: Deque[Dict[str, str]] = deque(maxlen=_MAX_LINES)
+
+# Guard so the stream wrappers are installed only once per process.
+_installed = False
+
+# Matches common Python logging prefixes like:
+#   "2024-01-01 12:00:00,123 - name - INFO - message"
+#   "INFO:     message"  (uvicorn)
+#   "WARNING: message"
+_LEVEL_PATTERN = re.compile(
+    r"(?:\b(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL|TRACE)\b)",
+    re.IGNORECASE,
+)
+
+# ANSI / VT100 colour & control sequences emitted by ascii_colors, uvicorn and
+# rich. They colour a real terminal but are pure noise in a browser <span>:
+# a raw ESC[32m line would otherwise render as literal "â†[32m..." text.
+# This covers SGR colour codes, cursor moves, erase-line, and OSC hyperlinks.
+_ANSI_ESCAPE_PATTERN = re.compile(
+    r"""
+    \x1b          # ESC
+    (?:
+        \[[0-9;?]*[ -/]*[@-~]   # CSI ... (colours, cursor: ESC[32m, ESC[2K, ESC[1;31m ...)
+      | \][^\x07\x1b]*(?:\x07|\x1b\\)  # OSC ... BEL/ST (hyperlinks, window titles)
+      | [@-Z\\-_]              # two-char escapes (ESC(, ESC=, ESC>, ...)
+    )
+    """,
+    re.VERBOSE,
+)
+
+# A few libraries emit the ESC byte stripped but keep the bracket tail
+# ("[32m") when piped to a non-TTY. Catch that residue too, but only at the
+# start of the line where colour codes are almost always anchored.
+_BARE_SGR_PATTERN = re.compile(r"\[[0-9;]{1,4}m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI colour/control sequences so captured lines render cleanly.
+
+    ascii_colors and uvicorn decorate console output with escape codes. The
+    admin log panel is HTML, not a terminal, so those codes must be stripped
+    on capture. The original stream still receives the coloured text â€” only
+    the buffered copy is sanitised.
+    """
+    if not text:
+        return text
+    cleaned = _ANSI_ESCAPE_PATTERN.sub("", text)
+    # Remove leftover bare SGR residue (e.g. "[0m", "[32;1m") anywhere in the
+    # line; these never carry meaningful content.
+    cleaned = _BARE_SGR_PATTERN.sub("", cleaned)
+    # Collapse the sometimes-doubled carriage returns ascii_colors emits when
+    # it redraws a line; keep the last visual state only.
+    if "\r" in cleaned:
+        cleaned = cleaned.split("\r")[-1]
+    return cleaned
+
+# ---- ANSI / ascii_colors cleanup -------------------------------------------
+# Console output captured from ``ascii_colors`` / uvicorn carries two kinds of
+# markup that must never reach the JSON feed:
+#   1. Raw ANSI escape sequences (CSI: ``\x1b[...m``, plus OSC and single-char
+#      escapes) â€” these render as garbage in a browser and bloat payloads.
+#   2. ascii_colors BBCode-style tags (``[green]...[/green]``, ``[bold]`` â€¦) that
+#      are normally converted to ANSI on the console but can survive verbatim
+#      when a message is written through a stream that does not strip them.
+# Both are removed here, at capture time, so every consumer (endpoint, UI,
+# exports) receives plain text.
+_ANSI_ESCAPE = re.compile(
+    r"""
